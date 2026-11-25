@@ -38,8 +38,7 @@ from parlord.frontends import read_key
 from .common import (BG_HOME_PREF, BG_HOMES, CoreClient, CoreError, NeedAuth, Refused, addr_key, claim_text,
                      describe_invite_event, err_text, on_machine, parse_profile, parse_turns, turn_sentence,
                      turn_time, with_program,
-                     group_games, more_tables, parse_games, parse_invites, parse_players, parse_tables, pending_invites,
-                     racks_pending)
+                     group_games, more_tables, parse_games, parse_invites, parse_players, parse_tables, pending_invites)
 from .common import parse_client, parse_clients
 from .common import SCORES_NOTE, parse_top, score_text
 from .chatcmd import note_lines
@@ -76,7 +75,7 @@ AUTO_PATHS = ("/seq.htm", "/board.gif")    # what a page asks for on its own: no
 # requests that change something: they need x= (the session's HMAC), so another site cannot make them
 ACTIONS = ("/new.htm", "/join.htm", "/invite.htm", "/uninvite.htm", "/leave.htm", "/resign.htm", "/und.htm",
            "/end.htm", "/move.htm", "/check.htm", "/password.htm", "/out.htm", "/click.htm", "/colours.htm",
-           "/note.htm", "/racks.htm", "/bghome.htm", "/profile.htm")
+           "/note.htm", "/bghome.htm", "/profile.htm")
 MAX_FIELDS = 16             # query or form fields in one request (the colors form has the most)
 # Keep-alive: a connection may carry this many requests, waiting this long between them; offered only while
 # the adapter and the client's address are well under their limits (MAX_REQUESTS, REQUESTS_PER_ADDR).
@@ -1232,18 +1231,9 @@ def invite_html(tid, link, private, invited, bot=None):
                            '<input type="submit" value="Invite">', 2))
 
 
-def notes_html(tid, link, notes, seat, ask, names):
-    """The table's notes (the latest last), a form to add one for a seated player, and, when another player
-    asks this seat to open the racks (ask: their seat and what for), the question with its two answers."""
+def notes_html(tid, link, notes, seat):
+    """The table's notes (the latest last) and a form to add one for a seated player."""
     out = ""
-    if ask is not None:
-        who = names[ask[0]] if ask[0] < len(names) else "Another player"
-        out += callout(p("<b>%s asks to open the racks%s.</b> With open racks each player's program is sent "
-                         "both racks and the order of the bag, for a program whose link carries them; such a "
-                         "program shows only its own player's rack. Opening them cannot be undone.<br>\n<b>%s</b> | %s"
-                         % (esc(who), " for " + esc(ask[1]) if ask[1] else "",
-                            a(link("/racks.htm", t=tid, ans="open"), "Agree"),
-                            a(link("/racks.htm", t=tid, ans="no"), "Say no")), 2))
     if notes:
         out += p("<b>Notes</b><br>\n" + "<br>\n".join(esc(n) for n in notes), 2)
     if seat >= 0:
@@ -1918,11 +1908,6 @@ class Web:
                 if not final.startswith("OK"):
                     return error_page(err_text(final).capitalize(), link("/table.htm", t=tid))
             return redirect(req, link("/table.htm", t=tid))
-        if path == "/racks.htm":
-            _, final = await core.req("OPR %s%s" % (tid, " no" if arg("ans") == "no" else ""))
-            if not final.startswith("OK"):
-                return error_page(err_text(final).capitalize(), link("/table.htm", t=tid))
-            return redirect(req, link("/table.htm", t=tid))
         if path == "/resign.htm":
             if arg("sure") != "1":
                 body = (h1("Resign table %s?" % esc(tid)) + p("Resigning ends the game and your opponent wins.") +
@@ -2022,8 +2007,7 @@ class Web:
             invite = invite_html(tid, link, tab["vis"] == "private", pending,
                                  botflag.next_name(tab["names"] + pending) if free else None)
         ndata, nfinal = await core.req("NOTE %s" % tid)
-        notes = notes_html(tid, link, note_lines(ndata) if nfinal.startswith("OK") else [], seat,
-                           racks_pending(events, seat) if tab and tab["status"] == "playing" else None, names)
+        notes = notes_html(tid, link, note_lines(ndata) if nfinal.startswith("OK") else [], seat)
         return table_page(me, tid, names, v, seat, log, watching, rate, js, link, key, sel, invite,
                           still=bool(check), notes=notes, uses=uses)
 

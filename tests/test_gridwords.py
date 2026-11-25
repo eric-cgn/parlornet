@@ -379,48 +379,29 @@ class Turns(WordList):
 
 # ---- a whole game over the protocol ------------------------------------------------------
 
-class OpenRacks(WordList):
-    """racks=open: every seated player's view carries every rack and the bag."""
+class TheBagAndEveryRack(WordList):
+    """"open": true in a view request (the core's VUE O, for an extension at a table marked integrity=false): a
+    seated player's view also carries every rack and the bag in draw order; a watcher's never does."""
 
-    def open_state(self, seed=3):
-        r = P.op_new({"players": 2, "options": {"racks": "open"}, "seed": seed, "rules": "classic"})
-        return r["state"]
-
-    def test_views_show_every_rack_and_the_bag_in_draw_order(self):
-        st = self.open_state()
-        wire = P.op_view({"state": st, "seat": 1})["wire"]
+    def test_a_seated_view_shows_every_rack_and_the_bag_in_draw_order(self):
+        st = P.op_new({"players": 2, "options": {}, "seed": 3, "rules": "classic"})["state"]
+        wire = P.op_view({"state": st, "seat": 1, "open": True})["wire"]
         self.assertIn("RK 0 %s" % st["racks"][0], wire)
         self.assertIn("RK 1 %s" % st["racks"][1], wire)
         order = "".join(l[3:] for l in wire if l.startswith("BO "))
         self.assertEqual(order, st["bag"][::-1])
         self.assertTrue(all(len(l) <= 78 for l in wire))
-        self.assertFalse(any(l.startswith(("RK", "BO")) for l in P.op_view({"state": st, "seat": -1})["wire"]))
-        hidden = P.op_new({"players": 2, "options": {}, "seed": 3})["state"]
-        self.assertFalse(any(l.startswith(("RK", "BO")) for l in P.op_view({"state": hidden, "seat": 0})["wire"]))
-        self.assertIn("error", P.op_new({"players": 2, "options": {"racks": "maybe"}, "seed": 3}))
+        self.assertFalse(any(l.startswith(("RK", "BO")) for l in P.op_view({"state": st, "seat": 0})["wire"]))
+        self.assertFalse(any(l.startswith(("RK", "BO")) for l in P.op_view({"state": st, "seat": -1,
+                                                                           "open": True})["wire"]))
         # the next draw takes the first tiles of that order
         st["racks"][0] = "CATSXYZ"
         r = P.op_apply({"state": st, "seat": 0, "move": ["PLAY", "8", "8", "H", "CAT"], "rules": "classic"})
         self.assertEqual(sorted(r["state"]["racks"][0]), sorted("SXYZ" + order[:3]))
 
-    def test_an_open_view_on_request(self):
-        """"open": true in a view request (the core's VUE O, for an extension at a table marked integrity=false)
-        gives a seated player the same lines at a table with hidden racks; a watcher still gets none."""
-        hidden = P.op_new({"players": 2, "options": {}, "seed": 3})["state"]
-        wire = P.op_view({"state": hidden, "seat": 0, "open": True})["wire"]
-        self.assertIn("RK 1 %s" % hidden["racks"][1], wire)
-        self.assertEqual("".join(l[3:] for l in wire if l.startswith("BO ")), hidden["bag"][::-1])
-        self.assertFalse(any(l.startswith(("RK", "BO")) for l in P.op_view({"state": hidden, "seat": -1,
-                                                                           "open": True})["wire"]))
-
-    def test_moves_are_checked_as_anywhere(self):
-        """Open racks change what a view shows, not the rules: every word is checked against the list."""
-        st = self.open_state()
-        st["racks"][0] = "QXZTEAB"
-        self.assertIn("not in the word list", apply(st, 0, "PLAY", "8", "8", "H", "QXZ")["error"])
-        self.assertIn("error", P.op_apply({"state": st, "seat": 0, "move": ["PLAY", "8", "8", "H", "QXZ", "OWN"],
-                                           "rules": "classic"}))
-        self.assertIn("error", P.op_apply({"state": st, "seat": 0, "move": ["PASS", "OVER"], "rules": "classic"}))
+    def test_no_table_options(self):
+        self.assertEqual(P.INFO["options"], [])
+        self.assertIn("error", P.op_new({"players": 2, "options": {"racks": "open"}, "seed": 3}))
 
 
 class Client:

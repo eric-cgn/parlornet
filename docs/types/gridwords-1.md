@@ -1,6 +1,6 @@
 # gridwords/1
 
-Grid Words is a crossword-building tile game for 2-4 players, each with a hidden rack. It has the flag `nomoves` (there is no legal-move list; a client builds a play and may preview it with `CHK`) and single-step moves (no `staged`). The rulesets are `english` and `classic`. The options are `racks=open|hidden` (default `hidden`; below, Open racks); the table's seat count is the core's `players=2|3|4` on `NEW` (default 2), and the time per turn is the core's `turn=`.
+Grid Words is a crossword-building tile game for 2-4 players, each with a hidden rack. It has the flag `nomoves` (there is no legal-move list; a client builds a play and may preview it with `CHK`) and single-step moves (no `staged`). The rulesets are `english` and `classic`. It has no table options; the table's seat count is the core's `players=2|3|4` on `NEW` (default 2), and the time per turn is the core's `turn=`.
 
 ## Rules (`english`)
 
@@ -18,13 +18,9 @@ Grid Words is a crossword-building tile game for 2-4 players, each with a hidden
 
 The same board, tiles, scoring and word list as `english`, with the ending used in club and tournament play: six turns in a row without a word played (passes and exchanges, by any players) end the game, however many players there are. Everything else, including the rack penalties at the end, is as in `english`. The DOoM extension (docs/protocols.md) makes its tables with this ruleset, because the crossword-game servers of the 1990s ended games this way. The plugin keeps each ruleset's differences in one table (`RULESETS` in plugins/gridwords/plugin.py), so a later ruleset for another period program can be added there.
 
-## Open racks (`racks=open`)
-
-For period programs whose link sends both racks and the whole bag to each player's machine. Such a program shows only its own player's rack. A running table's racks may also be opened later, with every player's consent (`OPR`, docs/protocol.md): the bag and the racks stay as they are, and from then on the table is as one made with `racks=open`. At a table with open racks every seated player's view also has `RK seat letters` for every seat (`RK seat -` for an empty rack) and the bag in draw order, the next tile first, in `BO letters` lines of up to 60 letters (`BO -` for an empty bag). Watchers do not get them. The core marks such a table `integrity=false` (docs/protocol.md, Tables marked integrity=false). Everything else is as at any other table: every move is checked as usual.
-
 ## A table marked integrity=false
 
-A server extension whose program receives every rack and the bag, as the Networdz extension's does (docs/protocols.md, Networdz), marks the table `integrity=false` and reads them with `VUE table O`: a seated player's view then has the same `RK` and `BO` lines as with open racks, for that extension only. The game is played exactly as at any other table: the table deals, checks every word against its list and ends the game, and the other players' views are as usual.
+A server extension whose program receives every rack and the bag, as the Networdz extension's does (docs/protocols.md, Networdz), marks the table `integrity=false` and reads them with `VUE table O`: a seated player's view then also has `RK seat letters` for every seat (`RK seat -` for an empty rack) and the bag in draw order, the next tile first, in `BO letters` lines of up to 60 letters (`BO -` for an empty bag), for that extension only. Watchers never get them, and neither does a player's own program. The game is played exactly as at any other table: the table deals, checks every word against its list and ends the game, and the other players' views are as usual.
 
 ## The word list
 

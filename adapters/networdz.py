@@ -101,7 +101,7 @@ import time
 from . import chatcmd, declare
 from .clients import BY_ID
 from .common import (LOGIN_TOTAL_SECS, NEWPASS_TEXT, CoreClient, CoreError, Gate, describe_integrity_event,
-                     describe_racks_event, err_text, keepalive, no_wait, parse_tables, peer_addr, sign_in_lines)
+                     err_text, keepalive, no_wait, parse_tables, peer_addr, sign_in_lines)
 from .games import gridwords as G
 
 CLIENT_NAME = BY_ID["networdz"].name        # "Networdz 2.0"
@@ -843,6 +843,8 @@ class Guest:
             if len(p) < 4 or p[0] != "EVT" or not p[2].isdigit() or int(p[2]) <= self.cursor:
                 continue
             evs.append((int(p[2]), p[3], (p[4] if len(p) > 4 else "").split()))
+        if evs and evs[-1][1] == "PLAY":    # its tiles come in the X event after it: wait for that
+            evs.pop()
         says = chatcmd.join_says(["%s %s" % (kind, " ".join(a)) for _, kind, a in evs])
         for i, (seq, kind, a) in enumerate(evs):
             self.cursor = seq
@@ -881,10 +883,6 @@ class Guest:
                        self.say("%s: %s" % (self.name_of(seat), text) if seat >= 0 else text))
         elif kind == "INT":
             await self.say(describe_integrity_event(" ".join([kind] + a)))
-        elif kind == "RACKS":
-            line = describe_racks_event(" ".join([kind] + a), self.names)
-            if line:
-                await self.say(line + ".")
         elif kind == "UNINVITE" and len(a) >= 2 and not self.started:
             why = a[2] if len(a) > 2 else ""
             await self.say("%s %s." % (a[1], {"declined": "declined your invitation", "expired":

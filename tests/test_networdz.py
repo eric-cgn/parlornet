@@ -201,6 +201,25 @@ class Tiles(unittest.TestCase):
         self.assertEqual(A.start_racks(now, [], 1), now)
 
 
+class Events(unittest.IsolatedAsyncioTestCase):
+    async def test_a_play_waits_for_its_tiles(self):
+        """A PLAY event whose X event has not come yet (the reply ended between them) is read again with it."""
+        g = A.Guest.__new__(A.Guest)
+        g.tid, g.cursor, g.started, g.backlog = "5", 3, True, __import__("collections").deque()
+        replies = [["EVT 5 4 TURN 1", "EVT 5 5 PLAY 1 8 8 H AT 2"],
+                   ["EVT 5 5 PLAY 1 8 8 H AT 2", "EVT 5 6 X 8 8 A 9 8 T", "EVT 5 7 TURN 0"]]
+
+        async def req(text):
+            self.assertEqual(text, "SIN 5 %d" % g.cursor)
+            return replies.pop(0), "OK"
+        g.req = req
+        await g.table_events()
+        self.assertEqual((g.cursor, [it[0] for it in g.backlog]), (4, ["TURN"]))
+        await g.table_events()
+        self.assertEqual((g.cursor, [it[0] for it in g.backlog]), (7, ["TURN", "PLAY", "X", "TURN"]))
+        self.assertEqual(g.backlog[1][2], ["8", "8", "A", "9", "8", "T"])
+
+
 # ---- a stock Networdz copy answering, connected to the parlor ----------------------------------------------
 
 class NwGuest:
