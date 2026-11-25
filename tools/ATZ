@@ -74,7 +74,7 @@ try:
             d = next((i for i in range(2, len(up)) if up[i] == "D" and up[i - 1] != "&"), 0)
             if d:
                 sock = sock and sock.close() or dial(cmd[d + 1:])
-            elif not (up[2:3] == "O" and sock):
+            elif up[2:3] != "O":                # ATO: back online, or NO CARRIER with no line
                 echo = False if "E0" in up else True if "E1" in up else echo
                 if sock and ("H" in up or "Z" in up):
                     sock = sock.close()
