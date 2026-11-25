@@ -1,72 +1,81 @@
-#!/bin/sh
-# pndial: plays a Hayes modem on a serial line logged in to a Unix shell, for period programs that dial.
-#
-#   pndial [-z] [host [port]]      (the defaults are parlornet.org and 6501)
-#
-# Run it in the shell the serial line is logged into, then start the period program and let it
-# dial. Or let the program start it: with a link named ATZ (or atz) to pndial on the PATH, or
-# with alias ATZ='pndial -z', a program's ATZ runs pndial, which answers it with OK, as a modem
-# answers a reset, instead of its first line, so a shell login works as a modem. pndial answers
-# AT commands with OK. On ATD it says CONNECT and joins the line to the parlor with nc, every
-# byte passed as it is, until either side hangs up; then it says NO CARRIER and waits for the
-# next dial. Ctrl-C or Ctrl-D while it waits puts the terminal back and ends it.
-#
-# The dial string picks the parlor. ATDT host:port dials that host and port, and ATDT host, with
-# a dot in the name, dials that host on the port above. Any other number (ATDT5551212, ATDT
-# parlornet) dials the host and port above. The port depends on the program: 6501 for the native
-# protocol (the Apple II client), 6502 telnet, 6519 Worthy Opponent, 6520 RSCARDS; the rest are in
-# docs/protocols.md. docs/serial.md explains it all. It needs sh, stty, tr and nc (any of them).
-# OpenBSD's nc and Nmap's ncat notice the parlor's hang-up only at the program's next key or two;
-# NC='busybox nc' pndial, or the traditional nc, says NO CARRIER at once.
-#
-# Part of ParlorNet (https://github.com/eric-cgn/parlornet), MIT license.
+#!/usr/bin/env python3
+"""pndial [-z] [host [port]]: a small Hayes modem for a serial line logged in to a Unix shell (docs/serial.md).
+Run as ATZ, or with -z, it answers OK at once. ATD host:port dials that, ATD host.name its port, any other
+number the default (parlornet.org 6501). Online, a second's quiet, +++ and a second's quiet give OK with the
+line still up: ATH hangs up, ATO goes back. Ctrl-C or Ctrl-D at the commands ends pndial."""
+import os, select, socket, sys, termios, time, tty
+a = sys.argv[1:]
+z = os.path.basename(sys.argv[0]).upper() == "ATZ" or a[:1] == ["-z"]
+a = a[a[:1] == ["-z"]:] + ["parlornet.org", "6501"][len(a) - (a[:1] == ["-z"]):]
+fd, sock, echo, line, code = 0, None, True, b"", 0
+saved = termios.tcgetattr(fd)
+speed = next((" %d" % b for b in (300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
+              if getattr(termios, "B%d" % b, None) == saved[5]), "")
+out = lambda b: os.write(fd, b if isinstance(b, bytes) else b.encode())
+say = lambda text: out("\r\n%s\r\n" % text)
 
-z=
-case ${0##*/} in ATZ | atz) z=1 ;; esac         # run as ATZ: the reset that started it
-[ "${1:-}" = -z ] && { z=1; shift; }
-host=${1:-parlornet.org} port=${2:-6501}
-cr=$(printf '\r')
-saved=$(stty -g) || exit 1                      # the terminal as it was, for the way out
-speed=$(stty speed 2>/dev/null)                 # the line's speed, for CONNECT 9600
-case $speed in *[!0-9]* | 0) speed= ;; esac
-echo=1                                          # echo commands, as a modem does until ATE0
+def dial(num):
+    num = num.strip()[num.strip()[:1] in ("T", "t", "P", "p"):].replace(" ", "").replace('"', "")   # tone or pulse
+    h, p = num.rsplit(":", 1) if ":" in num else (num, a[1]) if "." in num else a[:2]
+    try:
+        return socket.create_connection((h, int(p)), 30)
+    except (OSError, ValueError):
+        return None
 
-bye() { stty "$saved"; exit "$1"; }
-trap 'bye 130' INT
-trap 'bye 129' HUP
-trap 'bye 143' TERM
+def online(s):
+    """Bytes both ways, as they are: the socket at the escape, None when either side hangs up."""
+    s.settimeout(None)
+    last, plus = time.monotonic(), 0
+    while True:
+        r, now = select.select([fd, s], [], [], 0.1)[0], time.monotonic()
+        if plus == 3 and now - last >= 1:
+            return s
+        try:
+            data = s.recv(4096) if s in r else None
+            if data == b"" or (fd in r and not (got := os.read(fd, 4096))):
+                break
+            data and out(data)
+            if fd in r:
+                n = plus + len(got)
+                plus, last = (n if not got.strip(b"+") and n <= 3 and (plus or now - last >= 1) else 0), now
+                s.sendall(got)
+        except OSError:
+            break
+    s.close()
 
-# Command mode: whole lines, CR ends a line, Ctrl-C works; the line echoes them unless ATE0.
-commands() { stty sane; [ $echo = 1 ] || stty -echo; }
-
-commands
-if [ -n "$z" ]; then
-    printf '\nOK\n'                            # the answer to the ATZ that ran it
-else
-    printf 'pndial: dial ATDT for %s port %s, or ATDT host:port. Ctrl-C ends.\n' "$host" "$port"
-fi
-while line=$(read -r l && printf %s "$l"); do  # read in a subshell, so Ctrl-C ends it at once
-    line=${line%"$cr"}                          # CR ends a line (icrnl); a CR before LF is dropped
-    up=$(printf %s "$line" | tr a-z A-Z)
-    case $up in
-    ATD* | AT*[!\&]D*)                          # a dial (not &D, which sets up DTR)
-        num=${line#*[!\&][Dd]}
-        case $num in [TtPp]*) num=${num#?} ;; esac      # tone or pulse
-        num=$(printf %s "$num" | tr -d ' "\r')          # ATD"host:port" works too
-        case $num in
-        *:*) to=${num%:*} p=${num##*:} ;;
-        *.*) to=$num p=$port ;;
-        *)   to=$host p=$port ;;
-        esac
-        stty raw -echo                          # every byte through as it is, nothing echoed
-        printf '\r\nCONNECT%s\r\n' "${speed:+ $speed}"
-        ${NC:-nc} "${to:-$host}" "${p:-$port}" 2>/dev/null
-        commands
-        printf '\nNO CARRIER\n' ;;
-    AT*)                                        # anything else a modem would take
-        case $up in *E0*) echo=0 ;; *E1*) echo=1 ;; esac
-        commands
-        printf '\nOK\n' ;;
-    esac
-done
-bye 0
+tty.setraw(fd)
+try:
+    say("OK") if z else out("pndial: ATDT for %s port %s, or ATDT host:port. Ctrl-C ends.\r\n" % tuple(a[:2]))
+    while True:
+        if sock in select.select([fd] + [sock] * bool(sock), [], [])[0]:
+            if not sock.recv(4096):                 # what comes while at the commands is dropped
+                sock.close(); sock = None; say("NO CARRIER")
+            continue
+        c = os.read(fd, 1)
+        if c in (b"", b"\x03", b"\x04"):
+            code = 130 if c == b"\x03" else 0
+            break
+        if c in (b"\x08", b"\x7f"):
+            line = line[:-1]; echo and out(b"\x08 \x08")
+        elif c not in (b"\r", b"\n"):
+            line = (line + c)[:80]; echo and out(c)
+        elif line:
+            cmd, line = line.decode("latin-1").strip(), b""
+            up = cmd.upper()
+            echo and out(b"\r\n")
+            if not up.startswith("AT"):
+                continue
+            d = next((i for i in range(2, len(up)) if up[i] == "D" and up[i - 1] != "&"), 0)
+            if d:
+                sock = sock and sock.close() or dial(cmd[d + 1:])
+            elif not (up[2:3] == "O" and sock):
+                echo = False if "E0" in up else True if "E1" in up else echo
+                if sock and ("H" in up or "Z" in up):
+                    sock = sock.close()
+                say("OK"); continue
+            say("CONNECT" + speed if sock else "NO CARRIER")
+            if sock:
+                sock = online(sock); say("OK" if sock else "NO CARRIER")
+finally:
+    termios.tcsetattr(fd, termios.TCSAFLUSH, saved)
+sys.exit(code)
