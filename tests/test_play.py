@@ -956,8 +956,10 @@ class WebAndPlay(unittest.TestCase):
             self.assertIn('<a href="%s">' % want, body)
 
     def test_play_names_the_classic_pages(self):
-        """Play's page names the classic pages by their full address: the Host's name, the web's port."""
-        base = "http://parlornet.org:%d/" % self.web_port
+        """Play's page names the classic pages by their full address: the Host's name, the web's port. Two web
+        extensions run here; the core lists protocols by port, and Play takes the first HTTP one, the lower
+        port of the two."""
+        base = "http://parlornet.org:%d/" % min(self.web_port, self.web2_port)
         deadline = time.time() + 40
         while True:
             c = http.client.HTTPConnection("127.0.0.1", self.play_port, timeout=5)
