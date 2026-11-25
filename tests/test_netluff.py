@@ -273,7 +273,8 @@ class Service(Stack):
 
     def test_a_game_against_the_bot(self):
         """The Mac invites the bot, so it is seat 0 and moves first; it plays the bot's own rules until one side
-        makes five. Either way the Mac sees the end as it would from another copy: its own wn, or the bot's."""
+        makes five. Either way the Mac sees the end as it would from another copy: its own wn, or the bot's.
+        Two players by the same rules can also fill the board without a five: then the chat says it is a draw."""
         pw = self.signup("bea")
         m = self.signed_in("bea", pw)
         m.say("/invite bot")
@@ -282,12 +283,18 @@ class Service(Stack):
         self.assertTrue(m.said("you move first"))
         self.assertGreaterEqual(m.pages, 1)
         plies = 0
+
+        def draw():
+            return m.said("The board is full: a draw.")
         while m.result is None:
-            m.read(lambda: m.my_turn or m.result)
-            if m.result:
+            m.read(lambda: m.my_turn or m.result or draw())
+            if m.result or draw():
+                break
+            if len(m.mine | m.theirs) == A.SIZE * A.SIZE:          # the bot's stone filled the board
+                m.read(draw)
                 break
             plies += 1
-            self.assertLess(plies, 200)
+            self.assertLessEqual(plies, A.SIZE * A.SIZE // 2)      # the Mac's stones fill half the board at most
             m.play(*m.choose())
         nat = self.native("bea", pw)
         tid = re.search(r"on table (\w+):", m.said("Your game with bot")[0]).group(1)
@@ -297,7 +304,11 @@ class Service(Stack):
         view = F.parse_view(v)
         self.assertEqual(set(view["order"][0]), m.mine)
         self.assertEqual(set(view["order"][1]), m.theirs)
-        if m.result == "Loser!":
+        if m.result is None:                                     # a full board
+            self.assertTrue(draw())
+            self.assertEqual(len(m.mine | m.theirs), A.SIZE * A.SIZE)
+            self.assertEqual(view["five"], [])
+        elif m.result == "Loser!":
             self.assertTrue(set(m.line) <= m.theirs and len(m.line) == 5)
             self.assertTrue(m.said("bot made"))
             self.assertEqual(view["stones"][view["five"][0]], 1)
