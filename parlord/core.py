@@ -49,8 +49,7 @@ UNINVITE_WHY = ("declined", "withdrawn", "expired", "started", "left")
 # Looking (LST, IVL, WHO, VUE, SIN, WAT, SEE, GAM, MOTD, TIM, PRF GET and LST) is what frontends also do on their
 # own, every few seconds, so it never counts; a frontend reports the commands a player types that need no
 # other request with ACT. Signing in counts as well.
-ACTIVE_VERBS = frozenset(("ACT", "NEW", "JON", "LVE", "INV", "UNV", "RES", "MOV", "CHK", "UND", "END", "CHT", "OPR",
-                          "PWD"))
+ACTIVE_VERBS = frozenset(("ACT", "NEW", "JON", "LVE", "INV", "UNV", "RES", "MOV", "CHK", "UND", "END", "CHT", "PWD"))
 
 
 class Limits:
@@ -101,10 +100,9 @@ class Limits:
     notes = 20               # notes per table: a player's is refused past it, the core's drops the oldest
     note_len = 48            # a player's note: 1 to 48 printable ASCII characters
     note_core_len = MAXLINE - 2 - len("NOTE 2026-11-22 - ")     # 60
-    tdata_keys = 16          # keys a table's data holds, besides the core's own (TDATA_CORE)
+    tdata_keys = 16          # keys a table's data holds, besides the core's own (INTEGRITY_KEY)
     tdata_key_len = 8        # a key: 1 to 8 of a-z 0-9 _ -, so "TDS table key value" fits the line
     tdata_value_len = 56     # a value: 1 to 56 printable ASCII characters
-    racks_why_len = 20       # what open racks are for (OPR table text), as the notes name it
     integrity_why_len = note_core_len - len("Integrity: ")     # 49: why a table is marked integrity=false
     notices_keep = 1000      # notices kept for NFY (in memory only)
     notice_wait = 30         # the longest NFY waits for one
@@ -144,12 +142,11 @@ SCORE_REASONS = ("win", "draw", "loss", "resign", "timeout")
 
 
 TDATA_KEY_RE = re.compile(r"^[a-z0-9_-]+\Z")
-TDATA_CORE = ("racks",)     # the keys of a table's data that the core keeps itself (TDS and TDD refuse them)
 # A table marked integrity=false (INT; docs/protocol.md, Tables marked integrity=false): the server has given
-# out something it normally keeps, such as every rack. The core keeps "false why" under this key of the table's
-# data. It is longer than a key TDS takes, so no server extension can set or forget it there.
+# out something it normally keeps, such as the bag and every rack. The core keeps "false why" under this key of
+# the table's data. It is longer than a key TDS takes, so no server extension can set or forget it there, and it
+# does not count against the extensions' keys.
 INTEGRITY_KEY = "integrity"
-OPEN_RACKS_WHY = "each player's program receives the bag and racks"     # racks=open, or opened later (OPR)
 
 
 def printable(text):
@@ -1544,8 +1541,6 @@ class Server:
         self.next_id += 1
         self.store.set("next_id", self.next_id)
         self.tables[t.id] = t
-        if opts.get("racks") == "open":         # every seated player's view will carry every rack and the bag
-            self.disclose(t, OPEN_RACKS_WHY)
         self.save(t)
         return [ok(t.id)]
 
@@ -1749,10 +1744,6 @@ class Server:
             if inv and t.status == "open":
                 out.append("IVT %s %s/%d %s %s %s%s" % (t.id, t.type, t.ver, t.rules, inv["from"], t.status,
                                                         " seat=%d" % inv["seat"] if inv["seat"] >= 0 else ""))
-            ask = self.racks_ask(t) if t.status == "playing" else None
-            seat = t.seat_of(sess.player.name)
-            if ask and seat >= 0 and seat not in ask[0] and seat in self.racks_humans(t):
-                out.append("IVR %s %s/%d %s %s racks" % (t.id, t.type, t.ver, t.rules, t.seats[ask[0][0]]))
         return out + [ok()]
 
     def presence_idle(self):
@@ -2217,8 +2208,6 @@ class Server:
         key = args[1].lower() if len(args) > 1 else ""
         if not TDATA_KEY_RE.match(key) or len(key) > Limits.tdata_key_len:
             return None, [err("BADKEY", "a key is 1 to %d of a-z 0-9 _ -" % Limits.tdata_key_len)]
-        if key in TDATA_CORE:
-            return None, [err("RESERVED", "the core keeps %s itself" % key)]
         return key, None
 
     async def cmd_tdl(self, sess, args, line):
@@ -2240,7 +2229,7 @@ class Server:
         value = parts[3].strip() if len(parts) > 3 else ""
         if not value or len(value) > Limits.tdata_value_len or not printable(value):
             return [err("BADVALUE", "a value is 1 to %d printable ASCII characters" % Limits.tdata_value_len)]
-        if key not in t.data and sum(1 for k in t.data if k not in TDATA_CORE) >= Limits.tdata_keys:
+        if key not in t.data and sum(1 for k in t.data if k != INTEGRITY_KEY) >= Limits.tdata_keys:
             return [err("LIMIT", "at most %d keys a table; TDD one first" % Limits.tdata_keys)]
         self.set_data(t, key, value)
         return [ok()]
@@ -2297,91 +2286,6 @@ class Server:
                 self.save(t)
                 t.cond.notify_all()
         return [ok()]
-
-    # ---- opening the racks of a running table (OPR) ----------------------------------------------
-    @staticmethod
-    def racks_ask(t):
-        """A pending request to open the racks, from the table's data: ([seats that asked or agreed, the
-        asker first], what for), or None."""
-        f = t.data.get("racks", "").split(" ", 2)
-        if len(f) < 2 or f[0] != "ask":
-            return None
-        return [int(x) for x in f[1].split(",") if x.isdigit()], f[2] if len(f) > 2 else ""
-
-    def racks_humans(self, t):
-        """The seats whose players must agree to open the racks: every player still in the game but bots."""
-        return [i for i, s in enumerate(t.seats)
-                if s and i not in t.gone and not bots.is_bot(self.players.get(s.lower()))]
-
-    async def cmd_opr(self, sess, args, line):
-        """OPR table [text]: a seated player asks to open the racks of a running game (every seat's view then
-        shows every rack and the bag in draw order, as racks=open from the start does), or agrees to another
-        player's request; text says what for. With every other player a bot, or once each player has agreed,
-        the racks open: OK open. Otherwise OK asked, and the others are asked (IVL). OPR table no declines the
-        request (the player who asked withdraws it). One way: open racks are never hidden again."""
-        t, e = self.table_for(args)
-        if e:
-            return e
-        parts = line.strip().split(None, 2)
-        rest = parts[2].strip() if len(parts) > 2 else ""
-        no = rest.lower() == "no"
-        why = "" if no else "".join(c for c in rest if " " <= c <= "~").strip()[:Limits.racks_why_len].strip()
-        async with t.cond:
-            name = sess.player.name
-            seat = t.seat_of(name)
-            if seat < 0:
-                return [err("NOTSEATED", "you are not playing at this table")]
-            if t.status != "playing":
-                return [err("NOGAME", "the game is not running")]
-            if seat in t.gone:
-                return [err("STATE", "you have left this game")]
-            if "racks" not in (t.plugin.info.get("options") or []):
-                return [err("NORACKS", "this game has no racks to open")]
-            if t.options.get("racks") == "open":
-                return [err("STATE", "the racks are open already")] if no else [ok("open")]
-            ask = self.racks_ask(t)
-            if no:
-                if ask is None:
-                    return [err("NOASK", "nobody has asked to open the racks")]
-                self.set_data(t, "racks", None)
-                self.event(t, "RACKS no %d" % seat)
-                self.add_note(t, "", "%s %s" % (name, "withdrew the request to open the racks"
-                                                 if seat == ask[0][0] else "declined to open the racks"))
-                self.save(t)
-                t.cond.notify_all()
-                return [ok()]
-            agreed, purpose = ask if ask else ([], why)
-            if seat in agreed:
-                return [ok("asked")]
-            agreed = agreed + [seat]
-            if all(i in agreed for i in self.racks_humans(t)):
-                r = await t.plugin.call({"op": "option", "rules": t.rules, "state": t.state, "key": "racks",
-                                         "value": "open"})
-                if "error" in r or "state" not in r:
-                    return [err("NORACKS", r.get("error", "this game cannot open its racks"))]
-                t.state = r["state"]
-                t.options = dict(t.options, racks="open")
-                self.set_data(t, "racks", None)
-                if ask:
-                    self.event(t, "RACKS yes %d" % seat)
-                self.event(t, "RACKS open %d" % agreed[0])
-                self.add_note(t, "", "%s agreed: the racks are open" % name if ask else
-                              "%s opened the racks%s" % (name, " for " + purpose if purpose else ""))
-                self.disclose(t, OPEN_RACKS_WHY)
-                answer = "open"
-            else:
-                self.set_data(t, "racks", "ask %s %s" % (",".join(map(str, agreed)), purpose))
-                if ask:
-                    self.event(t, "RACKS yes %d" % seat)
-                    self.add_note(t, "", "%s agreed to open the racks" % name)
-                else:
-                    self.event(t, ("RACKS ask %d %s" % (seat, purpose)).rstrip())
-                    self.add_note(t, "", "%s asked to open the racks%s" % (name, " for " + purpose if purpose
-                                                                           else ""))
-                answer = "asked"
-            self.save(t)
-            t.cond.notify_all()
-        return [ok(answer)]
 
     # ---- notices for players away from the table (NFY) ----------------------------------------
     async def cmd_nfy(self, sess, args, line):

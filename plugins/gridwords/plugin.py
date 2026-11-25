@@ -72,14 +72,12 @@ RULESETS = {
 INFO = {
     "type": "gridwords", "ver": 1, "name": "Grid Words",
     "rules": list(RULESETS), "min": 2, "max": 4, "flags": ["nomoves"],
-    "options": ["racks"],
+    "options": [],
 }
 
-# racks=open: every seated player's view also shows every rack and the bag in draw order (RK and BO lines). The
-# core marks such a table integrity=false (docs/protocol.md). A view request may also carry "open": true, which the
-# core sends for a server extension whose program receives every rack and the bag (VUE O at a table marked
-# integrity=false): that view has the same lines.
-OPEN_RACKS = ("open", "hidden")
+# A view request may carry "open": true, which the core sends for a server extension whose program receives the bag
+# and every rack (VUE O at a table marked integrity=false; docs/protocol.md). A seated player's view then also has
+# every rack and the bag in draw order (RK and BO lines).
 
 
 def idle_limit(rules, np):
@@ -369,9 +367,8 @@ def op_new(req):
         return {"error": "two to four players"}
     if req.get("rules", "english") not in INFO["rules"]:
         return {"error": "the rulesets are: %s" % " ".join(INFO["rules"])}
-    shown = (req.get("options") or {}).get("racks", "hidden")
-    if shown not in OPEN_RACKS:
-        return {"error": "racks is open or hidden"}
+    if req.get("options"):
+        return {"error": "no options for this game"}
     if not load_words():
         return {"error": "this server has no word list for Grid Words yet"}
     seed = int(req.get("seed") or 0)
@@ -384,8 +381,6 @@ def op_new(req):
         bag = bag[:-RACK]
     st = {"np": n, "seed": seed, "cells": "." * (SIZE * SIZE), "bag": bag, "racks": racks,
           "scores": [0] * n, "turn": 0, "idle": 0, "shuffles": 0, "last": None, "over": False, "result": ""}
-    if shown == "open":
-        st["open"] = True
     return {"state": st, "events": ["TURN 0"]}
 
 
@@ -406,7 +401,7 @@ def op_view(req):
     wire = ["X " + " ".join(triples[i:i + 9]) for i in range(0, len(triples), 9)]
     if 0 <= seat < st["np"]:
         wire.append("R " + (st["racks"][seat] or "-"))
-        if st.get("open") or req.get("open"):      # every rack, and the bag with the next tile first
+        if req.get("open"):     # every rack, and the bag with the next tile first
             wire += ["RK %d %s" % (s, r or "-") for s, r in enumerate(st["racks"])]
             order = st["bag"][::-1]
             wire += ["BO " + order[i:i + 60] for i in range(0, len(order), 60)] or ["BO -"]
@@ -429,17 +424,6 @@ def op_view(req):
     if 0 <= seat < st["np"]:
         data["rack"] = st["racks"][seat]
     return {"wire": wire, "geometry": geometry(), "status": status, "data": data}
-
-
-def op_option(req):
-    """An option changed on a running game (docs/plugins.md): only racks, and only from hidden to open, as the
-    core's OPR does with every player's consent. The state then shows as at a table made with racks=open; the
-    bag and the racks stay as they are."""
-    if req.get("key") != "racks" or req.get("value") != "open":
-        return {"error": "only racks=open can be set on a running game"}
-    st = copy_state(req["state"])
-    st["open"] = True
-    return {"state": st}
 
 
 def op_moves(req):
@@ -568,7 +552,7 @@ def op_say(req):
 
 
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply,
-       "result": op_result, "option": op_option, "say": op_say}
+       "result": op_result, "say": op_say}
 
 
 def main():

@@ -47,7 +47,7 @@ from .common import (framed_motd, LOGIN_SECS, LOGIN_TOTAL_SECS, CLAIM_LEN, CoreC
                      keepalive, NeedAuth,
                      no_wait, describe_invite_event, err_text, group_games, parse_games, parse_invites,
                      parse_reversi_view, parse_players, parse_tables, peer_addr, MOVE_KEYS_PREF, pending_invites,
-                     describe_racks_event, describe_integrity_event, racks_pending, parse_profile, parse_turns,
+                     describe_integrity_event, parse_profile, parse_turns,
                      turn_sentence, turn_time)
 from .common import SCORES_NOTE, parse_top, score_text
 from .common import CUT_ENDS, fit, parse_client, parse_clients
@@ -453,7 +453,7 @@ def describe_event(text, names):
             return "Game over: a draw, %s" % p[2]
         if p[1] == "abandoned":
             return "The operator ended this game"
-    return describe_invite_event(text) or describe_racks_event(text, names) or describe_integrity_event(text)
+    return describe_invite_event(text) or describe_integrity_event(text)
 
 
 def say_cut(say, width):
@@ -1840,8 +1840,6 @@ class GameBase:
                 d = self.describe(p[3])
                 if d:
                     self.log.append(d)
-                if kind == "RACKS" and len(f) >= 3 and f[1] == "ask" and f[2] != str(self.me) and self.me >= 0:
-                    self.log.append("Type racks open to agree, or racks no to refuse.")
                 if kind == "END":
                     self.over = d or "Game over"
                 out.append((kind, d, int(f[1]) if kind == "JOIN" and f[1:2] and f[1].isdigit() else None))
@@ -1878,19 +1876,6 @@ class GameBase:
             return await self.notes() or ["This table has no notes yet."]
         _, final = await self.core.req("NOTE %s %s" % (self.tid, text))
         return ["Noted."] if final.startswith("OK") else ["Can't: " + err_text(final)]
-
-    async def typed_racks(self, word):
-        """racks open: ask to open the racks of this game, or agree to another player's request; racks no:
-        refuse it (OPR) -> what to say."""
-        if self.me < 0:
-            return "Only a player seated here can answer that."
-        if word not in ("open", "no"):
-            return "Type racks open to open the racks, or racks no to refuse."
-        _, final = await self.core.req("OPR %s%s" % (self.tid, " no" if word == "no" else ""))
-        await self.pull()
-        await self.refresh()
-        return {"OK open": "The racks are open.", "OK asked": "Asked: the racks open once the others agree.",
-                "OK": "You said no to opening the racks."}.get(final, "Can't: " + err_text(final))
 
     def playing(self):
         return bool(self.v and self.v["rows"]) and not self.over
@@ -2140,8 +2125,6 @@ class AnsiGame(GameBase, AnsiView):
                 self.say(lines[0])
             else:
                 await self.message("Notes", lines)
-        elif cmd == "racks" and len(p) <= 2:
-            self.say(await self.typed_racks(p[1].lower() if len(p) > 1 else ""))
         elif self.me >= 0 and self.move_word(cmd, p):
             await self.typed_move(self.move_word(cmd, p))
         else:
@@ -2249,8 +2232,6 @@ class PlainGame(GameBase):
         if cmd in ("notes", "note"):
             lines = await self.typed_note(line.split(None, 1)[1].strip() if cmd == "note" and len(p) > 1 else "")
             return await self.notice("\n".join(" " + l for l in lines))
-        if cmd == "racks" and len(p) <= 2:
-            return await self.notice(await self.typed_racks(p[1].lower() if len(p) > 1 else ""))
         word = self.move_word(cmd, p)
         if self.me >= 0 and word:
             err = await self.play_word(word)

@@ -1,5 +1,5 @@
-"""A table's notes (NOTE), the data kept with a table (TDL, TDS, TDD) and opening the racks of a running game
-(OPR): the core in-process, its database across a restart, and a database from before notes and table data."""
+"""A table's notes (NOTE), the data kept with a table (TDL, TDS, TDD) and tables marked integrity=false (INT): the
+core in-process, its database across a restart, and a database from before notes and table data."""
 import os
 import shutil
 import sqlite3
@@ -8,11 +8,11 @@ import tempfile
 import unittest
 
 from test_core import ROOT
-from test_gridwords import WORDS, P, best_play, write_words
+from test_gridwords import WORDS, best_play, write_words
 from test_invites import FakeWriter
 
 sys.path.insert(0, ROOT)
-from parlord.core import OPEN_RACKS_WHY, Limits, Server, Session  # noqa: E402
+from parlord.core import Limits, Server, Session  # noqa: E402
 
 
 class Base(unittest.IsolatedAsyncioTestCase):
@@ -82,111 +82,6 @@ class Base(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await self.req(b, "MOV %s PASS" % tid))[-1].startswith("OK"))
 
 
-class OpenRacks(Base):
-    async def test_against_the_bot_at_once(self):
-        ann, robo = await self.player("ann"), await self.player("robo", bot=True)
-        tid = await self.game(ann, robo)
-        t = self.srv.tables[tid]
-        await self.two_moves(ann, robo, tid)
-        self.assertFalse(any(l.startswith(("RK ", "BO ")) for l in await self.req(ann, "VUE %s" % tid)))
-        before = dict(t.state)
-        self.assertEqual(await self.req(ann, "OPR %s my own program" % tid), ["OK open"])
-        # the state is the one a racks=open table makes, with the same bag, racks, scores and seed
-        self.assertEqual(t.state, dict(before, open=True))
-        self.assertEqual(t.options["racks"], "open")
-        view = await self.req(ann, "VUE %s" % tid)
-        self.assertEqual(view[1:-1], P.op_view({"state": dict(before, open=True), "seat": 0})["wire"]
-                         + ["BOT 1", view[-3], "INT false " + OPEN_RACKS_WHY])
-        self.assertIn("RK 0 %s" % before["racks"][0], view)
-        self.assertIn("RK 1 %s" % before["racks"][1], view)
-        self.assertEqual("".join(l[3:] for l in view if l.startswith("BO ")), before["bag"][::-1])
-        watcher = await self.player("wes")
-        await self.req(watcher, "SEE %s" % tid)
-        self.assertFalse(any(l.startswith(("RK ", "BO ")) for l in await self.req(watcher, "VUE %s" % tid)))
-        # recorded in the history and in the notes, and the table is marked integrity=false; one way
-        self.assertEqual([e for _, e in t.events[-2:]], ["RACKS open 0", "INT false " + OPEN_RACKS_WHY])
-        notes = await self.req(ann, "NOTE %s" % tid)
-        self.assertRegex(notes[0], r"^NOTE \d{4}-\d\d-\d\d - ann opened the racks for my own program$")
-        self.assertRegex(notes[1], r"^NOTE \d{4}-\d\d-\d\d - Integrity: each player's program receives")
-        self.assertEqual(notes[-1], "OK 2")
-        self.assertTrue(any(l.endswith(" integrity=false") for l in await self.req(ann, "LST")))
-        self.assertEqual(await self.req(ann, "OPR %s" % tid), ["OK open"])
-        self.assertEqual((await self.req(ann, "OPR %s no" % tid))[0][:9], "ERR STATE")
-        self.assertEqual(len(t.notes), 2)
-
-    async def test_a_converted_table_plays_as_one_made_open(self):
-        """The same seed, moves and conversion give the state of a table made with racks=open."""
-        ann, robo = await self.player("ann"), await self.player("robo", bot=True)
-        tid = await self.game(ann, robo)
-        t = self.srv.tables[tid]
-        moves = []
-        for _ in range(2):
-            for who, seat in ((ann, 0), (robo, 1)):
-                view = await self.req(who, "VUE %s" % tid)
-                found = best_play(view, {w.upper() for w in WORDS.split()})
-                mv = list(found[1]) if found else ["EXCH", t.state["racks"][seat][:2]]
-                self.assertTrue((await self.req(who, "MOV %s %s" % (tid, " ".join(mv))))[-1].startswith("OK"))
-                moves.append((seat, mv))
-            if len(moves) == 2:
-                self.assertEqual(await self.req(ann, "OPR %s" % tid), ["OK open"])
-        st = P.op_new({"players": 2, "options": {"racks": "open"}, "seed": t.seed, "rules": "english"})["state"]
-        for seat, mv in moves:
-            st = P.op_apply({"state": st, "seat": seat, "move": mv, "rules": "english"})["state"]
-        self.assertEqual(t.state, st)
-
-    async def test_with_a_human_who_agrees(self):
-        ann, cy = await self.player("ann", frontend="doom"), await self.player("cy", frontend="web")
-        tid = await self.game(ann, cy)
-        t = self.srv.tables[tid]
-        self.assertEqual(await self.req(ann, "OPR %s my own program" % tid), ["OK asked"])
-        self.assertEqual(await self.req(ann, "OPR %s" % tid), ["OK asked"])        # asked already
-        self.assertNotIn("racks", t.options)
-        for s in (ann, cy):                     # hidden until cy agrees
-            self.assertFalse(any(l.startswith(("RK ", "BO ")) for l in await self.req(s, "VUE %s" % tid)))
-        self.assertEqual(await self.req(cy, "IVL"), ["IVR %s gridwords/1 english ann racks" % tid, "OK"])
-        self.assertEqual(await self.req(ann, "IVL"), ["OK"])
-        self.assertEqual(t.events[-1][1], "RACKS ask 0 my own program")
-        self.assertEqual(await self.req(ann, "TDL %s" % tid), ["TDL racks ask 0 my own program", "OK"])
-        self.assertEqual(await self.req(cy, "OPR %s" % tid), ["OK open"])
-        self.assertEqual([e for _, e in t.events[-3:]], ["RACKS yes 1", "RACKS open 0", "INT false " + OPEN_RACKS_WHY])
-        self.assertTrue(any(l.startswith("RK 0 ") for l in await self.req(cy, "VUE %s" % tid)))
-        self.assertEqual([n[3] for n in t.notes], ["ann asked to open the racks for my own program",
-                                                   "cy agreed: the racks are open", "Integrity: " + OPEN_RACKS_WHY])
-        self.assertEqual(await self.req(cy, "IVL"), ["OK"])
-        self.assertEqual(await self.req(ann, "TDL %s" % tid), ["TDL integrity false " + OPEN_RACKS_WHY, "OK"])
-
-    async def test_with_a_human_who_declines(self):
-        ann, cy = await self.player("ann"), await self.player("cy")
-        tid = await self.game(ann, cy)
-        t = self.srv.tables[tid]
-        self.assertEqual((await self.req(cy, "OPR %s no" % tid))[0][:9], "ERR NOASK")
-        self.assertEqual(await self.req(ann, "OPR %s for the CD" % tid), ["OK asked"])
-        self.assertEqual(await self.req(cy, "OPR %s no" % tid), ["OK"])
-        self.assertEqual(t.events[-1][1], "RACKS no 1")
-        self.assertNotIn("racks", t.options)
-        self.assertNotIn("racks", t.data)
-        self.assertFalse(any(l.startswith(("RK ", "BO ")) for l in await self.req(ann, "VUE %s" % tid)))
-        self.assertEqual(await self.req(cy, "IVL"), ["OK"])
-        self.assertEqual(t.notes[-1][3], "cy declined to open the racks")
-        # asked again and withdrawn by the asker
-        self.assertEqual(await self.req(ann, "OPR %s" % tid), ["OK asked"])
-        self.assertEqual(await self.req(ann, "OPR %s no" % tid), ["OK"])
-        self.assertEqual(t.notes[-1][3], "ann withdrew the request to open the racks")
-
-    async def test_refusals(self):
-        ann, cy, wes = await self.player("ann"), await self.player("cy"), await self.player("wes")
-        tid = await self.game(ann, cy)
-        self.assertEqual((await self.req(wes, "OPR %s" % tid))[0][:13], "ERR NOTSEATED")
-        open_tid = (await self.req(ann, "NEW gridwords english"))[-1].split()[1]
-        await self.req(ann, "JON %s" % open_tid)
-        self.assertEqual((await self.req(ann, "OPR %s" % open_tid))[0][:10], "ERR NOGAME")
-        rv = (await self.req(ann, "NEW reversi standard"))[-1].split()[1]
-        await self.req(ann, "JON %s" % rv)
-        await self.req(cy, "JON %s" % rv)
-        self.assertEqual((await self.req(ann, "OPR %s" % rv))[0][:11], "ERR NORACKS")
-        self.assertEqual((await self.req(ann, "OPR 999"))[0][:11], "ERR NOTABLE")
-
-
 class Integrity(Base):
     """A table marked integrity=false: the server gave out something it normally keeps. One way, with a reason;
     LST, VUE, a note and an INT event show it; the game goes on as before."""
@@ -212,7 +107,6 @@ class Integrity(Base):
         self.assertEqual((t.no_integrity, len(t.notes)), (self.WHY, 1))
         self.assertTrue((await self.req(bob, "JON %s" % tid))[-1].startswith("OK"))
         self.assertEqual(t.status, "playing")
-        self.assertFalse(t.state.get("open"))
         self.assertEqual(sum(1 for _, e in t.events if e.startswith("INT ")), 1)
         self.assertEqual((await self.req(nw, "INT %s false %s" % (tid, "x" * 50)))[0][:12], "ERR BADVALUE")
         self.assertEqual((await self.req(nw, "INT %s true" % tid))[0][:10], "ERR SYNTAX")
@@ -243,17 +137,7 @@ class Integrity(Base):
         self.assertEqual(rk(await self.req(bob, "VUE %s O" % tid)), [])             # a native player's view
         self.assertEqual(rk(await self.req(web, "VUE %s O" % other)), [])           # a table not marked
 
-    async def test_open_racks_mark_the_table(self):
-        ann = await self.player("ann")
-        tid = (await self.req(ann, "NEW gridwords classic racks=open"))[-1].split()[1]
-        self.assertEqual(self.srv.tables[tid].no_integrity, OPEN_RACKS_WHY)
-        self.assertTrue(any(l.startswith("TAB %s " % tid) and l.endswith(" integrity=false")
-                            for l in await self.req(ann, "LST")))
-        hidden = (await self.req(ann, "NEW gridwords classic"))[-1].split()[1]
-        self.assertIsNone(self.srv.tables[hidden].no_integrity)
-
     def test_the_reasons_fit(self):
-        self.assertLessEqual(len(OPEN_RACKS_WHY), Limits.integrity_why_len)
         self.assertLessEqual(len(self.WHY), Limits.integrity_why_len)
         self.assertLessEqual(len("EVT 999999 999999 INT false " + "x" * Limits.integrity_why_len), 78)
 
@@ -306,8 +190,8 @@ class TableData(Base):
         self.assertEqual(await self.req(ann, "TDL %s" % tid), ["TDL client doom 1993", "OK"])
         self.assertEqual((await self.req(ann, "TDS %s abcdefghi x" % tid))[0][:10], "ERR BADKEY")
         self.assertEqual((await self.req(ann, "TDS %s a.b x" % tid))[0][:10], "ERR BADKEY")
-        self.assertEqual((await self.req(ann, "TDS %s racks open" % tid))[0][:12], "ERR RESERVED")
-        self.assertEqual((await self.req(ann, "TDD %s racks" % tid))[0][:12], "ERR RESERVED")
+        self.assertEqual((await self.req(ann, "TDS %s integrity x" % tid))[0][:10], "ERR BADKEY")    # the core's
+        self.assertEqual((await self.req(ann, "TDD %s integrity" % tid))[0][:10], "ERR BADKEY")
         self.assertEqual((await self.req(ann, "TDS %s k %s" % (tid, "v" * 57)))[0][:12], "ERR BADVALUE")
         self.assertEqual((await self.req(ann, "TDS %s k" % tid))[0][:12], "ERR BADVALUE")
         longest = "TDS %s abcdefgh %s" % ("999999", "v" * Limits.tdata_value_len)
@@ -317,7 +201,7 @@ class TableData(Base):
         self.assertEqual((await self.req(ann, "TDS %s k99 x" % tid))[0][:9], "ERR LIMIT")
         self.assertEqual(await self.req(ann, "TDS %s k0 again" % tid), ["OK"])      # a key it has: replaced
         # the core's own key does not count against the extensions' keys
-        self.assertEqual(await self.req(ann, "OPR %s" % tid), ["OK asked"])
+        self.assertEqual(await self.req(ann, "INT %s false %s" % (tid, Integrity.WHY)), ["OK"])
         self.assertEqual(len(self.srv.tables[tid].data), Limits.tdata_keys + 1)
         self.assertEqual(await self.req(ann, "TDD %s k0" % tid), ["OK"])
         self.assertEqual(await self.req(ann, "TDD %s k0" % tid), ["OK"])
@@ -331,21 +215,21 @@ class Persistence(Base):
         self.addCleanup(shutil.rmtree, self.dir, True)
         self.db = os.path.join(self.dir, "parlor.db")
 
-    async def test_notes_data_and_open_racks_survive_a_restart(self):
+    async def test_notes_data_and_the_integrity_mark_survive_a_restart(self):
         ann, robo = await self.player("ann", frontend="doom"), await self.player("robo", bot=True)
         tid = await self.game(ann, robo)
         await self.req(ann, "NOTE %s from telnet" % tid)
         await self.req(ann, "TDS %s client doom" % tid)
-        self.assertEqual(await self.req(ann, "OPR %s my own program" % tid), ["OK open"])
+        self.assertEqual(await self.req(ann, "INT %s false %s" % (tid, Integrity.WHY)), ["OK"])
         old = self.srv.tables[tid]
         srv = await self.server(self.db)
         t = srv.tables[tid]
         self.assertEqual(t.notes, old.notes)
-        self.assertEqual(t.data, {"client": "doom", "integrity": "false " + OPEN_RACKS_WHY})
-        self.assertEqual((t.options, t.state), (old.options, old.state))
+        self.assertEqual(t.data, {"client": "doom", "integrity": "false " + Integrity.WHY})
+        self.assertEqual((t.options, t.state, t.no_integrity), (old.options, old.state, Integrity.WHY))
         ann2 = await self.player("ann", srv=srv)
-        self.assertEqual(len(await self.req(ann2, "NOTE %s" % tid, srv)), 4)
-        self.assertTrue(any(l.startswith("RK 1 ") for l in await self.req(ann2, "VUE %s" % tid, srv)))
+        self.assertEqual(len(await self.req(ann2, "NOTE %s" % tid, srv)), 3)
+        self.assertIn("INT false " + Integrity.WHY, await self.req(ann2, "VUE %s" % tid, srv))
         # a table that is removed takes its notes and data with it
         await srv.end_table(tid)
         await srv.end_table(tid)
@@ -376,57 +260,26 @@ class Persistence(Base):
         self.assertEqual(len(srv2.tables[tid].notes), 1)
 
 
-class PluginOption(unittest.TestCase):
-    def test_only_racks_open(self):
-        st = P.op_new({"players": 2, "options": {}, "seed": 5})["state"]
-        r = P.op_option({"state": st, "key": "racks", "value": "open"})
-        self.assertEqual(r["state"], dict(st, open=True))
-        self.assertNotIn("open", st)                    # the state given is not changed
-        self.assertIn("error", P.op_option({"state": st, "key": "racks", "value": "hidden"}))
-        self.assertIn("error", P.op_option({"state": st, "key": "size", "value": "open"}))
-
-
 class Frontends(unittest.TestCase):
-    """What the web, telnet, ParlorNet Play and the chat consoles make of notes and RACKS events."""
-
-    def test_pending_requests_and_their_words(self):
-        from adapters.common import describe_racks_event, parse_racks_asks, racks_pending
-        evs = ["START", "RACKS ask 0 my own program"]
-        self.assertEqual(racks_pending(evs, 1), (0, "my own program"))
-        self.assertIsNone(racks_pending(evs, 0))                    # the asker waits for no answer of its own
-        self.assertIsNone(racks_pending(evs, -1))                   # a watcher is not asked
-        self.assertEqual(racks_pending(evs + ["RACKS yes 1"], 2), (0, "my own program"))
-        self.assertIsNone(racks_pending(evs + ["RACKS yes 1"], 1))
-        self.assertIsNone(racks_pending(evs + ["RACKS no 1"], 1))
-        self.assertIsNone(racks_pending(evs + ["RACKS open 0"], 1))
-        names = ["eric", "ann"]
-        self.assertEqual(describe_racks_event("RACKS ask 0 my own program", names),
-                         "eric asks to open the racks for my own program")
-        self.assertEqual(describe_racks_event("RACKS no 1", names), "ann said no to opening the racks")
-        self.assertEqual(describe_racks_event("RACKS open 0", names), "The racks are open now, as eric asked")
-        self.assertIsNone(describe_racks_event("CHT 0 RACKS", names))
-        self.assertEqual(parse_racks_asks(["IVT 3 reversi/1 standard bo open", "IVR 25 gridwords/1 english eric racks",
-                                           "OK"]),
-                         [{"id": "25", "key": "gridwords/1", "rules": "english", "from": "eric"}])
+    """What the frontends make of notes (note_lines, the web page) and of the INT event."""
 
     def test_note_lines_and_the_web_page(self):
         from adapters.chatcmd import note_lines
         from adapters.web import notes_html
-        data = ["NOTE 2026-11-02 - eric opened the racks for my own program", "NOTE 2026-11-22 ann <b>hi</b>",
-                "OK 2"]
-        self.assertEqual(note_lines(data), ["Nov 2 eric opened the racks for my own program",
-                                            "Nov 22 ann: <b>hi</b>"])
+        data = ["NOTE 2026-11-02 - Integrity: " + Integrity.WHY, "NOTE 2026-11-22 ann <b>hi</b>", "OK 2"]
+        self.assertEqual(note_lines(data), ["Nov 2 Integrity: " + Integrity.WHY, "Nov 22 ann: <b>hi</b>"])
         self.assertEqual(note_lines(data, 1, day=False), ["ann: <b>hi</b>"])
         link = lambda p, **kw: p + "?" + "&".join("%s=%s" % kv for kv in sorted(kw.items()))   # noqa: E731
-        page = notes_html("25", link, note_lines(data), 1, (0, "my own program"), ["eric", "ann"])
-        self.assertIn("eric asks to open the racks for my own program.", page)
-        self.assertIn("/racks.htm?ans=open", page)
-        self.assertIn("/racks.htm?ans=no", page)
+        page = notes_html("25", link, note_lines(data), 1)
         self.assertIn("&lt;b&gt;hi&lt;/b&gt;", page)
         self.assertIn('action="/note.htm"', page)
-        watching = notes_html("25", link, [], -1, None, ["eric", "ann"])
+        watching = notes_html("25", link, [], -1)
         self.assertNotIn("note.htm", watching)
-        self.assertNotIn("racks", watching)
+
+    def test_the_integrity_event_in_words(self):
+        from adapters.common import describe_integrity_event
+        self.assertEqual(describe_integrity_event("INT false " + Integrity.WHY), "Integrity: %s." % Integrity.WHY)
+        self.assertIsNone(describe_integrity_event("CHT 0 INT false x"))
 
 
 del Base
