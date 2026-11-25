@@ -107,7 +107,7 @@ class Atz(unittest.TestCase):
         time.sleep(1.1)
         self.assertEqual(self.say(b"+++", b"OK\r\n", 4.0), b"\r\nOK\r\n")
         self.assertEqual(self.say(b"ATH\r", b"OK\r\n"), b"\r\nOK\r\n")
-        self.assertEqual(self.say(b"ATO\r", b"OK\r\n"), b"\r\nOK\r\n")               # nothing to go back to
+        self.assertEqual(self.say(b"ATO\r", b"NO CARRIER\r\n"), b"\r\nNO CARRIER\r\n")  # no line to go back to
         self.assertEqual(self.say(b"ATZ\r", b"OK\r\n"), b"\r\nOK\r\n")             # commands again
         os.write(self.fd, b"\x03")              # Ctrl-C while it waits ends it
         end = time.monotonic() + 5
