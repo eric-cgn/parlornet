@@ -999,7 +999,7 @@ var PN = (function () {
     return any;
   };
   // the events the shell itself describes; the rest are the game's (moves), which a turn's line can be about
-  var SHELL_EVENTS = ["JOIN", "CLIENT", "LEAVE", "START", "END", "CHT", "INVITE", "UNINVITE", "GONE", "RACKS", "TURN"];
+  var SHELL_EVENTS = ["JOIN", "CLIENT", "LEAVE", "START", "END", "CHT", "INVITE", "UNINVITE", "GONE", "RACKS", "TURN", "INT"];
   Table.prototype.event = function (text, quiet, seq) {
     var f = text.split(" "), kind = f[0], joined = this.lastJoin;
     this.lastJoin = null;
@@ -1051,6 +1051,7 @@ var PN = (function () {
       case "INVITE": return f[2] + " is invited";
       case "UNINVITE": return f[2] + "'s invitation ended" + (f[3] ? " (" + f[3] + ")" : "");
       case "GONE": return nm(f[1]) + " is out of the game (" + f[2] + ")";
+      case "INT": return f[1] === "false" ? "Integrity: " + f.slice(2).join(" ").replace(/\.$/, "") + "." : null;
       case "RACKS":
         if (f[1] === "ask") return nm(f[2]) + " asks to open the racks" + (f.length > 3 ? " for " + f.slice(3).join(" ") : "");
         if (f[1] === "yes") return nm(f[2]) + " agrees to open the racks";

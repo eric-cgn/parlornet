@@ -1750,10 +1750,6 @@ class Session:
                 elif kind == "PASS" and a:
                     mover = int(a[0])
                     out.append("%s passes." % self.who_at(mover))
-                elif kind == "OVER" and a:
-                    out.append("%s's own program ends the game by its rules." % self.who_at(int(a[0])))
-                elif kind == "UNLISTED" and len(a) >= 2:
-                    out.append(" ".join(G.unlisted_lines(a[1:], 999)))
                 elif kind == "TURN" and a:
                     s = int(a[0])
                     out += ["%s starts the clock." % self.who_at(mover if mover is not None else s),

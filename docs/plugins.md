@@ -20,8 +20,8 @@ Server to plugin, each answered by one line. Every request for a table carries `
 | Request | Reply |
 |---|---|
 | `{"op":"info"}` | `{"id","name","min","max","options":[...],"flags":[...],"views":{...}}`, `"process":"own"` for a `plugin.py` that needs a process of its own, and `"say":true` for a plugin that answers `say` |
-| `{"op":"new","players":n,"options":{},"seed":int}` | `{"state":...}`. At a table that keeps no integrity (`INT`, [protocol.md](protocol.md)) the request also has `"integrity":false` and `"authority"`, the seat of the table's creator (-1 when not seated), whose program runs the game; a plugin that has nothing to do with it ignores both |
-| `{"op":"view","state","seat"}` | `{"wire":[view lines],"geometry":[static lines],"status":text,"data":{...}}`: the type's view lines in wire form, plus the same state as JSON for modern clients |
+| `{"op":"new","players":n,"options":{},"seed":int}` | `{"state":...}` |
+| `{"op":"view","state","seat"}` | `{"wire":[view lines],"geometry":[static lines],"status":text,"data":{...}}`: the type's view lines in wire form, plus the same state as JSON for modern clients. The request may also have `"open":true`, which the core sends for a server extension at a table marked `integrity=false` (`VUE table O`, [protocol.md](protocol.md)): a game with racks then gives a seated player the same lines as with open racks; a plugin with nothing hidden ignores it |
 | `{"op":"moves","state","seat"}` | `{"moves":[token lists]}` or `{"check":true}` for huge move sets |
 | `{"op":"apply","state","seat","move":[tokens],"check":bool}` | `{"state","events":[wire event text],"end":result?,"tied":[seats]?}` or `{"error":"reason"}`; with `check` nothing is changed and `{"info"}` is returned. `tied` is optional, with an `end` that is a draw: the seats that share it, for the scores (protocol.md, Scores). Without it the core takes the seats still playing with the top score the result lists, or every seat still playing; Cannon Fire sends it, since its last tanks share a draw whatever their points |
 | `{"op":"result","state"}` | `{"over":false}` or `{"over":true,"scores":[...]}` |

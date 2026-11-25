@@ -47,7 +47,8 @@ from .common import (framed_motd, LOGIN_SECS, LOGIN_TOTAL_SECS, CLAIM_LEN, CoreC
                      keepalive, NeedAuth,
                      no_wait, describe_invite_event, err_text, group_games, parse_games, parse_invites,
                      parse_reversi_view, parse_players, parse_tables, peer_addr, MOVE_KEYS_PREF, pending_invites,
-                     describe_racks_event, racks_pending, parse_profile, parse_turns, turn_sentence, turn_time)
+                     describe_racks_event, describe_integrity_event, racks_pending, parse_profile, parse_turns,
+                     turn_sentence, turn_time)
 from .common import SCORES_NOTE, parse_top, score_text
 from .common import CUT_ENDS, fit, parse_client, parse_clients
 from .chatcmd import note_lines, time_text
@@ -452,7 +453,7 @@ def describe_event(text, names):
             return "Game over: a draw, %s" % p[2]
         if p[1] == "abandoned":
             return "The operator ended this game"
-    return describe_invite_event(text) or describe_racks_event(text, names)
+    return describe_invite_event(text) or describe_racks_event(text, names) or describe_integrity_event(text)
 
 
 def say_cut(say, width):

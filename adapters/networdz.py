@@ -3,91 +3,105 @@
 ParlorNet is not affiliated with Networdz's author. Networdz (Lance Frohman, San Francisco, 1996; Windows 3.1 or
 later, Winsock) plays a crossword-tile game between two to four PCs over TCP, peer to peer: one copy is the host
 ("Local / Dial mode") and connects out to each remote player's copy, which waits in "Answer mode". The host's copy
-chooses the rules, deals, checks every word against its own dictionary, starts and ends the game. This extension
-answers as the remote copies: the player's Networdz hosts and connects to the parlor once for each Remote player
-it lists, and each connection is one seat of a gridwords/1 table at the parlor, where a player on the web, by
-telnet, in Play or anywhere else (the bot too) plays that seat. The parlor never hosts and never connects out.
-The protocol was read from games captured between copies of the program.
+deals, judges the words and runs the game. Here the parlor is always that host. Each connection is one Networdz
+player, a guest seated at an ordinary gridwords/1 table beside players on the web, by telnet, in Play, on the
+8-bit clients, in GameMaster or the bot, and other Networdz guests. The parlor deals, judges every word with its
+own word list and ends the game, as for every other client; this extension speaks the host's side of Networdz's
+protocol to the guest's copy. The protocol was read from games captured between copies of the program, and the
+host's side checked against the stock program in Answer mode.
+
+A stock copy only answers: it waits for its host to connect. It reaches the parlor once a patch makes the
+answering copy connect out to it, which is a later step. The extension only listens; it never connects out.
 
 The wire. Binary messages, each a type letter and a fixed length; the second byte is a seat (Networdz's player
-number from 0) or 4 for every player:
+number from 0) or 4 for every player. From the host (the parlor):
 
-    X seat 'C' seat        host: you are this seat (on connecting)          4
-    D seat name[21]        answerer: my player's name; sent again, it renames the seat   23
-    E 4 7 x u16            host: the rules (show racks, hints, tournament, exchange 4 of a kind,
-                           trade blanks, timed, minutes)                    16
-    F 4 4 x 84             host: the players (type: 0 none, 1 computer, 2 person, 3 remote; name; address)  338
-    A 4 bag[250]           host: the bag, a tile number at each place, 0xFA where it is drawn  252
-    G seat / H seat ...    host: pick a tile to see who starts / the place picked   2 / 12
-    R 4 4 x u16            host: the order of play, the first player first  10
-    P seat                 host: draw tiles now                             2
-    Q seat rack[8] .. draws[8] ..   the rack before the draw (0xFA empty) and the place drawn for each slot  24
-    I seat new 0           host: this seat's turn (new 0: the same seat again after a refused word)  4
-    J seat 8 x (row, col, tile, blank's letter) ..   a play: each rack tile, at row and col 0x15 if not played  44
-    M seat code ..word     host: its verdict on that play: 0 taken, 7 not in its dictionary  18
-    K seat / N seat        a pass / host: discard now (while the bag has tiles)   2 / 2
-    O seat rack[8] .. 8 x u16 ..    the discards: 1 for each tile put back     36
-    B seat text[81]        a chat line; Networdz shows it as "name: text"   83
-    S 4 / Y 4 / Z 4        host: the game is over / stopped / the host has quit   2
+    X seat 'C' seat         you are this seat (on connecting, and at a game's start for another seat)   4
+    E 4 7 x u16             the rules: show racks, hints, tournament, exchange 4 of a kind, trade blanks,
+                            timed, minutes; the parlor sends them all off                       16
+    F 4 4 x 84              the players: type (0 none, 1 computer, 2 person, 3 remote), skill, name, address,
+                            connected, seat                                                     338
+    A 4 bag[250]            the bag: a tile number at each place, 0xFA where it is drawn        252
+    R 4 4 x u16             the order of play, the first player first                          10
+    P seat                  that seat draws now                                                2
+    Q seat rack[8] .. draws[8] ..   another seat's draw: its rack before, the place drawn for each slot   24
+    I seat new 0            that seat's turn; new 0: the same seat again after a refused play    4
+    J seat 8 x (row, col, tile, blank's letter) ..   another seat's play (row and col 0x15: not played)   44
+    M seat code dy dx word[6] tail[7]   the verdict on a play: 0 taken, 7 not in the word list    18
+    K seat / N seat         another seat's pass / the guest discards now                        2
+    O seat rack[8] .. 8 x u16 ..    another seat's discards: 1 for each tile put back           36
+    B seat text[81]         a chat line; Networdz shows it as "name: text"                      83
+    S 4 / Y 4 / Z 4         the game is over / stopped / the host has quit                      2
 
-The host sends every message to every remote copy, its own and the others', so the first connection of a host
-(the lowest seat) is read for the game and the others only carry their seat's answers. A tile's number is its
-place in the configuration's tile set: the blanks first, then each letter as many times as the set has it. The
-parlor plays the standard set, so the Networdz player loads the ParlorNet configuration (PARLOR.CFG, given on the
-client's page), which has the standard board, the 100 tiles and their points and racks of 7; a game whose bag
-does not hold those 100 tiles is refused in the chat.
+From the guest: D seat name[21] (its player's name, the answer to X), Q (its draw), J (its play), K (a pass),
+O (its discards after N), B (chat), Z (it quits).
+
+What the stock program was seen to need (docs/clients/networdz.md): it takes X again with another seat and
+answers D for it, but X with the seat it has already makes it drop the rest of what came with it, so a game
+whose seat is the guest's already starts with E; it starts a game with E, F, A and R and no starting picks (G, H); with "Draw Own Tiles" off it
+draws its tiles at random among the places the last A holds; it shows a Person and a Computer in F, and a seat of
+type 0 with a name speaks in the chat under that name without playing. M ends with seven bytes that a stock host
+sends there (TAIL); a refused play whose M lacks them stops the answering copy with "Internal Error A3", and so
+does a word that runs into them, so M carries at most five letters of the word. For a refused play it shows its
+own message for each code and lets its player try again (7 "WORD is not in the dictionary", 14 "Tiles are not
+in a line", 15 "Tiles are not connected", 16 "Word must cover center square", 18 "No tiles played", among
+others), except codes 1 to 5, its system errors, which stop it.
+
+Tiles. A tile's number is its place in the configuration's tile set: the blanks first, then each letter as many
+times as the set has it. The parlor plays the standard set, so the Networdz player loads the ParlorNet
+configuration (PARLOR.CFG, on the client's page): the standard board, the 100 tiles and their points, racks of 7.
+Each guest's game keeps its own numbering of the table's tiles (Tiles): where each one is, on the board, on a
+rack or in the bag. The extension reads the whole table with VUE O, which the core answers with every rack and
+the bag only for a table marked integrity=false; the extension marks each table where a Networdz guest sits
+(INT, REASON), because Networdz's protocol sends the bag and every rack to the guest's program. Networdz shows
+its player only their own rack (E: Show Racks off).
+
+The deal. The table deals and draws. Before the guest draws, A holds only the tiles the table dealt it, so the
+copy's random pick takes exactly those; then A holds the whole bag again. Another seat's draw goes as Q with the
+places of the tiles the table dealt it.
+
+A game, for a guest at seat g:
+
+    START           X g, E, F, A (every tile), R (the table's order: seat 0 first), then each seat's first draw
+                    in that order: P s and Q s for another seat; A (its tiles only), P g, the copy's Q, A (the
+                    whole bag) for the guest. Then I for the first turn
+    the guest's J   PLAY at the table; M g 0 when it is taken (then its draw, as above, and the next I), or
+                    M g 7 with the word the word list lacks, or the code of the program's own message for the
+                    table's reason (REASONS; 7 with no word for any other), then I g 0, and the reason in the
+                    chat
+    the guest's K   N g while the bag holds 7 tiles or more; its O with tiles is EXCH, without PASS; with fewer
+                    tiles in the bag K is PASS at once
+    another seat    PLAY: J and M s 0, then P s and Q s for its draw; EXCH: K, O with the tiles put back,
+                    P, Q, A; PASS: K (and O with none while the bag has tiles); TURN: I
+    the end         S after the table's END (Networdz then works out the final scores itself, as the table
+                    does); Y after a resignation, a clock run out or the operator's end, with a line saying so
+    chat            B both ways; the parlor's own lines come from a seat of type 0 named ParlorNet in F (from
+                    seat 4 when all four seats play)
 
 Sign-in. Networdz sends names but nothing secret, so the Networdz player types /signin NAME PASSWORD in its Chat
-window (/signin PASSWORD once a game has named the player); the name goes to the core and the password answers
-its credential question (common.sign_in_lines). The extension's lines come in that window as a seat's chat.
+window (/signin PASSWORD signs in with the name it sent in D); the name goes to the core and the password
+answers its credential question (common.sign_in_lines). Then the shared chat commands (chat-commands.md) find,
+open and join tables; /open N opens one for N players.
 
-The table. After sign-in, /open or /invite NAME (/invite bot) makes a gridwords/1 classic table with one seat for
-the Networdz player (seat 0) and one for each remote seat it connected, racks=open, marked integrity=false with
-the reason "the host's Networdz deals the tiles" (the core's INT): the host's copy deals and decides, so the
-parlor cannot keep its secrets or be the authority. Every player's program sees every rack anyway. At such a
-table the creator's program has the say (docs/types/gridwords-1.md): every move hands the turn to seat 0, and the
-extension gives it on (TURN) as Networdz's I says. Seat 1 and up are the remote seats in Networdz's order; each
-connection is renamed after the player who sits there (D), between games only: during one Networdz takes a D
-for a move out of turn.
-
-The game. Networdz's New Game waits (its "picking a tile" step) until every seat is taken. Then:
-
-    host's play     J and M from the host -> PLAY x y H|V letters OWN (its words are its dictionary's)
-    host's draw     Q from the host -> RACK letters (the tiles its copy drew)
-    host's pass     K, then O with no tile -> PASS; O with tiles -> EXCH letters, then RACK
-    a turn          I -> TURN seat, when the core's turn is another
-    the end         S -> OVER, unless the core's game ended first (a player went out)
-    seat's draw     P -> RACK letters seat (the places it picks in the host's bag), then Q
-    seat's play     the core's PLAY -> J; M 0 -> the draw; M 7 -> VOID word (the play is taken back, the
-                    player is told why, and the table refuses that word from then on)
-    seat's exchange the core's EXCH -> K, N -> O with the tiles that left the rack, P -> the draw
-    seat's pass     the core's PASS -> K, N -> O with no tile
-    chat            B from the host -> table chat, or a command; a seat's chat -> B from its connection
-
-Every seat's tiles come from the host's bag, which Networdz sends (A) and the table follows: the table deals and
-draws nothing itself. When Networdz asks a parlor seat to draw, the extension picks places in the host's bag for
-the empty slots, as a remote copy does, and tells the table the rack before it answers Networdz. A word the
-host's dictionary refuses is taken back (VOID with the word), and the table refuses it from then on, so the bot
-finds another.
-
-Left out: Trade Blanks, Exchange 4 of a kind, Timed and Tournament Rules (the chat asks the player to turn them
-off), computer players and a second person at the host, a remote seat that is not the parlor, loading saved
-games, other configurations and languages, watching from Networdz, resuming a game on a later connection.
+Left out: Trade Blanks, Exchange 4 of a kind, Timed and Tournament Rules (sent off), other configurations and
+languages, watching from Networdz, and playing on a game that began before the connection (the program has no
+message that sets up a board): a guest who leaves a running game finishes it elsewhere.
 
     python3 -m adapters.networdz --core 127.0.0.1:6590 --key networdz.key --port 6516
 """
 import argparse
 import asyncio
+import collections
 import itertools
 import random
 import re
 import sys
 import time
 
-from . import botflag, chatcmd, declare
+from . import chatcmd, declare
 from .clients import BY_ID
-from .common import (LOGIN_TOTAL_SECS, NEWPASS_TEXT, CoreClient, CoreError, Gate, err_text, keepalive, no_wait,
-                     parse_invites, parse_tables, peer_addr, sign_in_lines)
+from .common import (LOGIN_TOTAL_SECS, NEWPASS_TEXT, CoreClient, CoreError, Gate, describe_integrity_event,
+                     describe_racks_event, err_text, keepalive, no_wait, parse_tables, peer_addr, sign_in_lines)
 from .games import gridwords as G
 
 CLIENT_NAME = BY_ID["networdz"].name        # "Networdz 2.0"
@@ -95,22 +109,19 @@ MACHINE = "Windows"                         # Networdz is a Windows program (3.1
 PROTOCOL = ("NETWORDZ", "Networdz, for Networdz 2.0 on Windows", "Grid Words for Networdz 2.0 on Windows")
 GRID = "gridwords/1"
 RULES = "classic"
-REASON = "the host's Networdz deals the tiles"     # INT: why the table keeps no integrity
-TABLE_MARK = ("client", "networdz")                 # kept with each table made here (TDS)
-HOST_NAME = "ParlorNet"                             # a remote seat's name until a player sits there
+REASON = "a Networdz program receives the bag and all racks"     # INT: why the table is marked integrity=false
+VOICE = "ParlorNet"                         # the name the parlor's own chat lines come under
 MAX_SESSIONS = 40
-HELLO_SECS = 30.0           # X after connecting
 POLL_SECS = 0.5             # the table's events
-INVITE_SECS = 4.0           # IVL, while signed in and not playing
-LOBBY_SECS = 1800.0         # connected, no game and nothing typed: the connections close
-KEEP_SECS = 45.0            # between games, nothing sent on a connection this long: its name again (D)
+LOBBY_SECS = 1800.0         # connected, no game and nothing typed: the connection closes
+DRAW_SECS = 60.0            # the guest's Q after P
 CHAT_GAP = 0.3              # between lines in the chat (the instructions box shows the last)
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,12}\Z")
-COMMANDS = ["list", "resign", "invite", "open", "close", "accept", "decline", "who", "tables", "top", "score",
-            "note", "motd", "time", "signin", "quit", "help"]
+LOBBY_SEAT = 1              # the guest's seat on connecting, before a game (X)
+COMMANDS = ["list", "resign", "invite", "open", "join", "close", "accept", "decline", "who", "tables", "top",
+            "score", "note", "motd", "time", "signin", "quit", "help"]
 BEFORE_SIGNIN = ("signin", "help", "motd", "quit")
-NOTES = ["Your table has a seat for you and one for each Remote player your Networdz lists here.",
-         "/invite bot plays the bot. Choose New Game once everyone is seated."]
+NOTES = ["/open 3 or /open 4 opens a table for more players.", "Your game starts in Networdz once everyone sits."]
 ids = itertools.count(1)
 
 # ---- the wire -----------------------------------------------------------------------------------------------
@@ -123,13 +134,29 @@ OFF = 0x15                  # a rack tile's row and column in a play: not on the
 SLOTS = 8                   # rack slots in every message (Networdz's largest rack)
 RACK = 7                    # the ParlorNet configuration's rack
 BAG = 250                   # places in the bag message
+SIZE = 15                   # the board
 NAME_LEN, TEXT_LEN = 21, 81
 SAY_LEN = TEXT_LEN - 1 - len("ParlorNet: ")   # a line of the parlor's own, with the name before it
 NONE, COMPUTER, PERSON, REMOTE = 0, 1, 2, 3
-REFUSED = {7: "not in the host's dictionary"}
+# M's codes, as the stock program shows them: the play is taken; "WORD is not in the dictionary"; "WORD is too
+# short"; "Tiles are not in a line"; "Tiles are not connected"; "Word must cover center square"; "No tiles played"
+TAKEN, NOT_LISTED, TOO_SHORT, NOT_IN_LINE, NOT_CONNECTED, NOT_CENTER, NO_TILES = 0, 7, 8, 14, 15, 16, 18
+REASONS = [("not in the word list: ", NOT_LISTED), ("must join the words", NOT_CONNECTED),
+           ("must cover the center", NOT_CENTER), ("at least one tile", NO_TILES), ("two letters or more", TOO_SHORT),
+           ("part of the word too", NOT_IN_LINE)]
+M_WORD = 5                  # letters of the word M carries
+TAIL = bytes.fromhex("e0156d011916e0")      # M's last seven bytes, as a stock host sends them
 
 # The ParlorNet configuration's tile set in Networdz's order: the blanks, then each letter (G.STD_TIL).
 TILESET = "_" * G.STD_TIL["_"][1] + "".join(c * G.STD_TIL[c][1] for c in sorted(G.STD_TIL) if c != "_")
+
+
+def u16(v):
+    return bytes([v & 255, v >> 8 & 255])
+
+
+def u16s(b, n):
+    return [b[i] | b[i + 1] << 8 for i in range(0, 2 * n, 2)]
 
 
 def text_field(text, n):
@@ -140,22 +167,51 @@ def cstr(b):
     return b.split(b"\0", 1)[0].decode("latin-1", "replace")
 
 
-def msg_d(seat, name):
-    return b"D" + bytes([seat]) + text_field(name, NAME_LEN)
+def slots(values, fill=EMPTY):
+    """A rack's 8 bytes: the rack's 7 slots (fill for a missing one), then 0."""
+    vals = list(values[:RACK]) + [fill] * (RACK - len(values))
+    return bytes(vals + [0] * (SLOTS - RACK))
 
 
-def msg_b(seat, text):
-    return b"B" + bytes([seat]) + text_field(text, TEXT_LEN)
+def msg_x(seat):
+    return b"X" + bytes([seat, ord("C"), seat])
 
 
-def msg_h(seat, slot, place):
-    rack = [EMPTY] * RACK + [0] * (SLOTS - RACK)
-    rack[slot] = place
-    return b"H" + bytes([seat] + rack) + b"\0\0"
+def msg_e():
+    """New Game's rules, every one off: Show Racks, Allow Hints, Tournament Rules, Exchange 4 of a kind, Trade
+    Blanks, Timed (and its minutes, 2 as the program's default has them)."""
+    return b"E" + bytes([ALL]) + b"".join(u16(v) for v in (0, 0, 0, 0, 0, 0, 2))
+
+
+def msg_f(players):
+    """players: [(type, name, seat)] for Networdz's four places, as many as given; a remote one is connected."""
+    body = b""
+    for i in range(4):
+        kind, name, seat = players[i] if i < len(players) else (NONE, "", i)
+        addr = b"parlor" if kind == REMOTE else b""
+        tail = u16(1) + u16(seat) if kind == REMOTE else b"\0" * 4
+        body += u16(kind) + u16(100) + text_field(name, NAME_LEN) + addr.ljust(49, b"\0") + tail + b"\0" * 6
+    return b"F" + bytes([ALL]) + body
+
+
+def msg_a(bag):
+    return b"A" + bytes([ALL]) + bytes(bag[:BAG]).ljust(BAG, b"\0")
+
+
+def msg_r(order):
+    return b"R" + bytes([ALL]) + b"".join(u16(s) for s in (list(order) + [0] * 4)[:4])
+
+
+def msg_p(seat):
+    return b"P" + bytes([seat])
 
 
 def msg_q(seat, rack, draws):
     return b"Q" + bytes([seat]) + slots(rack) + b"\0\0" + slots(draws, EMPTY) + b"\0" * 4
+
+
+def msg_i(seat, new=True):
+    return b"I" + bytes([seat, 1 if new else 0, 0])
 
 
 def msg_j(seat, recs):
@@ -166,8 +222,19 @@ def msg_j(seat, recs):
     return b"J" + bytes([seat]) + body.ljust(4 * SLOTS, b"\0") + b"\0" * 10
 
 
+def msg_m(seat, code, across, word=""):
+    """The verdict on a play: code, the way its word runs (across: one step down a column is 0), the word (at
+    most M_WORD letters, so that it stops before TAIL), and TAIL."""
+    w = word.upper().encode("ascii", "replace")[:M_WORD]
+    return b"M" + bytes([seat, code, 0 if across else 1, 1 if across else 0]) + w.ljust(M_WORD + 1, b"\0") + TAIL
+
+
 def msg_k(seat):
     return b"K" + bytes([seat])
+
+
+def msg_n(seat):
+    return b"N" + bytes([seat])
 
 
 def msg_o(seat, rack, put_back):
@@ -175,15 +242,18 @@ def msg_o(seat, rack, put_back):
     return b"O" + bytes([seat]) + slots(rack) + b"\0" * 4 + flags + b"\0" * 6
 
 
-def slots(values, fill=EMPTY):
-    """A rack's 8 bytes: the rack's 7 slots (fill for a missing one), then 0."""
-    vals = list(values[:RACK]) + [fill] * (RACK - len(values))
-    return bytes(vals + [0] * (SLOTS - RACK))
+def msg_b(seat, text):
+    return b"B" + bytes([seat]) + text_field(text, TEXT_LEN)
+
+
+def msg_end(kind):
+    """S (the game is over), Y (stopped) or Z (the host quits)."""
+    return kind.encode() + bytes([ALL])
 
 
 class Reader:
-    """Networdz's byte stream -> messages (bytes, each a whole message of its type's size); ("junk", bytes) for
-    a type it does not know, after which the rest of what has come is dropped."""
+    """Networdz's byte stream -> messages (kind, bytes); ("junk", bytes) for a type it does not know, after
+    which the rest of what has come is dropped."""
 
     def __init__(self):
         self.buf = b""
@@ -204,25 +274,6 @@ class Reader:
         return out
 
 
-def u16s(b, n):
-    return [b[i] | b[i + 1] << 8 for i in range(0, 2 * n, 2)]
-
-
-def parse_rules(m):
-    v = u16s(m[2:], 7)
-    return {"racks": v[0], "hints": v[1], "tournament": v[2], "four": v[3], "trade": v[4], "timed": v[5],
-            "minutes": v[6]}
-
-
-def parse_players(m):
-    """F -> [(type, name, address)] for Networdz's four players."""
-    out = []
-    for i in range(4):
-        e = m[2 + 84 * i:2 + 84 * (i + 1)]
-        out.append((e[0] | e[1] << 8, cstr(e[4:25]), cstr(e[25:74])))
-    return out
-
-
 def parse_play(m):
     """J -> [(row, col, tile, letter)] for each rack slot."""
     out = []
@@ -232,13 +283,20 @@ def parse_play(m):
     return out
 
 
+def parse_draw(m):
+    """Q -> (the rack before the draw, the place drawn for each slot), RACK slots each."""
+    return list(m[2:2 + RACK]), list(m[12:12 + RACK])
+
+
+def parse_discards(m):
+    """O -> the slots put back."""
+    flags = u16s(m[14:], RACK)
+    return [i for i in range(RACK) if flags[i]]
+
+
 def letter(tile):
     """A tile number -> its letter ("_" a blank), or "" for an empty slot or a number past the set."""
     return TILESET[tile] if 0 <= tile < len(TILESET) else ""
-
-
-def letters_of(rack):
-    return "".join(letter(t) for t in rack if t != EMPTY and letter(t))
 
 
 def minus(a, b):
@@ -253,17 +311,19 @@ def minus(a, b):
     return "".join(out)
 
 
-def bag_ok(bag):
-    """A new game's bag holds the ParlorNet configuration's tiles, each once."""
-    return sorted(bag[:len(TILESET)]) == list(range(len(TILESET))) and not any(bag[len(TILESET):])
+def common(a, b):
+    """The letters a and b share, counted."""
+    return minus(a, minus(a, b))
 
 
 def play_move(placed, tiles):
-    """A host's play: placed [(x, y, letter, blank)] (1-based squares) and the board's tiles {(x, y): c} -> the
-    PLAY tokens with the whole main word, or None when the tiles are not in one line."""
+    """A play: placed [(x, y, letter, blank)] (1-based squares) and the board's tiles {(x, y): c} -> the PLAY
+    tokens with the whole main word, or None when the tiles are not in one line."""
     xs, ys = {p[0] for p in placed}, {p[1] for p in placed}
     new = {(x, y): (c, b) for x, y, c, b in placed}
-    if len(ys) == 1 and len(xs) >= 1:
+    if len(new) != len(placed):
+        return None
+    if len(ys) == 1:
         horiz = True
         if len(placed) == 1:        # one tile: the way it makes a word
             x, y = placed[0][:2]
@@ -289,176 +349,314 @@ def play_move(placed, tiles):
     return ["PLAY", str(x), str(y), "H" if horiz else "V", word]
 
 
-def parse_racks(lines):
-    """RK lines of an open-rack view -> {seat: letters}."""
-    out = {}
+def parse_open_view(lines):
+    """VUE O -> {"racks": {seat: letters}, "bag": letters, "turn", "tiles", ...} (G.parse_view and the RK and
+    BO lines)."""
+    v = G.parse_view(lines)
+    racks, bag = {}, ""
     for l in lines:
         f = l.split()
         if len(f) >= 2 and f[0] == "RK" and f[1].isdigit():
-            out[int(f[1])] = "" if len(f) < 3 or f[2] == "-" else f[2]
-    return out
+            racks[int(f[1])] = "" if len(f) < 3 or f[2] == "-" else f[2]
+        elif len(f) == 2 and f[0] == "BO" and f[1] != "-":
+            bag += f[1]
+    v["racks"], v["bagtiles"] = racks, bag
+    return v
+
+
+def refusal(reason, word=""):
+    """The core's reason for refusing a play (word: its main word) -> (M's code, the word for M). Networdz shows
+    its own message for each code; any reason it has none for goes as 7 with no word, and the chat says why."""
+    m = re.match(r"not in the word list: ([A-Z]+)", reason or "")
+    if m:
+        return NOT_LISTED, m.group(1)
+    code = next((c for text, c in REASONS if text in (reason or "")), NOT_LISTED)
+    return code, word if code == TOO_SHORT else ""
+
+
+def start_racks(now, backlog, me):
+    """The racks a game started with, from the racks now ({seat: letters}) and the table's events not yet told
+    Networdz (backlog: (kind, args, tiles of the X event after a PLAY, says), in order): a seat that has played
+    since had the tiles it placed instead of those it drew. Which of its tiles came in the draw the table does
+    not say, and Networdz does not show another seat's rack, so the last ones on the rack are taken. A seat
+    plays once at most before the guest's first turn (me), which waits for Networdz."""
+    racks = dict(now)
+    items = [it for it in backlog if not callable(it)]
+    for i, (kind, a, tiles, _) in enumerate(items):
+        seat = int(a[0]) if a and a[0].isdigit() else -1
+        if kind == "PLAY" and tiles and seat in racks and seat != me:
+            placed = "".join("_" if c.islower() else c for c in tiles[2::3])
+            k = next((int(it[1][1]) for it in items[i + 1:] if it[0] == "DRAW" and it[1][:1] == [str(seat)]
+                      and len(it[1]) > 1 and it[1][1].isdigit()), 0)
+            rack = racks[seat]
+            racks[seat] = rack[:len(rack) - k] + placed
+    return racks
 
 
 def log(sid, text):
     print("networdz %s: %s" % (sid, text), file=sys.stderr, flush=True)
 
 
-# ---- a connection: one remote seat of a Networdz host --------------------------------------------------------
+# ---- a game's tiles as Networdz numbers them --------------------------------------------------------------
 
-class Link:
+class Desync(Exception):
+    """Networdz and the table no longer agree about a tile."""
+
+
+class Tiles:
+    """One guest's game: each of the table's 100 tiles has a number (its place in TILESET), and is in the bag
+    (a place 0..99 of the bag message), on a rack (a slot of a seat's 7) or on the board."""
+
+    def __init__(self, racks, bag, rng=None):
+        """racks: {seat: letters} and bag: letters, as the table has them before Networdz's first draws. Every
+        tile starts in the bag, at a shuffled place; the first draws give each seat its rack."""
+        self.rng = rng or random.Random()
+        numbers = collections.defaultdict(list)
+        for n, c in enumerate(TILESET):
+            numbers[c].append(n)
+        if sorted("".join(racks.values()) + bag) != sorted(TILESET):
+            raise Desync("the table's tiles are not the ParlorNet set")
+        places = list(range(len(TILESET)))
+        self.rng.shuffle(places)
+        self.bag = [EMPTY] * BAG
+        for n, p in zip(range(len(TILESET)), places):
+            self.bag[p] = n
+        self.racks = {s: [EMPTY] * RACK for s in racks}
+        self.board = {}             # (x, y) -> number
+        self.out = []               # numbers put back by an exchange, until its draw is over
+
+    def bag_letters(self):
+        return "".join(letter(n) for n in self.bag if n != EMPTY)
+
+    def rack_letters(self, seat):
+        return "".join(letter(n) for n in self.racks[seat] if n != EMPTY)
+
+    def places_for(self, letters):
+        """Places in the bag holding these letters (one each), chosen at random among those that do."""
+        out = []
+        for c in letters:
+            choice = [p for p, n in enumerate(self.bag) if n != EMPTY and letter(n) == c and p not in out]
+            if not choice:
+                raise Desync("the bag has no %s" % ("blank" if c == "_" else c))
+            out.append(self.rng.choice(choice))
+        return out
+
+    def short_bag(self, places):
+        """A: only these places hold their tiles."""
+        return [self.bag[p] if p in places else EMPTY for p in range(len(TILESET))]
+
+    def full_bag(self):
+        return self.bag[:len(TILESET)]
+
+    def draw(self, seat, places):
+        """These places' tiles go to the seat's empty slots, in order -> (the rack before, the place for each
+        slot), as Q has them."""
+        rack = self.racks[seat]
+        before = list(rack)
+        draws = [EMPTY] * RACK
+        empty = [i for i in range(RACK) if rack[i] == EMPTY]
+        if len(places) > len(empty):
+            raise Desync("seat %d has no room for %d tiles" % (seat, len(places)))
+        for slot, p in zip(empty, places):
+            if self.bag[p] == EMPTY:
+                raise Desync("place %d is empty" % p)
+            rack[slot], self.bag[p] = self.bag[p], EMPTY
+            draws[slot] = p
+        return before, draws
+
+    def took(self, seat, before, draws):
+        """The guest's own draw (its Q): check it against the places it was given, and take it."""
+        if list(before[:RACK]) != self.racks[seat]:
+            raise Desync("the rack before the draw differs")
+        places = [p for p in draws if p != EMPTY]
+        empty = [i for i in range(RACK) if self.racks[seat][i] == EMPTY]
+        for slot, p in enumerate(draws[:RACK]):
+            if p == EMPTY:
+                continue
+            if slot not in empty or p >= len(self.bag) or self.bag[p] == EMPTY:
+                raise Desync("the draw names place %d for slot %d" % (p, slot))
+            self.racks[seat][slot], self.bag[p] = self.bag[p], EMPTY
+        return places
+
+    def play(self, seat, placed):
+        """Another seat's play: placed [(x, y, c)] as the X event has them (lower case: a blank) -> J's records,
+        one for each rack slot."""
+        rack = self.racks[seat]
+        recs = {}
+        for x, y, c in placed:
+            want = "_" if c.islower() else c
+            slot = next((i for i in range(RACK) if i not in recs and rack[i] != EMPTY and letter(rack[i]) == want),
+                        None)
+            if slot is None:
+                raise Desync("seat %d's rack has no %s" % (seat, want))
+            recs[slot] = (y - 1, x - 1, rack[slot], c.upper() if c.islower() else "")
+        out = []
+        for i in range(RACK):
+            out.append(recs.get(i, (OFF, OFF, rack[i], "")))
+            if i in recs:
+                self.board[(recs[i][1] + 1, recs[i][0] + 1)] = rack[i]
+                rack[i] = EMPTY
+        return out
+
+    def guest_play(self, seat, recs):
+        """The guest's J -> placed [(x, y, letter, blank)] (1-based squares), checked against its rack and the
+        board; the tiles stay on the rack until the table takes the play (played)."""
+        placed = []
+        for slot, (row, col, tile, bl) in enumerate(recs[:RACK]):
+            if row == OFF and col == OFF:
+                continue
+            if tile != self.racks[seat][slot] or not (0 <= row < SIZE and 0 <= col < SIZE):
+                raise Desync("the play does not match the rack or the board")
+            c = letter(tile)
+            if c == "_" and not ("A" <= bl.upper() <= "Z"):
+                raise Desync("a blank without its letter")
+            placed.append((col + 1, row + 1, bl.upper() if c == "_" else c, c == "_", slot))
+        return placed
+
+    def played(self, seat, placed):
+        for x, y, _, _, slot in placed:
+            self.board[(x, y)] = self.racks[seat][slot]
+            self.racks[seat][slot] = EMPTY
+
+    def put_back(self, seat, letters=None, slots_=None):
+        """An exchange: these letters (or these slots) leave the rack until the draw is over -> the slots."""
+        rack = self.racks[seat]
+        if slots_ is None:
+            slots_ = []
+            for c in letters:
+                slot = next((i for i in range(RACK) if i not in slots_ and rack[i] != EMPTY and letter(rack[i]) == c),
+                            None)
+                if slot is None:
+                    raise Desync("seat %d's rack has no %s to put back" % (seat, c))
+                slots_.append(slot)
+        for i in slots_:
+            self.out.append(rack[i])
+            rack[i] = EMPTY
+        return slots_
+
+    def back_in_bag(self):
+        """The tiles an exchange put back go to empty places of the bag."""
+        empty = [p for p in range(len(TILESET)) if self.bag[p] == EMPTY]
+        self.rng.shuffle(empty)
+        for n, p in zip(self.out, empty):
+            self.bag[p] = n
+        self.out = []
+
+    def tiles(self):
+        """The board as {(x, y): letter}."""
+        return {xy: letter(n) for xy, n in self.board.items()}
+
+
+# ---- one Networdz guest -----------------------------------------------------------------------------------
+
+class Guest:
     def __init__(self, svc, reader, writer, ticket):
         self.svc, self.r, self.w, self.ticket = svc, reader, writer, ticket
         self.addr = peer_addr(writer)
+        self.sid = next(ids)
         self.wire = Reader()
-        self.seat = None            # Networdz's player number for this connection (X)
-        self.name = HOST_NAME
-        self.shown = True           # the host's screen shows self.name
-        self.host = None
-        self.sent = time.monotonic()
+        self.queue = asyncio.Queue()
+        self.core = None
+        self.core_lock = asyncio.Lock()
+        self.nw_name = ""           # the name its D said
+        self.name = None            # signed in as
+        self.console = None
         self.closed = False
+        self.t0 = self.last_typed = time.monotonic()
+        self.polling = False        # a look at the table's events is queued
+        self.nseat = LOBBY_SEAT     # the seat X said last
+        self.voice = 0              # the seat the parlor's own lines come from
+        self.tid = None             # my table, once seated
+        self.seat = None            # my seat there
+        self.cursor = 0
+        self.started = False        # the table's game has begun
+        self.over = False           # ... and ended
+        self.game = None            # Tiles, while a game is relayed
+        self.names = []
+        self.backlog = collections.deque()      # what is still to be told Networdz, in order
+        self.waiting = None         # ("Q", places, then) or ("O",): Networdz's answer the backlog waits for
+        self.wait_until = 0.0
+        self.pending = None         # the guest's play or exchange the table is deciding
+        self.my_turn = False
 
+    # ---- output --------------------------------------------------------------------------------------------
     async def send(self, *msgs):
         data = b"".join(msgs)
         if not data or self.closed:
             return
         if self.svc.trace:
-            log("trace", "to seat %s: %s" % (self.seat, data.hex()))
+            log(self.sid, "trace: to Networdz %s" % data.hex())
         self.w.write(data)
-        self.sent = time.monotonic()
         try:
             await self.w.drain()
         except (ConnectionError, OSError):
             self.closed = True
 
-    async def rename(self, name):
-        """The seat's name on the host's screen (D). Only between games: during one (a New Game waiting for
-        players too) Networdz takes a D for a move out of turn, so the name goes when the game is over."""
-        self.name = name
-        self.shown = False
-        if self.host is None or self.host.nw is None:
-            await self.show_name()
-
-    async def show_name(self):
-        self.shown = True
-        await self.send(msg_d(self.seat, self.name))
-
-    def close(self):
-        self.closed = True
-        try:
-            self.w.close()
-        except Exception:
-            pass
-
-
-# ---- a Networdz host: its connections, its player's core session and the game --------------------------------
-
-class Host:
-    def __init__(self, svc, addr):
-        self.svc, self.addr = svc, addr
-        self.sid = next(ids)
-        self.links = {}             # Networdz seat -> Link (ours)
-        self.queue = asyncio.Queue()
-        self.core = None
-        self.core_lock = asyncio.Lock()
-        self.name = None            # signed in as
-        self.console = None
-        self.ticket = None
-        self.t0 = self.last_typed = time.monotonic()
-        self.closing = False
-        self.polling = False        # a look at the table's events is queued
-        self.tid = None             # the table, once made
-        self.cursor = 0
-        self.started = False        # the table's game has begun at the core
-        self.over = False           # ... and ended there
-        self.announced = {}
-        self.reset_game()
-
-    def reset_game(self):
-        """Networdz's game, as the extension keeps it."""
-        self.nw = None              # None between Networdz games, else a dict (new_game)
-        self.pending_bag = None     # an A that came before the E of a New Game
-        self.held = []              # (kind, seat) G and P to answer once the core's game runs
-        self.host_play = None       # the host's J, until its M
-        self.host_pass = False      # the host's K, until its O or the next I
-        self.outgoing = {}          # Networdz seat -> ("pass", put back, drawn) for a parlor seat's K
-        self.sent_play = {}         # Networdz seat -> its rack before the J sent for it, until the host's M
-        self.detached = False       # Networdz and the table are out of step: no more relaying
-
-    # ---- seats ---------------------------------------------------------------------------------------------
-    @property
-    def ours(self):
-        return sorted(self.links)
-
-    def primary(self):
-        return self.links[self.ours[0]] if self.links else None
-
-    def host_seat(self):
-        if self.nw and self.nw.get("host") is not None:
-            return self.nw["host"]
-        return next(i for i in range(4) if i not in self.links)
-
-    def core_seat(self, nseat):
-        """Networdz seat -> the table's seat: 0 the host's player, then the remote seats in order."""
-        if nseat == self.host_seat():
-            return 0
-        return self.ours.index(nseat) + 1 if nseat in self.links else None
-
-    def nw_seat(self, cseat):
-        if cseat == 0:
-            return self.host_seat()
-        return self.ours[cseat - 1] if 0 < cseat <= len(self.ours) else None
-
-    # ---- output --------------------------------------------------------------------------------------------
-    def voice(self):
-        """Where the parlor's own lines come from: a seat of ours still named ParlorNet, else a seat with no
-        player (Networdz shows ": text"), else the first connection."""
-        for s in self.ours:
-            if self.links[s].name == HOST_NAME:
-                return self.links[s], s, ""
-        used = set(self.ours) | {self.host_seat()}
-        if self.nw and self.nw.get("players"):
-            used |= {i for i, p in enumerate(self.nw["players"]) if p[0] != NONE}
-        free = [i for i in range(4) if i not in used]
-        if free and self.links:
-            return self.primary(), free[0], ""
-        return self.primary(), self.ours[0] if self.links else 0, HOST_NAME + ": "
-
     async def say(self, lines):
         if isinstance(lines, str):
             lines = [lines]
-        link, seat, prefix = self.voice()
-        if link is None:
-            return
-        for i, line in enumerate(l for l in lines if l):
+        for i, line in enumerate(chatcmd.wrap([l for l in lines if l], TEXT_LEN - 1)):
             if i:
                 await asyncio.sleep(self.svc.chat_gap)
-            await link.send(msg_b(seat, (prefix + line)[:TEXT_LEN - 1]))
+            await self.send(msg_b(self.voice, line[:TEXT_LEN - 1]))
 
     async def req(self, text):
         async with self.core_lock:
             return await self.core.req(text)
 
-    # ---- the connections ------------------------------------------------------------------------------------
-    async def add(self, link):
-        self.links[link.seat] = link
-        link.host = self
-        name = await self.seat_name(link.seat)
-        link.name = name or HOST_NAME
-        await link.send(msg_d(link.seat, link.name))
-        log(self.sid, "seat %d connected" % link.seat)
+    # ---- the session ---------------------------------------------------------------------------------------
+    async def run(self):
+        try:
+            self.core = await CoreClient.connect(*self.svc.core_addr)
+            await self.core.source(self.addr)
+            await self.core.claim(CLIENT_NAME, MACHINE)
+        except (OSError, asyncio.TimeoutError, CoreError) as e:
+            log(self.sid, "the core is not answering: %s" % e)
+            self.core = None
+        await self.lobby()
+        if self.core is None:
+            await self.say("The game server is not answering. Try again soon.")
+            self.close()
+            return
+        asyncio.ensure_future(self.greet())
+        reader = asyncio.ensure_future(self.read())
+        ticker = asyncio.ensure_future(self.tick())
+        try:
+            while not self.closed:
+                item = await self.queue.get()
+                if item is None:
+                    continue
+                kind, m = item
+                try:
+                    if kind == "core":
+                        self.polling = False
+                        await self.table_events()
+                    else:
+                        await self.on_message(kind, m)
+                    await self.pump()
+                except Desync as e:
+                    await self.out_of_step(str(e))
+                except (CoreError, OSError, asyncio.TimeoutError) as e:
+                    log(self.sid, "%s: %s" % (kind, e))
+                except Exception as e:
+                    log(self.sid, "%s failed: %r" % (kind, e))
+                    import traceback
+                    traceback.print_exc()
+        finally:
+            reader.cancel()
+            ticker.cancel()
+            await self.hang_up()
 
-    async def seat_name(self, nseat):
-        """The name of the player at the table seat for a Networdz seat, or None."""
-        if not self.tid or self.core is None:
-            return None
-        cs = self.core_seat(nseat)
-        t = await self.table()
-        if t and cs is not None and cs < len(t["seated"]) and t["seated"][cs] != "-":
-            return t["seated"][cs]
-        return None
+    async def lobby(self):
+        """Before a game: the guest is seat 1, and seat 0 is the parlor, named in the players' list (again once
+        D names the guest)."""
+        self.nseat, self.voice = LOBBY_SEAT, 0
+        await self.send(msg_x(LOBBY_SEAT), self.lobby_players())
+
+    def lobby_players(self):
+        return msg_f([(PERSON, VOICE, 0), (REMOTE, self.nw_name, LOBBY_SEAT)])
 
     async def greet(self):
-        await asyncio.sleep(0.5)            # the other connections of the same New Game first
         lines = ["Welcome to ParlorNet: Grid Words for Networdz."]
         try:
             motd = await self.core.motd()
@@ -470,52 +668,34 @@ class Host:
         lines += ["/help lists the commands.", "To sign in, type /signin NAME PASSWORD"]
         await self.say(lines)
 
-    async def gone(self, link):
-        self.links.pop(link.seat, None)
-        if not self.links:
-            self.closing = True
-            await self.queue.put(None)
-
-    # ---- the session ---------------------------------------------------------------------------------------
-    async def run(self):
+    async def read(self):
         try:
-            self.core = await CoreClient.connect(*self.svc.core_addr)
-            await self.core.source(self.addr)
-            await self.core.claim(CLIENT_NAME, MACHINE)
-        except (OSError, asyncio.TimeoutError, CoreError) as e:
-            log(self.sid, "the core is not answering: %s" % e)
-            self.core = None
-        if self.core is not None:
-            asyncio.ensure_future(self.greet())
-        ticker = asyncio.ensure_future(self.tick())
-        try:
-            while not self.closing:
-                item = await self.queue.get()
-                if item is None:
-                    continue
-                link, kind, m = item
-                try:
-                    await self.on_message(link, kind, m)
-                except (CoreError, OSError, asyncio.TimeoutError) as e:
-                    log(self.sid, "message %s: %s" % (kind, e))
-                except Exception as e:
-                    log(self.sid, "message %s failed: %r" % (kind, e))
-                    import traceback
-                    traceback.print_exc()
-        finally:
-            ticker.cancel()
-            await self.hang_up()
+            while not self.closed:
+                data = await self.r.read(4096)
+                if not data:
+                    break
+                for kind, m in self.wire.feed(data):
+                    if kind == "junk":
+                        log(self.sid, "not understood: %r" % m[:16])
+                        continue
+                    if self.svc.trace:
+                        log(self.sid, "trace: from Networdz %s" % m.hex())
+                    await self.queue.put((kind, m))
+        except (ConnectionError, OSError):
+            pass
+        log(self.sid, "disconnected")
+        self.closed = True
+        await self.queue.put(None)
 
     async def hang_up(self):
-        for link in list(self.links.values()):
-            link.close()
+        self.close()
         if self.ticket is not None:
             self.ticket.release()
         if self.core is None:
             return
         try:
             if self.name and self.tid and not self.started:
-                await self.req("LVE %s" % self.tid)
+                await self.req("LVE %s" % self.tid)      # stand up from a table whose game has not begun
             if self.name:
                 await self.core.out()
         except (CoreError, OSError, asyncio.TimeoutError):
@@ -523,332 +703,133 @@ class Host:
         finally:
             self.core.close()
 
+    def close(self):
+        self.closed = True
+        try:
+            self.w.close()
+        except Exception:
+            pass
+        self.queue.put_nowait(None)
+
     async def tick(self):
-        last_ivl = 0.0
-        while not self.closing:
+        while not self.closed:
             await asyncio.sleep(self.svc.poll)
             try:
                 now = time.monotonic()
-                if self.core is None:
-                    await self.say("The game server is not answering. Try again soon.")
-                    self.stop()
-                    return
                 if self.name is None and now - self.t0 > LOGIN_TOTAL_SECS:
                     await self.say("Signing in took too long. Connect again to try again.")
-                    self.stop()
+                    self.close()
+                elif not self.started and now - self.last_typed > LOBBY_SECS:
+                    await self.say("Nothing happened for a long time; goodbye.")
+                    await self.send(msg_end("Z"))
+                    self.close()
+                elif self.waiting and now > self.wait_until:
+                    await self.queue.put(("late", None))
                 elif self.tid and not self.polling:
                     self.polling = True
-                    await self.queue.put((None, "core", None))
-                if self.name and not self.started and now - last_ivl >= INVITE_SECS:
-                    last_ivl = now
-                    await self.check_invitations()
-                if not self.started and self.nw is None and now - self.last_typed > LOBBY_SECS:
-                    await self.say("Nothing happened for a long time; goodbye.")
-                    self.stop()
-                for link in list(self.links.values()):     # between games only: during one Networdz takes
-                    if self.nw is None and now - link.sent >= self.svc.keep:     # a D for a move out of turn
-                        await link.show_name()
+                    await self.queue.put(("core", None))
             except (CoreError, OSError, asyncio.TimeoutError) as e:
                 log(self.sid, "tick: %s" % e)
-            except Exception as e:
-                log(self.sid, "tick error: %r" % e)
-
-    def stop(self):
-        self.closing = True
-        for link in list(self.links.values()):
-            link.close()
-        self.queue.put_nowait(None)
 
     # ---- messages from Networdz ----------------------------------------------------------------------------
-    async def on_message(self, link, kind, m):
-        if self.svc.trace and kind != "core":
-            log(self.sid, "trace: seat %d sent %s" % (link.seat, m.hex()))
-        if kind == "core":
-            self.polling = False
-            if self.tid:
-                await self.table_events()
+    async def on_message(self, kind, m):
+        if kind == "late":
+            if self.waiting:
+                raise Desync("Networdz did not answer in time")
             return
         if self.ticket is not None and self.name is None:
             self.ticket.touch()
-        if link is not self.primary():
-            return                  # the host sends everything to every connection: the first one is read
-        seat = m[1]
-        if kind in "DHQJKOB" and seat in self.links:
-            return                  # our own, sent on to the other connections
         handler = getattr(self, "nw_" + kind, None)
         if handler is not None:
-            await handler(seat, m)
+            await handler(m)
 
-    async def nw_B(self, seat, m):
+    async def nw_D(self, m):
+        self.nw_name = cstr(m[2:])
+        if self.game is None and self.nseat == LOBBY_SEAT:
+            await self.send(self.lobby_players())
+
+    async def nw_B(self, m):
         text = cstr(m[2:]).strip()
-        if seat != self.host_seat() or not text:
+        if text:
+            await self.chat(text)
+
+    async def nw_Z(self, m):
+        log(self.sid, "Networdz quit")
+        self.close()
+
+    async def nw_Q(self, m):
+        if not self.waiting or self.waiting[0] != "Q":
             return
-        await self.chat(text)
+        _, given, then = self.waiting
+        before, draws = parse_draw(m)
+        took = self.game.took(self.nseat, before, draws)
+        if sorted(took) != sorted(given):
+            raise Desync("Networdz drew other tiles than the table dealt")
+        self.waiting = None
+        await self.send(msg_a(self.game.full_bag()))
+        if then:
+            await then()
 
-    async def nw_E(self, seat, m):
-        """A New Game starts: its rules."""
-        bag = self.pending_bag
-        self.reset_game()
-        self.nw = {"rules": parse_rules(m), "bag": bag, "racks": {}, "turn": None, "host": None,
-                   "players": None, "order": [], "ok": True}
-        r = self.nw["rules"]
-        off = [n for k, n in (("trade", "Trade Blanks"), ("four", "Exchange 4 of a kind"), ("timed", "Timed"),
-                              ("tournament", "Tournament Rules")) if r[k]]
-        log(self.sid, "New Game: %s" % r)
-        if off:
-            await self.refuse(["ParlorNet plays without %s." % " or ".join(off),
-                               "Stop Game, turn them off in Options, Rules, then New Game."])
-        await self.check_bag()
-
-    async def nw_F(self, seat, m):
-        if not self.nw:
+    async def nw_J(self, m):
+        if not self.my_turn or self.pending or self.game is None:
             return
-        players = parse_players(m)
-        self.nw["players"] = players
-        persons = [i for i, p in enumerate(players) if p[0] == PERSON]
-        remotes = [i for i, p in enumerate(players) if p[0] == REMOTE]
-        if any(p[0] == COMPUTER for p in players):
-            await self.refuse(["Computer players cannot play at the parlor.", "Set them to none, then New Game."])
-        elif len(persons) != 1:
-            await self.refuse(["Exactly one Person plays at your PC here.", "Make the others Remote players."])
-        elif sorted(remotes) != self.ours:
-            await self.refuse(["Every Remote player must be the parlor's address.",
-                               "Connect again with Options, Communicate."])
-        else:
-            self.nw["host"] = persons[0]
-            log(self.sid, "players: %s" % ", ".join("%d %s" % (i, p[1]) for i, p in enumerate(players) if p[0]))
-            if self.name is None:
-                await self.say(["Sign in to play: /signin NAME PASSWORD", "Your game waits until then."])
-            elif not self.tid or self.over:
-                await self.say(["Make your table first: /invite NAME (or bot), or /open.",
-                                "Your game waits until everyone is seated."])
-            elif not self.started:
-                await self.waiting_line()
-            elif len(self.ours) + 1 != len((await self.table() or {}).get("seated", [])):
-                await self.refuse(["Table %s has another number of seats." % self.tid,
-                                   "Stop Game; /resign it, then make another."])
-
-    async def refuse(self, lines):
-        if self.nw:
-            self.nw["ok"] = False
-        await self.say(lines)
-
-    async def nw_A(self, seat, m):
-        """The bag: at a New Game (before or after its E), after the starting picks and after an exchange."""
-        bag = list(m[2:2 + BAG])
-        if self.nw is None:
-            self.pending_bag = bag
+        placed = self.game.guest_play(self.nseat, parse_play(m))
+        tokens = play_move([p[:4] for p in placed], self.game.tiles()) if placed else None
+        if tokens is None:
+            await self.refuse_play(*((NOT_IN_LINE, "", "Your tiles are not in one line.") if placed else
+                                     (NO_TILES, "", "You played no tile.")))
             return
-        self.nw["bag"] = bag
-        await self.check_bag()
-
-    async def check_bag(self):
-        """A new game's bag must hold the ParlorNet configuration's tiles, once (PARLOR.CFG)."""
-        if self.nw.get("checked") or self.nw.get("bag") is None:
+        self.pending = ("play", placed, tokens)
+        self.my_turn = False
+        _, final = await self.req("MOV %s %s" % (self.tid, " ".join(tokens)))
+        if final.startswith("OK"):
+            word = tokens[4].replace("_", "")
+            await self.send(msg_m(self.nseat, TAKEN, tokens[3] == "H", word))
+            self.game.played(self.nseat, placed)
             return
-        self.nw["checked"] = True
-        if not bag_ok(self.nw["bag"]) and self.nw["ok"]:
-            await self.refuse(["Your Networdz plays another tile set.",
-                               "Load PARLOR.CFG (Options, Configuration), then New Game."])
+        self.pending = None
+        self.my_turn = True
+        why = err_text(final)
+        await self.refuse_play(*refusal(why, tokens[4].replace("_", "")), why=why[:1].upper() + why[1:] + ".")
 
-    async def nw_G(self, seat, m):
-        if seat in self.links:
-            self.held.append(("G", seat))
-            await self.answer_held()
+    async def refuse_play(self, code, word, why):
+        """M with the code, I to the same seat again, and the reason in the chat."""
+        await self.send(msg_m(self.nseat, code, True, word), msg_i(self.nseat, new=False))
+        await self.say(why)
 
-    async def nw_R(self, seat, m):
-        if self.nw:
-            self.nw["order"] = [s for s in u16s(m[2:], 4)]
-
-    async def nw_P(self, seat, m):
-        if seat in self.links:
-            self.held.append(("P", seat))
-            await self.answer_held()
-
-    async def nw_Q(self, seat, m):
-        """The host's draw: its rack, which the table takes (RACK)."""
-        if not self.nw or self.nw.get("bag") is None:
+    async def nw_K(self, m):
+        if not self.my_turn or self.pending or self.game is None:
             return
-        rack, draws = list(m[2:2 + RACK]), list(m[12:12 + RACK])      # the rack before the draw, the places
-        for i, place in enumerate(draws):
-            if place != EMPTY and place < BAG:
-                rack[i] = self.nw["bag"][place]
-                self.nw["bag"][place] = EMPTY
-        self.nw["racks"][seat] = rack
-        if seat == self.host_seat() and self.playing():
-            await self.move("RACK %s" % (letters_of(rack) or "-"), quiet=True)
-
-    async def nw_I(self, seat, m):
-        if not self.nw:
+        self.my_turn = False
+        if len(self.game.bag_letters()) >= RACK:     # an exchange is possible: Networdz asks for the discards
+            self.waiting = ("O",)
+            self.wait_until = time.monotonic() + DRAW_SECS
+            await self.send(msg_n(self.nseat))
             return
-        self.nw["turn"] = seat
-        if self.host_pass:          # the host passed with an empty bag: no discards came
-            self.host_pass = False
-            await self.move("PASS")
-        cs = self.core_seat(seat)
-        if cs is not None and self.playing():
-            v = await self.view()
-            if v["turn"] >= 0 and v["turn"] != cs:
-                await self.move("TURN %d" % cs, quiet=True)
+        await self.guest_move("PASS")
 
-    async def nw_J(self, seat, m):
-        if seat == self.host_seat():
-            self.host_play = parse_play(m)
-
-    async def nw_M(self, seat, m):
-        code, word = m[2], cstr(m[5:])
-        if seat == self.host_seat():
-            play, self.host_play = self.host_play, None
-            if code == 0 and play and self.playing():
-                await self.host_played(play)
+    async def nw_O(self, m):
+        if not self.waiting or self.waiting[0] != "O":
             return
-        if seat not in self.links or not self.playing():
+        self.waiting = None
+        put = parse_discards(m)
+        rack = self.game.racks[self.nseat]
+        give = "".join(letter(rack[i]) for i in put if rack[i] != EMPTY)
+        if not give:
+            await self.guest_move("PASS")
             return
-        cs = self.core_seat(seat)
-        before = self.sent_play.pop(seat, None)
-        if before is None:              # no play of ours waits for it
-            log(self.sid, "seat %d: the host's M %d for no play" % (seat, code))
-            return
-        if code == 0:
-            return
-        if before is not None:          # refused: the tiles stay on the seat's rack in Networdz
-            self.nw["racks"][seat] = before
-        why = REFUSED.get(code, "refused by the host (code %d)" % code)
-        _, final = await self.req("MOV %s VOID %s" % (self.tid, word.upper()) if word.isalpha() else
-                                  "MOV %s VOID" % self.tid)
-        log(self.sid, "seat %d's %s refused (%d): %s" % (cs, word, code, final))
-        await self.req("CHT %s %s" % (self.tid, ("%s is %s." % (word.upper() or "That word", why))[:56]))
+        self.pending = ("exch", put)
+        await self.guest_move("EXCH %s" % give)
 
-    async def nw_K(self, seat, m):
-        if seat == self.host_seat():
-            self.host_pass = True
-
-    async def nw_N(self, seat, m):
-        """Discard now: a parlor seat's pass or exchange, kept since its K."""
-        if seat not in self.links:
-            return
-        kind, put_back, _ = self.outgoing.pop(seat, ("pass", [], ""))
-        rack = list(self.nw["racks"].get(seat, []))
-        await self.links[seat].send(msg_o(seat, rack, put_back))
-        for i in put_back:              # the tiles go back to the bag after the draw (Networdz's A says where)
-            rack[i] = EMPTY
-        self.nw["racks"][seat] = rack
-
-    async def nw_O(self, seat, m):
-        """The host's discards after its K: none is a pass, else an exchange."""
-        if seat != self.host_seat() or not self.playing():
-            return
-        self.host_pass = False
-        rack = list(m[2:2 + RACK])
-        flags = u16s(m[14:], RACK)
-        give = "".join(letter(rack[i]) for i in range(RACK) if flags[i] and rack[i] != EMPTY)
-        await self.move("EXCH %s" % give if give else "PASS")
-
-    async def show_names(self):
-        """Between games: the names that changed during one."""
-        for link in list(self.links.values()):
-            if not link.shown:
-                await link.show_name()
-
-    async def nw_S(self, seat, m):
-        """Networdz's game is over (by its own rules: every player passed with the bag empty, or one went out)."""
-        if self.playing():
-            v = await self.view()
-            if v["turn"] >= 0:
-                await self.move("OVER", quiet=True)
-        self.nw = None
-        await self.show_names()
-
-    async def nw_Y(self, seat, m):
-        if self.playing():
-            await self.say(["Table %s goes on at the parlor:" % self.tid,
-                            "finish it on the web or by telnet, or /resign it."])
-        self.detached = True
-        self.nw = None
-        await self.show_names()
-
-    async def nw_Z(self, seat, m):
-        log(self.sid, "the host quit")
-        self.stop()
+    async def guest_move(self, move):
+        _, final = await self.req("MOV %s %s" % (self.tid, move))
+        if not final.startswith("OK"):
+            self.pending = None
+            raise Desync("the table refused %s: %s" % (move.split()[0].lower(), err_text(final)))
+        if move.startswith("EXCH"):
+            self.game.put_back(self.nseat, slots_=self.pending[1])
 
     # ---- the table's side ------------------------------------------------------------------------------
-    def playing(self):
-        return bool(self.tid and self.started and not self.over and not self.detached and self.nw
-                    and self.nw.get("ok"))
-
-    async def move(self, text, quiet=False):
-        _, final = await self.req("MOV %s %s" % (self.tid, text))
-        if not final.startswith("OK"):
-            log(self.sid, "the table refused %s: %s" % (text, final))
-            await self.out_of_step("The table refused %s: %s." % (text.split()[0].lower(), err_text(final)))
-        elif not quiet:
-            log(self.sid, "host: %s" % text)
-        return final.startswith("OK")
-
-    async def out_of_step(self, why):
-        if self.detached:
-            return
-        self.detached = True
-        await self.say([why, "Finish table %s on the web or by telnet." % self.tid])
-
-    async def view(self):
-        data, final = await self.req("VUE %s" % self.tid)
-        if not final.startswith("OK"):
-            raise CoreError(err_text(final))
-        v = G.parse_view(data)
-        v["racks"] = parse_racks(data)
-        return v
-
-    async def host_played(self, play):
-        """The host's play, which its own dictionary took: on the table as it stands, with OWN."""
-        v = await self.view()
-        placed = [(col + 1, row + 1, letter(tile) if letter(tile) != "_" else bl, letter(tile) == "_")
-                  for row, col, tile, bl in play[:RACK] if row != OFF and tile != EMPTY and letter(tile)]
-        tokens = play_move(placed, v["tiles"]) if placed else None
-        if tokens is None:
-            await self.out_of_step("Your play could not be read.")
-            return
-        await self.move(" ".join(tokens + ["OWN"]))
-
-    async def answer_held(self):
-        """G and P for parlor seats, once the table's game runs (a new game waits until everyone is seated)."""
-        if not self.nw or not self.nw.get("ok") or not self.started or self.over or self.detached:
-            return
-        while self.held:
-            kind, seat = self.held.pop(0)
-            if kind == "G":
-                bag = self.nw.get("bag") or []
-                places = [i for i, t in enumerate(bag[:len(TILESET)]) if t != EMPTY]
-                place = random.choice(places) if places else 0
-                await self.links[seat].send(msg_h(seat, min(2 * seat, RACK - 1), place))     # its slot: 2 x seat
-            else:
-                await self.draw(seat)
-
-    async def draw(self, seat):
-        """Networdz asks a parlor seat to draw: as a remote copy does, a place in the host's bag for each empty
-        slot while it has tiles. The table takes the rack first (RACK letters seat: the host's program deals),
-        so a player there has it before Networdz gives the next turn."""
-        cs = self.core_seat(seat)
-        rack = list(self.nw["racks"].get(seat, [EMPTY] * RACK))
-        rack += [EMPTY] * (RACK - len(rack))
-        bag = self.nw["bag"]
-        draws = [EMPTY] * RACK
-        kept = list(rack)               # Q carries the rack as it was before the draw, and the places drawn
-        for slot in range(RACK):
-            places = [i for i, t in enumerate(bag[:len(TILESET)]) if t != EMPTY]
-            if rack[slot] != EMPTY or not places:
-                continue
-            place = random.choice(places)
-            draws[slot], rack[slot] = place, bag[place]
-            bag[place] = EMPTY
-        self.nw["racks"][seat] = rack
-        if await self.move("RACK %s %d" % (letters_of(rack) or "-", cs), quiet=True):
-            await self.links[seat].send(msg_q(seat, kept, draws))
-
-    async def table(self):
-        data, final = await self.req("LST table=%s" % self.tid)
-        return next((t for t in parse_tables(data) if t["id"] == self.tid), None) if final.startswith("OK") else None
-
     async def table_events(self):
         data, final = await self.req("SIN %s %d" % (self.tid, self.cursor))
         if final.startswith("ERR"):
@@ -866,99 +847,204 @@ class Host:
         for i, (seq, kind, a) in enumerate(evs):
             self.cursor = seq
             nxt = evs[i + 1] if i + 1 < len(evs) else None
-            await self.core_event(kind, a, nxt[2] if nxt and nxt[1] == "X" else None, says)
+            self.backlog.append((kind, a, nxt[2] if nxt and nxt[1] == "X" else None, says))
+
+    async def pump(self):
+        """Tell Networdz what the table did, in order, while it is not drawing or discarding."""
+        while self.backlog and not self.waiting and not self.closed:
+            item = self.backlog.popleft()
+            if callable(item):
+                await item()
+            else:
+                await self.core_event(*item)
+
+    def nw_of(self, seat):
+        return seat           # the table's seat n is Networdz's seat n
 
     async def core_event(self, kind, a, tiles=None, says=None):
         seat = int(a[0]) if a and a[0].isdigit() else -1
-        nseat = self.nw_seat(seat) if seat >= 0 else None
-        change = chatcmd.change_of(kind, a, says or {}, 0)
+        change = chatcmd.change_of(kind, a, says or {}, self.seat if self.seat is not None else -1)
         if kind == "JOIN" and len(a) >= 2:
-            if nseat in self.links:
-                await self.links[nseat].rename(a[1])
-            if seat != 0:
-                say = (says or {}).get(seat, "")
-                await self.say(chatcmd.joined(a[1], say, "sits down at table %s" % self.tid, SAY_LEN)
-                               if self.nw is None else
-                               chatcmd.joined(a[1], say, "sits down (named after this game)", SAY_LEN))
-        elif change:                        # a player plays on with another program
+            if seat != self.seat:
+                await self.say(chatcmd.joined(a[1], (says or {}).get(seat, ""), "sits down at table %s" % self.tid,
+                                              SAY_LEN))
+        elif change:
             t = await self.table()
             name = t["seated"][change[0]] if t and change[0] < len(t["seated"]) else "seat %d" % (change[0] + 1)
             await self.say(chatcmd.client_change(name, change[1], SAY_LEN))
-        elif kind == "LEAVE" and nseat in self.links and not self.started:
-            await self.links[nseat].rename(HOST_NAME)
-        elif kind == "START":
-            self.started = True
-            log(self.sid, "table %s starts" % self.tid)
-            if self.nw:
-                await self.answer_held()
-            else:
-                await self.say(["Everyone is seated at table %s." % self.tid, "Choose New Game to play."])
+        elif kind == "LEAVE" and seat >= 0 and seat != self.seat and not self.started:
+            await self.say("Seat %d stands up from table %s." % (seat + 1, self.tid))
+        elif kind == "CHT" and len(a) >= 2:
+            if seat != self.seat:
+                text = " ".join(a[1:])
+                await (self.send(msg_b(self.nw_of(seat), text)) if self.game and seat >= 0 else
+                       self.say("%s: %s" % (self.name_of(seat), text) if seat >= 0 else text))
+        elif kind == "INT":
+            await self.say(describe_integrity_event(" ".join([kind] + a)))
+        elif kind == "RACKS":
+            line = describe_racks_event(" ".join([kind] + a), self.names)
+            if line:
+                await self.say(line + ".")
         elif kind == "UNINVITE" and len(a) >= 2 and not self.started:
             why = a[2] if len(a) > 2 else ""
             await self.say("%s %s." % (a[1], {"declined": "declined your invitation", "expired":
                                                "did not come in time"}.get(why, "is no longer invited")))
-        elif kind == "CHT" and len(a) >= 2 and seat != 0:
-            text = " ".join(a[1:])
-            if nseat in self.links:
-                await self.links[nseat].send(msg_b(nseat, text))
-            else:
-                await self.say(text)
+        elif kind == "START":
+            await self.start()
         elif kind == "END":
-            self.over = True
-            log(self.sid, "table %s over: %s" % (self.tid, " ".join(a)))
-            if self.nw and a[:1] in (["resign"], ["timeout"]):
-                who = self.links.get(nseat).name if nseat in self.links else "You"
-                await self.say(["%s %s: the game is over at the parlor." % (
-                    who, "resigned" if a[0] == "resign" else "ran out of time"), "Choose Stop Game."])
-        elif not self.playing() or seat <= 0 or nseat not in self.links:
+            await self.end(a)
+        elif self.game is None:
             return
-        elif kind == "PLAY" and tiles:
-            await self.seat_played(nseat, tiles)
-        elif kind in ("EXCH", "PASS"):
-            await self.seat_passed(nseat, kind)
+        elif kind == "PLAY" and tiles and seat != self.seat:
+            await self.other_played(seat, a, tiles)
+        elif kind == "PLAY" and seat == self.seat:
+            self.pending = None
+        elif kind == "DRAW" and len(a) >= 2:
+            await self.drew(seat)
+        elif kind == "EXCH" and len(a) >= 2:
+            await self.exchanged(seat)
+        elif kind == "PASS" and seat != self.seat:
+            await self.send(msg_k(seat), *([msg_o(seat, self.game.racks[seat], [])] if self.game.bag_letters() else []))
+        elif kind == "TURN" and seat >= 0:
+            self.my_turn = seat == self.seat
+            await self.send(msg_i(self.nw_of(seat)))
 
-    async def seat_played(self, nseat, f):
-        """A parlor seat's play, from the tiles of the X event after its PLAY: J for Networdz."""
-        placed = [(int(f[i]), int(f[i + 1]), f[i + 2]) for i in range(0, len(f) - 2, 3)]
-        rack = list(self.nw["racks"].get(nseat, []))
-        rack += [EMPTY] * (RACK - len(rack))
-        recs, used = [], {}
-        for x, y, c in placed:
-            want = "_" if c.islower() else c
-            slot = next((i for i in range(RACK) if i not in used and rack[i] != EMPTY and letter(rack[i]) == want),
-                        None)
-            if slot is None:
-                await self.out_of_step("Seat %s's rack in Networdz lacks %s." % (self.core_seat(nseat), want))
-                return
-            used[slot] = (y - 1, x - 1, rack[slot], c.upper() if c.islower() else "")
-        self.sent_play[nseat] = list(rack)          # the rack as it was, should the host refuse the play
-        for i in range(RACK):
-            recs.append(used.get(i, (OFF, OFF, rack[i], "")))
-            if i in used:
-                rack[i] = EMPTY
-        self.nw["racks"][nseat] = rack
-        await self.links[nseat].send(msg_j(nseat, recs))
+    def name_of(self, seat):
+        return self.names[seat] if 0 <= seat < len(self.names) and self.names[seat] != "-" else "seat %d" % (seat + 1)
 
-    async def seat_passed(self, nseat, kind):
-        """A parlor seat's exchange or pass: K now, its discards when Networdz asks (N), its draw at P."""
-        put_back = []
-        if kind == "EXCH":
-            v = await self.view()
-            rack = list(self.nw["racks"].get(nseat, []))
-            now = v["racks"].get(self.core_seat(nseat), "")
-            gone = minus(letters_of(rack), now)
-            for c in gone:
-                slot = next(i for i in range(len(rack)) if i not in put_back and letter(rack[i]) == c)
-                put_back.append(slot)
-        self.outgoing[nseat] = ("pass", put_back, "")
-        await self.links[nseat].send(msg_k(nseat))
+    async def view(self):
+        data, final = await self.req("VUE %s O" % self.tid)
+        if not final.startswith("OK"):
+            raise CoreError(err_text(final))
+        v = parse_open_view(data)
+        if self.seat is not None and self.seat not in v["racks"]:
+            raise Desync("the table shows no racks (is it marked integrity=false?)")
+        return v
+
+    async def table(self):
+        data, final = await self.req("LST table=%s clients" % self.tid)
+        return next((t for t in parse_tables(data) if t["id"] == self.tid), None) if final.startswith("OK") else None
+
+    async def start(self):
+        """The table's game begins: Networdz's New Game, the players, the bag, the order and the first draws."""
+        self.started, self.over = True, False
+        log(self.sid, "table %s starts" % self.tid)
+        t = await self.table()
+        self.names = t["seated"] if t else []
+        v = await self.view()
+        n = len(v["racks"])
+        bots = set()
+        data, final = await self.req("VUE %s" % self.tid)
+        for l in data:
+            if l.startswith("BOT "):
+                bots |= {int(x) for x in l.split()[1:] if x.isdigit()}
+        players = []
+        for s in range(n):
+            kind = REMOTE if s == self.seat else COMPUTER if s in bots else PERSON
+            if s != self.seat and await self.plays_networdz(t, s):
+                kind = REMOTE
+            players.append((kind, self.name_of(s), s))
+        self.voice = ALL
+        if n < 4:
+            players.append((NONE, VOICE, n))
+            self.voice = n
+        await self.table_events()           # every move the view shows is in the backlog now
+        racks = start_racks(v["racks"], self.backlog, self.seat)
+        self.game = Tiles(racks, minus(TILESET, "".join(racks.values())), self.svc.rng)
+        seat = [msg_x(self.seat)] if self.seat != self.nseat else []    # X with its own seat again: Networdz
+        self.nseat = self.seat                                          # drops what comes with it
+        await self.send(*seat, msg_e(), msg_f(players), msg_a(self.game.full_bag()), msg_r(range(n)))
+        self.backlog.extendleft(reversed([lambda s=s: self.deal(s, racks[s]) for s in range(n)]))
+
+    async def plays_networdz(self, t, seat):
+        """Another seat's player plays with Networdz too (LST clients): Remote in F."""
+        return "Networdz" in ((t or {}).get("clients") or {}).get(seat, "")
+
+    async def deal(self, seat, letters, then=None):
+        """A draw: Q for another seat; for the guest A with only its tiles, P, and its own Q (nw_Q)."""
+        if not letters:
+            if then:
+                await then()
+            return
+        places = self.game.places_for(letters)
+        if seat != self.seat:
+            before, draws = self.game.draw(seat, places)
+            await self.send(msg_p(seat), msg_q(seat, before, draws))
+            if then:
+                await then()
+            return
+        self.waiting = ("Q", places, then)
+        self.wait_until = time.monotonic() + DRAW_SECS
+        await self.send(msg_a(self.game.short_bag(places)), msg_p(self.nseat))
+
+    async def drew(self, seat):
+        """DRAW after a play: the tiles the seat's rack gained at the table."""
+        v = await self.view()
+        new = minus(v["racks"].get(seat, ""), self.game.rack_letters(seat))
+        await self.deal(seat, new)
+
+    async def other_played(self, seat, a, tiles):
+        placed = [(int(tiles[i]), int(tiles[i + 1]), tiles[i + 2]) for i in range(0, len(tiles) - 2, 3)]
+        recs = self.game.play(seat, placed)
+        across = a[3] == "H" if len(a) > 3 else True
+        await self.send(msg_j(seat, recs), msg_m(seat, TAKEN, across, a[4] if len(a) > 4 else ""))
+
+    async def exchanged(self, seat):
+        """EXCH: the tiles put back and the ones drawn, from the racks before and after."""
+        v = await self.view()
+        after = v["racks"].get(seat, "")
+        if seat == self.seat:           # its discards came in O (guest_move took them off the rack)
+            self.pending = None
+            new = minus(after, self.game.rack_letters(seat))
+            await self.deal(seat, new, then=self.exchange_done)
+            return
+        before = self.game.rack_letters(seat)
+        kept = common(before, after)
+        rack = list(self.game.racks[seat])
+        put = self.game.put_back(seat, minus(before, kept))
+        await self.send(msg_k(seat), msg_o(seat, rack, put))
+        await self.deal(seat, minus(after, kept), then=self.exchange_done)
+
+    async def exchange_done(self):
+        self.game.back_in_bag()
+        await self.send(msg_a(self.game.full_bag()))
+
+    async def end(self, a):
+        self.over = True
+        log(self.sid, "table %s over: %s" % (self.tid, " ".join(a)))
+        if self.game is not None:
+            if a[:1] in (["win"], ["draw"]):
+                await self.send(msg_end("S"))
+                await self.say("Game over at table %s: %s." % (self.tid, self.result(a)))
+            else:
+                await self.send(msg_end("Y"))
+                await self.say("Table %s is over: %s." % (self.tid, self.result(a)))
+        self.game, self.my_turn, self.pending = None, False, None
+        self.tid, self.seat, self.started = None, None, False
+
+    def result(self, a):
+        if a[:1] == ["win"] and len(a) >= 2 and a[1].isdigit():
+            return "%s wins, %s" % (self.name_of(int(a[1])), a[2] if len(a) > 2 else "")
+        if a[:1] == ["draw"]:
+            return "a draw, %s" % (a[1] if len(a) > 1 else "")
+        if a[:1] in (["resign"], ["timeout"]) and len(a) > 1 and a[1].isdigit():
+            return "%s %s" % (self.name_of(int(a[1])), "resigned" if a[0] == "resign" else "ran out of time")
+        return "the game was ended"
+
+    async def out_of_step(self, why):
+        log(self.sid, "out of step: %s" % why)
+        if self.game is None:
+            return
+        self.game, self.waiting, self.my_turn, self.pending = None, None, False, None
+        self.backlog.clear()
+        await self.send(msg_end("Y"))
+        await self.say(["Networdz and table %s no longer agree." % self.tid,
+                        "Finish the game on the web or by telnet."])
 
     # ---- chat and commands ---------------------------------------------------------------------------------
     async def chat(self, text):
         self.last_typed = time.monotonic()
         cmd = chatcmd.parse(text)
-        if self.core is None:
-            return
         try:
             if self.console is None:
                 if cmd is not None and cmd.name == "signin":
@@ -980,7 +1066,7 @@ class Host:
                 if not final.startswith("OK"):
                     await self.say("Your chat did not go: %s" % err_text(final))
             else:
-                await self.say("Chat reaches the other players once you have a table.")
+                await self.say("Chat reaches the other players once you sit at a table.")
         except (CoreError, OSError, asyncio.TimeoutError) as e:
             log(self.sid, "command failed: %s" % e)
             await self.say("The server is not answering just now.")
@@ -990,15 +1076,12 @@ class Host:
             await self.say("You are signed in as %s." % self.name)
             return
         args = cmd.args
-        named = None
-        if self.nw and self.nw.get("host") is not None and self.nw.get("players"):
-            named = self.nw["players"][self.nw["host"]][1]
         if self.core.auth == "none":
-            name, password = (args[0] if args else named), None
+            name, password = (args[0] if args else self.nw_name), None
         elif len(args) >= 2:
             name, password = args[0], " ".join(args[1:])
-        elif len(args) == 1 and named:
-            name, password = named, args[0]
+        elif len(args) == 1 and self.nw_name:
+            name, password = self.nw_name, args[0]
         else:
             await self.say("Type /signin NAME PASSWORD")
             return
@@ -1022,136 +1105,58 @@ class Host:
             return
         if self.ticket is not None and not self.ticket.sign_in():
             await self.say("The server is full. Try again soon.")
-            self.stop()
+            self.close()
             return
         self.name = self.core.name or name
         log(self.sid, "signed in as %s" % self.name)
         self.core.user_input()
         self.console = Console(self)
-        n = len(self.links)
-        await self.say(["Signed in as %s." % self.name,
-                        "Your Networdz has %d remote seat%s here." % (n, "" if n == 1 else "s"),
-                        "/invite NAME or /invite bot for each, or /open."])
-        await self.check_invitations()
+        await self.say(["Signed in as %s." % self.name, "/invite NAME or /invite bot, /open or /list."])
 
     async def do_quit(self, cmd):
         await self.say("Goodbye.")
-        self.stop()
+        await self.send(msg_end("Z"))
+        self.close()
 
-    async def check_invitations(self):
-        data, final = await self.req("IVL")
-        if not final.startswith("OK"):
-            return
-        invs = parse_invites(data)
-        for i in invs:
-            if i["id"] in self.announced:
-                continue
-            self.announced[i["id"]] = i["from"]
-            await self.say(["%s invites you to table %s." % (i["from"], i["id"]),
-                            "Networdz plays the tables it hosts: /invite %s here." % i["from"]])
-
-    async def waiting_line(self):
-        t = await self.table()
-        if not t:
-            return
-        free = t["seats"] - t["filled"]
-        await self.say("Table %s waits for %d more player%s." % (self.tid, free, "" if free == 1 else "s"))
-
-    async def make_table(self, vis):
-        """The table for this host's game: a seat for its player and one for each remote seat here."""
-        if self.tid and not self.over:
-            return self.tid
-        n = 1 + len(self.links)
-        if not 2 <= n <= 4:
-            await self.say("Connect one to three Remote players to the parlor first.")
-            return None
-        _, final = await self.req("NEW %s %s players=%d racks=open turn=%s vis=%s"
-                                  % (GRID, RULES, n, self.svc.turn, vis))
-        if not final.startswith("OK"):
-            await self.say("Can't open a table: %s" % err_text(final))
-            return None
-        tid = final.split()[1]
+    async def seated(self, tid, seat, opp, how):
+        """The console seated me: this is the table Networdz plays, marked integrity=false (its program receives
+        the bag and every rack)."""
+        if self.tid and self.tid != tid and self.started and not self.over:
+            await self.say("Table %s goes on at the parlor." % self.tid)
+        self.tid, self.seat, self.cursor, self.started, self.over = tid, seat, 0, False, False
+        self.game, self.waiting, self.pending, self.my_turn = None, None, None, False
+        self.backlog.clear()
         _, final = await self.req("INT %s false %s" % (tid, REASON))
         if not final.startswith("OK"):
-            await self.say("Can't open a table: %s" % err_text(final))
-            return None
-        await self.req("TDS %s %s %s" % ((tid,) + TABLE_MARK))
-        _, final = await self.req("JON %s 0" % tid)
-        if not final.startswith("OK"):
-            await self.req("LVE %s" % tid)
-            await self.say("Can't open a table: %s" % err_text(final))
-            return None
-        self.tid, self.cursor, self.started, self.over = tid, 0, False, False
-        self.detached = False
-        for link in self.links.values():
-            if link.name != HOST_NAME:
-                await link.rename(HOST_NAME)
-        log(self.sid, "table %s for %d players (%s)" % (tid, n, vis))
-        return tid
+            log(self.sid, "INT %s: %s" % (tid, final))
+        log(self.sid, "seated at table %s, seat %d (%s)" % (tid, seat, how))
 
 
 class Console(chatcmd.Console):
-    """The shared chat commands, on the one table this host's game is played at."""
+    """The shared chat commands; /open N opens a table for N players."""
 
-    def __init__(self, h):
-        self.h = h
-        super().__init__(h.say, h.req, lambda: h.name, COMMANDS, kinds=[GRID], label="Grid Words",
-                         new="%s racks=open" % RULES, notes=NOTES,
-                         handlers={"quit": h.do_quit, "signin": h.do_signin, "invite": self.do_invite,
-                                   "open": self.do_open, "accept": self.do_accept, "close": self.do_close},
-                         current=lambda: h.tid if h.started and not h.over else None)
+    def __init__(self, g):
+        self.g = g
+        super().__init__(g.say, g.req, lambda: g.name, COMMANDS, kinds=[GRID], label="Grid Words",
+                         new="%s turn=%s" % (RULES, g.svc.turn), notes=NOTES,
+                         handlers={"quit": g.do_quit, "signin": g.do_signin, "open": self.do_open},
+                         seated=g.seated, current=lambda: g.tid if g.started and not g.over else None)
 
     async def do_open(self, cmd):
-        h = self.h
-        if h.tid and not h.over:
-            await self.say("Your table is %s." % h.tid)
+        n = cmd.args[0] if cmd.args else "2"
+        if not (n.isdigit() and 2 <= int(n) <= 4):
+            await self.say("Type /open, or /open 3 or /open 4 for more players.")
             return
-        if await h.make_table("public"):
-            await self.say(["Table %s is open: anyone can sit down." % h.tid, "/close closes it."])
-
-    async def do_invite(self, cmd):
-        h = self.h
-        name = cmd.args[0]
-        if name.lower() == (h.name or "").lower():
-            await self.say("You cannot invite yourself.")
+        keep = self.new
+        self.new = "%s players=%s" % (keep, n)
+        try:
+            tid = await self.new_table("public")
+        finally:
+            self.new = keep
+        if tid is None:
             return
-        if not (h.tid and not h.over) and not await h.make_table("private"):
-            return
-        t = await h.table()
-        if t and t["status"] != "open":
-            await self.say("Table %s has begun already." % h.tid)
-            return
-        if botflag.is_bot_name(name):
-            data, _ = await self.req("SIN %s 0" % h.tid)
-            invited = [l.split()[5] for l in data if l.startswith("EVT") and l.split()[3] == "INVITE"
-                       and len(l.split()) > 5]
-            name = botflag.next_name((t["names"] if t else []) + invited) or name
-        _, final = await self.req("INV %s %s" % (h.tid, name))
-        if not final.startswith("OK"):
-            await self.say("There is no player called %s here." % name if final.startswith("ERR NOPLAYER")
-                           else "Can't invite %s: %s" % (name, err_text(final)))
-            return
-        if final == "OK offline":
-            await self.say("%s is not online now. Your invitation waits." % name)
-        elif botflag.is_bot_name(name):
-            await self.say("You invited the bot to table %s." % h.tid)
-        else:
-            await self.say("You invited %s to table %s." % (name, h.tid))
-
-    async def do_accept(self, cmd):
-        await self.say(["Networdz plays only the tables it hosts.", "/invite %s here instead." % cmd.args[0]])
-
-    async def do_close(self, cmd):
-        h = self.h
-        if not h.tid or h.started:
-            await self.say("You have no open table.")
-            return
-        await self.req("LVE %s" % h.tid)
-        await self.say("Table %s is closed." % h.tid)
-        h.tid = None
-        for link in h.links.values():
-            if link.name != HOST_NAME:
-                await link.rename(HOST_NAME)
+        await self.g.seated(tid, 0, None, "open")
+        await self.say("Your table %s is open for %s players. /close closes it." % (tid, n))
 
 
 # ---- the listener -----------------------------------------------------------------------------------------
@@ -1160,68 +1165,25 @@ class Service:
     def __init__(self, args):
         self.args = args
         self.core_addr = (args.core_host, args.core_port)
-        self.poll, self.turn, self.keep, self.chat_gap = args.poll, args.turn, args.keep, args.chat_gap
+        self.poll, self.turn, self.chat_gap = args.poll, args.turn, args.chat_gap
         self.trace = args.trace
-        self.hosts = {}             # address -> Host
+        self.rng = random.Random()
         self.gate = Gate(MAX_SESSIONS)
         self.gate.notice = b""
 
     async def handle(self, reader, writer):
         keepalive(writer)
-        link = Link(self, reader, writer, None)
-        msgs, data, end = [], b"", time.monotonic() + HELLO_SECS
-        try:
-            while not msgs:         # X may come in pieces
-                more = await asyncio.wait_for(reader.read(64), max(0.1, end - time.monotonic()))
-                if not more:
-                    break
-                data += more
-                msgs = link.wire.feed(more)
-        except (asyncio.TimeoutError, ConnectionError, OSError):
-            pass
-        if not msgs or msgs[0][0] != "X" or msgs[0][1][1] >= 4:
-            log("-", "not Networdz: %r" % data[:16])
+        addr = peer_addr(writer)
+        ticket = self.gate.admit(addr, writer)
+        if ticket is None:
             writer.close()
             return
-        link.seat = msgs[0][1][1]
-        host = self.hosts.get(link.addr)
-        if host is None or host.closing or link.seat in host.links:
-            ticket = self.gate.admit(link.addr, writer)     # a Networdz host signing in counts once
-            if ticket is None:
-                writer.close()
-                return
-            host = Host(self, link.addr)
-            host.ticket = ticket
-            self.hosts[link.addr] = host
-            asyncio.ensure_future(self.run_host(host))
-        await host.add(link)
-        for kind, m in msgs[1:]:
-            await host.queue.put((link, kind, m))
+        g = Guest(self, reader, writer, ticket)
+        log(g.sid, "connected from %s" % addr)
         try:
-            while not link.closed:
-                data = await reader.read(4096)
-                if not data:
-                    break
-                for kind, m in link.wire.feed(data):
-                    if kind == "junk":
-                        log(host.sid, "not understood: %r" % m[:16])
-                        continue
-                    await host.queue.put((link, kind, m))
-        except (ConnectionError, OSError):
-            pass
-        finally:
-            link.close()
-            log(host.sid, "seat %d disconnected" % link.seat)
-            await host.gone(link)
-
-    async def run_host(self, host):
-        try:
-            await host.run()
+            await g.run()
         except Exception as e:
             print("networdz session error: %r" % e, file=sys.stderr, flush=True)
-        finally:
-            if self.hosts.get(host.addr) is host:
-                del self.hosts[host.addr]
 
 
 async def serve(args):
@@ -1242,8 +1204,6 @@ def parse_args(argv=None):
     ap.add_argument("--core", default="127.0.0.1:6590", help="the core's frontend channel")
     ap.add_argument("--key", default=None, help="this frontend's key file (python -m parlord.frontends)")
     ap.add_argument("--turn", default="30m", help="time per turn at the tables this extension makes")
-    ap.add_argument("--keep", type=float, default=KEEP_SECS,
-                    help="seconds with nothing sent on a connection before its name goes again")
     ap.add_argument("--trace", action="store_true", help="log every message to and from Networdz, in hex")
     declare.add_args(ap)
     ap.add_argument("--poll", type=float, default=POLL_SECS, help=argparse.SUPPRESS)              # tests
