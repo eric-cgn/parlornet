@@ -18,6 +18,7 @@ from adapters import catalog  # noqa: E402
 from parlord import admin as PA  # noqa: E402
 from parlord import auth  # noqa: E402
 from parlord.core import Server, Session  # noqa: E402
+from speed import slow  # noqa: E402
 
 
 class FakeWriter:
@@ -390,6 +391,7 @@ class Widgets(unittest.TestCase):
         self.assertEqual(io.keys, ["TAB", "x", "BTAB", "DEL", "UP", "ENTER"])
 
 
+@slow
 class LiveTUI(unittest.TestCase):
     """parlord with its admin socket and the admin adapter as processes,
     driven over a raw socket with key bytes."""

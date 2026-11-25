@@ -217,15 +217,6 @@ def parse_view(lines):
     return v
 
 
-def unlisted_lines(words, width=48):
-    """What both players are told when a classic program's own word check let words through that the server's
-    list lacks (an OWN play's UNLISTED event): short lines for a one-line chat box."""
-    import textwrap
-    first = "%s %s not in this server's word list." % (", ".join(words), "is" if len(words) == 1 else "are")
-    return textwrap.wrap(first, width) + ["A ParlorNet player could not have played %s." % (
-        "it" if len(words) == 1 else "them")]
-
-
 def _who(names, i):
     i = int(i)
     n = names[i] if 0 <= i < len(names) else "-"
@@ -247,12 +238,6 @@ def describe_event(text, names):
             return "%s exchanges %s tile%s" % (_who(names, p[1]), p[2], "" if p[2] == "1" else "s")
         if p[0] == "PASS" and len(p) == 2:
             return "%s passes" % _who(names, p[1])
-        if p[0] == "VOID" and len(p) == 3:          # INT: the hosting program refused the play just made
-            return "%s's %s is refused by the host's program and taken back" % (_who(names, p[1]), p[2])
-        if p[0] == "OVER" and len(p) == 2:          # an OVER move: the player's own program ended the game
-            return "%s's own program ended the game" % _who(names, p[1])
-        if p[0] == "UNLISTED" and len(p) >= 3:     # an OWN play: the player's own program checked the words
-            return " ".join(unlisted_lines(p[2:], 999))[:-1]
         if p[0] == "ADJ" and len(p) == 4:
             if p[3] == "-":
                 return "%s goes out: %s for the tiles left on the other racks" % (_who(names, p[1]), p[2])

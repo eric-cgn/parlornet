@@ -4,7 +4,7 @@
 
 Networdz is a crossword tile game for Windows 3.1 and later by Lance Frohman of San Francisco. Version 2.0 has files dated October 1996 and was US$12 shareware, sold on CD collections from 1996 to 1998. One to four people play, on one PC or over a network or the Internet, in 16 languages. Version 2.0 was the first to play over a network: two to four PCs over a LAN or the Internet, through Winsock. It also plays against the computer and has a chat window, a timed option and tournament rules, and its configuration files change the board, the tiles and the language.
 
-There is no server: one player's copy is the host. It chooses the rules, shuffles the bag, checks every word against its own dictionary, and connects out to each remote player's copy. ParlorNet answers as the remote copies, so a Networdz player hosts a game whose other seats are played at the parlor: on the web, by telnet, in ParlorNet Play, on any other Grid Words client, or by the bot ([protocols guide](../protocols.md#networdz)).
+There is no server: one player's copy is the host. It deals, checks every word against its dictionary and connects out to each remote player's copy, which waits in Answer mode. On a parlor the parlor is always that host. A Networdz player is a guest at an ordinary Grid Words table, beside players on the web, by telnet, in ParlorNet Play, on the 8-bit clients, in GameMaster, the bot and other Networdz players. The parlor deals, judges every word with its own word list and ends the game ([protocols guide](../protocols.md#networdz)).
 
 ## Getting it
 
@@ -12,28 +12,14 @@ The archive below is from Walnut Creek's Giga Games 5 CD of June 1997. It holds 
 
 ## Setting it up
 
-You need Windows 3.1 or later with Winsock. Make your account on the web site or by telnet first.
+The stock program cannot connect to a parlor yet. A copy in Answer mode waits for its host to connect to it, and a parlor never connects out to players. A small patch that makes the answering copy connect out to the parlor, to `{host}` on port `6516`, is a later step, and this section will then say how to get it. Until then Networdz has no rating here. The parlor's side has been tested against the stock program in Answer mode under Wine, with a test-only helper in the patch's place: whole games against the bot and with other players, with plays, a refused word, exchanges, passes and chat.
 
-1. Close Networdz. Add the lines under `NETWORDZ.INI` below to that file in your Windows folder (make it if it is not there): the parlor's port, `6516`, and the rules the parlor does not play, turned off.
-2. Save the text under `PARLOR.CFG` below in the Networdz folder: the standard board, the 100 standard tiles and their points, and racks of 7.
-3. Start Networdz, choose Options, Configuration and open `PARLOR.CFG`.
-4. In Options, Players, make Player 1 a Person with your name, and make Player 2 (and 3 and 4, for more players) Remote, each with `{host}` (the parlor's name or address) as its IP name. Set the others to none.
-5. In Options, Communicate, keep "Local / Dial Mode", click Connect, then OK. The Remote players show as ParlorNet.
-6. Choose Options, Chat, where the parlor's lines come. Type `/signin NAME PASSWORD` and press Enter. If the server emailed you your password, sign in once on the web or by telnet first, where you choose a password of your own.
-7. Type `/invite NAME` for each player you want, `/invite bot` for the bot (once for each seat it takes), or `/open` to let anyone sit down. Each Remote player takes the name of the player who sits there.
-8. When everyone is seated, choose Game, New Game.
+You will need Windows 3.1 or later with Winsock, the patch, and an account, which you make on the web site or by telnet. Then:
 
-`NETWORDZ.INI`:
-
-```
-[Remote]
-Internet Protocol Port=6516
-[Rules]
-Trade Blanks=0
-Exchange Four of a Kind=0
-Timed=0
-Tournament Rules=0
-```
+1. Save the text under `PARLOR.CFG` below in the Networdz folder: the standard board, the 100 standard tiles and their points, and racks of 7.
+2. Start Networdz, choose Options, Configuration and open `PARLOR.CFG`.
+3. Choose Options, Chat, where the parlor's lines come. Type `/signin NAME PASSWORD`, or `/signin PASSWORD` for the name you gave Networdz. If the server emailed you your password, sign in once on the web or by telnet first, where you choose a password of your own.
+4. Type `/invite NAME` to play someone, `/invite bot` to play the bot, `/open` to let anyone sit down, or `/join` a table from `/list`. The game starts in Networdz once everyone is seated.
 
 `PARLOR.CFG`:
 
@@ -116,27 +102,22 @@ Z Points=10
 
 The Chat window takes the [shared chat commands](../chat-commands.md):
 
-- `/invite NAME` invites a player to your table, who may be on the web, by telnet or anywhere else, and `/invite bot` invites the bot.
-- `/open` opens your table to anyone, and `/close` closes it before the game starts.
+- `/invite NAME` invites a player, who may be on the web, by telnet or anywhere else, and `/invite bot` invites the bot.
+- `/open` opens a table for two that anyone can join, `/open 3` or `/open 4` one for more players, and `/close` closes it before the game starts. `/join TABLE` or `/join NAME` sits down at an open table, and `/accept NAME` or `/decline NAME` answers an invitation.
 - `/resign` resigns the game, after a second `/resign` to confirm.
-- `/list` lists your games and the open tables, `/who` lists the players online, `/note` reads or adds a note to the game, `/motd` shows the message of the day, `/help` lists the commands and `/quit` signs out.
+- `/list` lists your games and the open tables, `/who` the players online, `/tables NAME` a player's tables, `/top` the leaderboard and `/score` a score. `/note` reads or adds a note to the game, `/time` shows the time, `/motd` the message of the day, `/help` the commands, and `/quit` signs out.
 
 Anything else you type is chat with the other players.
 
 ## Known quirks
 
-- Your PC is the host, so your copy of Networdz deals the tiles and checks the words with its own dictionary. The parlor marks the table `integrity=false` ("the host's Networdz deals the tiles"): it cannot keep the game's secrets or decide it. Every rack is shown on every copy of Networdz anyway. The other players see the mark in the table's notes.
-- A word your dictionary does not have is refused for the other players too, even when the parlor's word list has it. They are told in the table's chat and play again, and the table refuses that word from then on, the bot's too.
-- Your own words are taken as your Networdz takes them.
-- The parlor plays the standard board and tiles only. With Networdz's own default board (17 by 17, 128 tiles) or another configuration the chat asks you to load `PARLOR.CFG`, and the game waits.
-- Trade Blanks, Exchange 4 of a kind, Timed and Tournament Rules are not played here. The chat asks you to turn them off (Options, Rules) and to start a New Game.
-- Every Remote player must be the parlor; no Computer players or second Person.
-- Networdz's own New Game waits, with "... is picking a tile to start", until every seat at your table is taken. A player who sits down then shows as ParlorNet until that game is over.
-- The parlor's own lines in the chat come from a seat nobody sits in, which Networdz shows as ": text", or before anyone sits down, as "ParlorNet: text".
-- When a game ends at the parlor first (a resignation, or a turn clock run out), the chat says so; choose Stop Game.
-- Stop Game, or quitting Networdz, leaves the table running at the parlor: finish it on the web or by telnet, or `/resign` it. Networdz cannot load a game back from the parlor.
-- Each game needs its own table: `/invite` the players again, then New Game.
+- Networdz's protocol sends the bag and every rack to each player's program, so a table where a Networdz player sits is marked `integrity=false`, with the line "Integrity: a Networdz program receives the bag and all racks." in the chat and in the table's log. Networdz shows you only your own rack, and the game goes on as at any other table.
+- A word the parlor's list lacks shows in Networdz as not in the dictionary, with at most five letters of it. A play whose tiles are not in a line, do not touch the board or miss the center square shows Networdz's own message for it. Either way the chat gives the table's reason; take your tiles back and play again.
+- The bot shows in Networdz as Computer, and the parlor's own lines come under the name ParlorNet, or with no name when all four seats play.
+- The parlor plays the standard board and tiles only: load `PARLOR.CFG` before you connect.
+- Trade Blanks, Exchange 4 of a kind, Timed and Tournament Rules are not played here; the parlor sends them off.
+- A game you leave goes on at the parlor: finish it on the web or by telnet, or `/resign` it. Networdz cannot load a game back.
 
 ## Screenshots
 
-![Networdz 2.0 at the end of a game it hosted against the bot through the parlor, under Wine](../../static/img/networdz-game.gif)
+![Networdz 2.0 at the end of a game against the bot, with the parlor as the host, under Wine](../../static/img/networdz-game.gif)

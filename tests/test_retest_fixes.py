@@ -23,6 +23,16 @@ WRONG = "Wrong guess 1"      # never SECRET
 RESET_ASKED = "ASK password Password secret"     # after a reset: the temporary password went by mail
 
 
+class CheapHashes:
+    """These tests make dozens of password players and guesses: scrypt at a lower cost (the cost is stored
+    with each hash, so checks use it too). The cost itself is tested in test_auth."""
+
+    def setUp(self):
+        patch = mock.patch.object(auth, "SCRYPT_N", 2 ** 10)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+
 async def guess(srv, source, name, pw):
     """A sign-in from a client address: the name, then pw at the password question; the last line."""
     s = public(source)
@@ -30,7 +40,7 @@ async def guess(srv, source, name, pw):
     return await say(srv, s, "AUT password %s" % pw)
 
 
-class N1WrongAnswerBudgets(unittest.IsolatedAsyncioTestCase):
+class N1WrongAnswerBudgets(CheapHashes, unittest.IsolatedAsyncioTestCase):
     async def test_per_address_budget_across_names(self):
         srv = server("password", "email")
         n, _ = auth.SOURCE_MISSES
@@ -135,7 +145,7 @@ class N2RecoveryPerRequester(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(srv.accounts.is_trusted("cal", "192.0.2.5"))
 
 
-class R21OwnRecoveryBudget(unittest.IsolatedAsyncioTestCase):
+class R21OwnRecoveryBudget(CheapHashes, unittest.IsolatedAsyncioTestCase):
     """Round 2, R2-1, from r17b_recovery_budget.py: strangers' resets for other
     players use up the strangers' recovery budget, never the owners'."""
 

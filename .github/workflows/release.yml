@@ -1,7 +1,8 @@
-# Every push to main: if VERSION names a version with no release yet, run the whole test suite, build the
-# Docker image, tag the commit v<version> and publish a GitHub Release of the source. No image is published:
-# each parlor builds its own from the source (README.md, "Run your own parlor"). A push that keeps the
-# version does nothing. Run it by hand on main to release a version whose push did not run it.
+# Every push to main: if VERSION names a version with no release yet, run the whole test suite (the fast tests
+# and the slow ones, tests/speed.py), build the Docker image, tag the commit v<version> and publish a GitHub
+# Release of the source. No image is published: each parlor builds its own from the source (README.md, "Run
+# your own parlor"). A push that keeps the version does nothing. Run it by hand on main to release a version
+# whose push did not run it.
 name: Release
 
 on:
@@ -16,7 +17,7 @@ jobs:
   release:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45   # the suite takes about a quarter of an hour
+    timeout-minutes: 45   # the whole suite, slow tests too, takes about a quarter of an hour
     permissions:
       contents: write
     steps:
@@ -42,7 +43,7 @@ jobs:
         if: steps.version.outputs.new == 'yes'
         with:
           python-version: "3.13"
-      - name: Test
+      - name: Test (fast and slow)
         if: steps.version.outputs.new == 'yes'
         run: python3 -m unittest discover -s tests
       - name: Docker image

@@ -14,12 +14,14 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_core import free_port  # noqa: E402
+from speed import slow  # noqa: E402
 
 PNDIAL = os.path.join(ROOT, "tools", "pndial")
 
 
 @unittest.skipUnless(os.name == "posix" and hasattr(os, "forkpty") and shutil.which("nc")
                      and os.path.exists("/bin/sh"), "needs a pty, /bin/sh and nc")
+@slow
 class Pndial(unittest.TestCase):
     def setUp(self):
         self.port, closed = free_port(), free_port()

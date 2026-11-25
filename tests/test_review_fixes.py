@@ -26,6 +26,7 @@ from adapters.common import CoreClient, CoreError  # noqa: E402
 from parlord import auth, core as pcore, frontends  # noqa: E402
 from parlord.accounts import source_key  # noqa: E402
 from parlord.core import Limits, Server, Session  # noqa: E402
+from speed import slow  # noqa: E402
 
 SID = r"^OK [A-Za-z0-9_-]{22}$"
 SECRET = "Correct horse 1"          # the password of the players made below (a test value, never printed)
@@ -204,6 +205,7 @@ class F01CoreShares(unittest.IsolatedAsyncioTestCase):
                 p.stop()
 
 
+@slow
 class F01Adapters(unittest.TestCase):
     """The review's reproduction: 410 idle connects to IOS and FIBS, then the
     web and telnet still work; and connections that do send a login line are

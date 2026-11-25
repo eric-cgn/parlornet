@@ -24,6 +24,7 @@ from adapters import outland as O  # noqa: E402
 from adapters.common import describe_invite_event, parse_players, uninvite_of  # noqa: E402
 from adapters import botflag  # noqa: E402
 from parlord.core import Limits, Server, Session  # noqa: E402
+from speed import slow  # noqa: E402
 
 
 class FakeWriter:
@@ -175,6 +176,7 @@ class Presence(CoreBase):
             SETTINGS["presence.idle"]("10")
 
 
+@slow
 class Stack(WebPlayers, unittest.TestCase):
     """A core (sign-in none), the web, telnet, IOS, FIBS and Outland adapters, and the bot."""
 
@@ -434,6 +436,7 @@ class Stack(WebPlayers, unittest.TestCase):
         c.until("You withdrew wyn's invitation.")
 
 
+@slow
 class Idle(WebPlayers, unittest.TestCase):
     """The idle cutoff through the frontends, with presence.idle at 4 seconds (the settings file) and the
     adapters reporting typing at once: an idle player leaves the who lists with each protocol's own

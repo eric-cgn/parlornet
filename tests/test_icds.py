@@ -23,6 +23,7 @@ sys.path.insert(0, ROOT)
 from adapters import icds as A  # noqa: E402
 
 import importlib.util  # noqa: E402
+from speed import slow  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("checkers_plugin_for_icds", ROOT + "/plugins/checkers/plugin.py")
 P = importlib.util.module_from_spec(_spec)
@@ -293,6 +294,7 @@ class Unit(unittest.TestCase):
         self.assertEqual(asyncio.run(s.resolve(tr, "2-18", v)), ("2x9x18", None))
 
 
+@slow
 class Stack(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

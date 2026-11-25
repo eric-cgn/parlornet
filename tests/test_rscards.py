@@ -15,6 +15,7 @@ sys.path.insert(0, ROOT)
 from adapters import rscards as A  # noqa: E402
 from adapters import rscwire as R  # noqa: E402
 from adapters import rscgames as G  # noqa: E402
+from speed import slow  # noqa: E402
 
 WAIT = 25
 LOG = []
@@ -178,6 +179,7 @@ class Stack(unittest.TestCase):
         return f
 
 
+@slow
 class Service(Stack):
     def test_sign_in(self):
         pw = self.signup("ann")

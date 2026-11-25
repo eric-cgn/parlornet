@@ -20,26 +20,11 @@ The same board, tiles, scoring and word list as `english`, with the ending used 
 
 ## Open racks (`racks=open`)
 
-For period programs whose link sends both racks and the whole bag to each player's machine; a server extension for such a program makes its tables `classic racks=open`. Such a program shows only its own player's rack. A running table's racks may also be opened later, with every player's consent (`OPR`, docs/protocol.md): the bag and the racks stay as they are, and from then on the table is as one made with `racks=open`. At a table with open racks:
+For period programs whose link sends both racks and the whole bag to each player's machine. Such a program shows only its own player's rack. A running table's racks may also be opened later, with every player's consent (`OPR`, docs/protocol.md): the bag and the racks stay as they are, and from then on the table is as one made with `racks=open`. At a table with open racks every seated player's view also has `RK seat letters` for every seat (`RK seat -` for an empty rack) and the bag in draw order, the next tile first, in `BO letters` lines of up to 60 letters (`BO -` for an empty bag). Watchers do not get them. The core marks such a table `integrity=false` (docs/protocol.md, Tables marked integrity=false). Everything else is as at any other table: every move is checked as usual.
 
-- Every seated player's view also has `RK seat letters` for every seat (`RK seat -` for an empty rack) and the bag in draw order, the next tile first, in `BO letters` lines of up to 60 letters (`BO -` for an empty bag). Watchers do not get them.
-- At a table with open racks, a play may end with the word `OWN`: `PLAY x y H|V letters OWN`. It means the mover's own program has checked the words against its own list and cannot take the play back. Words missing from the server's list are then accepted, and named in an `UNLISTED` event after the play's `X` event. Everything else about the play is checked as usual. `OWN` anywhere else is refused (`ERR ILLEGAL OWN is for tables with open racks`).
+## A table marked integrity=false
 
-- At such a table, a move may also end with the word `OVER`: the mover's own program has ended the game after this turn by its own rules and takes nothing more. The turn is played, then the game ends as after a run of scoreless turns, with an `OVER seat` event before the `ADJ` events. `OVER` anywhere else is refused.
-
-Everything else is as at any other table.
-
-## Tables that keep no integrity (`INT`)
-
-For a peer program that runs the game itself, such as Networdz 2.0, whose hosting copy shuffles the bag and checks the words with its own dictionary (the Networdz extension, docs/protocols.md, makes its tables `classic racks=open` and marks them; docs/protocol.md, Tables that keep no integrity). The core tells the plugin at the start, with the authority: the seat of the table's creator, whose program runs the game. At such a table the table follows that program:
-
-- The authority moves first, and after every move, anyone's, the turn goes back to the authority. It gives the turn on with `TURN seat` (a `TURN` event only; such a move is not recorded as a turn).
-- `RACK letters` (`_` for a blank, `-` for none) says what the mover's own rack now holds, drawn by its own program: the old rack goes back to the bag and those tiles come out of it, so they must be in the two together. Any seat may say it about its own rack, at any time. It makes no event: the racks are open.
-- `VOID [word]`, from the authority, takes back the play another seat has just made, which the authority's program refused: the table is as before the play, and a `VOID seat word` event and `TURN seat` follow, so that player moves again. Only the last move can be taken back, and only before anything else is played. With a word (the one the program refused), a play that makes that word is refused at the table from then on (`ERR ILLEGAL the host's program does not take WORD`), so a player or the bot looks for another; the table remembers the last 200.
-- `OVER`, from the authority, alone or after a move of its own, ends the game when its program does, with the usual rack penalties; a seat that has played its last tile with the bag empty gets the others' racks.
-- A play may carry `OWN`, as at a table with open racks. An exchange needs only as many tiles in the bag as it puts back. Passes and exchanges never end the game by themselves. The authority going out ends it at once; another seat going out waits for the authority's `OVER`, since its program may still refuse that last play, and then gets the others' racks as usual.
-
-`VOID`, `TURN` and `OVER` from any other seat are refused. Everything else is as at a table with open racks.
+A server extension whose program receives every rack and the bag, as the Networdz extension's does (docs/protocols.md, Networdz), marks the table `integrity=false` and reads them with `VUE table O`: a seated player's view then has the same `RK` and `BO` lines as with open racks, for that extension only. The game is played exactly as at any other table: the table deals, checks every word against its list and ends the game, and the other players' views are as usual.
 
 ## The word list
 
@@ -95,9 +80,6 @@ Letters, the verb and the direction are case-insensitive.
 | `DRAW seat n` | The player drew n tiles; which ones only that player sees, in the next `VUE`. |
 | `EXCH seat n` | The player exchanged n tiles. |
 | `PASS seat` | The player passed. |
-| `OVER seat` | That seat's own program ended the game after its turn (Open racks); `ADJ` and `END` follow. |
-| `UNLISTED seat word ...` | An `OWN` play made these words, which are not in the server's list (Open racks). |
-| `VOID seat word` | The authority's program refused that seat's play just made, which is taken back (Tables that keep no integrity). |
 | `TURN seat` | Whose turn it is now. |
 | `ADJ seat ±n letters` | At the end: the change to each seat's score and the tiles left on its rack (`-` for none: the player who went out, who gains the others' total). |
 | `END win seat s0/s1/...` or `END draw s0/s1/...` | The final scores, after the `ADJ` changes. |

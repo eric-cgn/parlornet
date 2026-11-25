@@ -1,20 +1,17 @@
-"""The Networdz extension (adapters/networdz.py): Grid Words for Networdz 2.0 on Windows.
+"""The Networdz extension (adapters/networdz.py): the parlor as the Networdz host, for Networdz 2.0 guests.
 
-NwHost below plays the part of Networdz 2.0 as the host ("Local / Dial mode"), as games captured between copies
-of the program show it: it connects once for each Remote player and sends X;
-the answer is D with a name, which a later D changes. New Game sends E, F and A, then G to each seat in turn for
-the tile that decides who starts (H answers), A again, R with the order of play, and P to each seat in that
-order, which draws (Q). Then I gives each turn. The host plays its own player's turns (J, M, P, Q), checks every
-remote play against its own dictionary (M: 0 taken, 7 refused, and then I to the same seat again), and asks for
-discards after a pass (N) while the bag has tiles. It sends every message to every remote copy, so the parlor's
-seats see each other's. It ends the game (S) when a player goes out with the bag empty or every player passes in
-a row with the bag empty. It reads the stream message by message, so a message of the wrong length fails a test.
+NwGuest below plays the part of a stock Networdz 2.0 copy in Answer mode, as the program was seen to behave
+against a scripted host (docs/clients/networdz.md): it answers X with D and its name, takes E, F, A and R, and
+when P names its seat it draws a tile for each empty slot at random among the places the last A holds, and
+answers Q. It keeps every rack from the other seats' Q, J and O, and the board from J and its own plays. Its
+player plays J, passes with K and discards with O after N; M is the host's verdict on its play, and a refused
+play whose M lacks the bytes a stock host ends it with stops it, as it stops the program ("Internal Error A3").
+It connects to the extension's port itself, as a copy with the dial-out patch will.
 
-The core runs with the small word list of the gridwords tests; the host's dictionary is that list without the
-words in REFUSED, so the bot's plays of them are refused by the host and taken back at the parlor."""
+The fast tests are the wire's builders and parsers, the tile bookkeeping and the start of a game. The slow ones
+play whole games through the core, the extension and the bot."""
 import os
 import random
-import re
 import select
 import socket
 import sys
@@ -24,170 +21,233 @@ import unittest
 
 from test_adapters import spawn
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
-from test_gridwords import P, WORDS, write_words
+from test_gridwords import P, WORDS, best_play, write_words
 
 sys.path.insert(0, ROOT)
 from adapters import networdz as A  # noqa: E402
 from adapters.games import gridwords as G  # noqa: E402
+from speed import slow  # noqa: E402
 
 WAIT = 30
 LOG = []                    # the extension's log, for a failing test's message
-CORE_WORDS = set(WORDS.upper().split())
-REFUSED = {"TEA", "EAT", "ATE", "TAN", "ANT"}      # in the parlor's list, not in the host's dictionary
+CORE_WORDS = {w.upper() for w in WORDS.split()}
 
-# Messages captured from Networdz 2.0 (three players: Hank hosting, Annie and Bert answering), zeros cut off.
+# Messages captured from Networdz 2.0 (Hank hosting; Annie and Bert answering), zeros cut off.
 CAPTURED = {
     "X": "58014301",
     "D": "4401416e6e6965",
     "E": "45040100000000000000000000000200",
-    "F": "46040200640048616e6b00000000000000000000000000000000000000000000000000000000000000000000000000000000"
-         "00000000000000000000000000000000000000000000000000000000000000000000000003006400416e6e69650000000000"
-         "00000000000000000000003137322e32312e302e330000000000000000000000000000000000000000000000000000000000"
-         "0000000000000000000001000100000000000000030064004265727400000000000000000000000000000000003137322e32"
-         "312e302e36000000000000000000000000000000000000000000000000000000000000000000000000000000010002000000"
-         "00000000000064",
     "A": "41042d45515c5e554e0d1e262a1115120010594b62250b4901174a02395643462458483c1850534c05091b130f4f0a04381c"
          "0622471a3523075d3a343f3b273d411f19545b44162952614d3e0c2f322e3103570e630830405a2b1d21603714202c422833"
          "5f36",
     "R": "52040000010002",
     "Q": "5100fafafafafafafa0000004f59444061013c",
     "J": "4a00070803001515210007071600151519000706330007054500151527",
-    "M": "4d0000000141004541001690b06e0150e2b0",
     "O": "4f025a483a2f4b1f26000000000001000000000000000000000001",
     "pass": "4f015d6202373c634f",
     "B": "4202626572742073617973206869",
-    "H": "4802fafafafa08fafa",
+    # the host's verdicts on a remote seat's plays: refused, down and across, and taken
+    "M7down": "4d010701004c4952490000e0156d011916e0",
+    "M7across": "4d010700014a4f4e455300e0156d011916e0",
 }
 
 
 def captured(kind):
     raw = CAPTURED[kind]
     m = bytes.fromhex(raw + ("0" if len(raw) % 2 else ""))
-    t = {"pass": "O"}.get(kind, kind).encode()
+    t = {"pass": "O", "M7down": "M", "M7across": "M"}.get(kind, kind).encode()
     return m.ljust(A.SIZES[t], b"\0")
 
 
 class Wire(unittest.TestCase):
     def test_reader_and_captured_messages(self):
         r = A.Reader()
-        stream = b"".join(captured(k) for k in ("X", "E", "F", "A", "H", "R", "Q", "J", "M", "O", "B"))
+        stream = b"".join(captured(k) for k in ("X", "D", "A", "R", "Q", "J", "O", "B"))
         got = []
         for i in range(0, len(stream), 37):         # in pieces, as TCP brings them
             got += r.feed(stream[i:i + 37])
-        self.assertEqual([k for k, _ in got], list("XEFAHRQJMOB"))
+        self.assertEqual([k for k, _ in got], list("XDARQJOB"))
         self.assertEqual(r.buf, b"")
         self.assertEqual(r.feed(b"Wjunk"), [("junk", b"Wjunk")])
-        self.assertEqual(A.parse_rules(captured("E")), {"racks": 1, "hints": 0, "tournament": 0, "four": 0,
-                                                        "trade": 0, "timed": 0, "minutes": 2})
-        players = A.parse_players(captured("F"))
-        self.assertEqual([(p[0], p[1]) for p in players], [(2, "Hank"), (3, "Annie"), (3, "Bert"), (0, "")])
-        self.assertEqual(players[1][2], "172.21.0.3")
         self.assertEqual(A.u16s(captured("R")[2:], 4), [0, 1, 2, 0])
-
-    def test_tiles_and_the_bag(self):
-        """The ParlorNet configuration's tile set: blanks first, then each letter; the host's first draw."""
-        self.assertEqual(A.TILESET[:3] + A.TILESET[-3:], "__AYYZ")
-        self.assertEqual(len(A.TILESET), 100)
-        bag = list(captured("A")[2:2 + A.BAG])
-        self.assertTrue(A.bag_ok(bag))
-        self.assertFalse(A.bag_ok(bag[:99] + [120] + bag[100:]))
-        q = captured("Q")
-        draws = list(q[12:12 + A.RACK])
-        self.assertEqual("".join(A.letter(bag[p]) for p in draws), "AGEELPI")
-        self.assertEqual(A.letters_of([3, A.EMPTY, 0]), "A_")
+        self.assertEqual(A.parse_discards(captured("O")), [0, 6])
+        self.assertEqual(A.parse_discards(captured("pass")), [])
+        before, draws = A.parse_draw(captured("Q"))
+        self.assertEqual((before, draws), ([A.EMPTY] * 7, [0x4f, 0x59, 0x44, 0x40, 0x61, 0x01, 0x3c]))
 
     def test_builders_match_the_program(self):
-        self.assertEqual(A.msg_d(1, "Annie"), captured("D"))
+        self.assertEqual(A.msg_x(1), captured("X"))
         self.assertEqual(A.msg_b(2, "bert says hi"), captured("B"))
-        self.assertEqual(A.msg_h(2, 4, 8), captured("H"))
-        o = captured("O")
-        self.assertEqual(A.msg_o(2, list(o[2:9]), [0, 6]), o)
-        p = captured("pass")
-        self.assertEqual(A.msg_o(1, list(p[2:9]), []), p)
-        rack = [A.EMPTY] * 7
-        draws = [0x4f, 0x59, 0x44, 0x40, 0x61, 0x01, 0x3c]
-        q = A.msg_q(0, rack, draws)
-        self.assertEqual(q, captured("Q"))
+        self.assertEqual(A.msg_r([0, 1, 2]), captured("R"))
+        self.assertEqual(A.msg_q(0, [A.EMPTY] * 7, [0x4f, 0x59, 0x44, 0x40, 0x61, 0x01, 0x3c]), captured("Q"))
         j = captured("J")
         self.assertEqual(A.msg_j(0, A.parse_play(j)[:7]), j)
+        o = captured("O")
+        self.assertEqual(A.msg_o(2, list(o[2:9]), [0, 6]), o)
+        self.assertEqual(A.msg_a(list(captured("A")[2:])), captured("A"))
         self.assertEqual(A.msg_k(3), b"K\x03")
+        self.assertEqual(A.msg_end("S"), b"S\x04")
+        # the verdicts a stock host sends, and the seven bytes they end with
+        self.assertEqual(A.msg_m(1, A.NOT_LISTED, False, "LIRI"), captured("M7down"))
+        self.assertEqual(A.msg_m(1, A.NOT_LISTED, True, "JONES"), captured("M7across"))
+        long = A.msg_m(1, A.NOT_LISTED, True, "VIRION")
+        self.assertEqual((long[5:11], long[-7:]), (b"VIRIO\0", A.TAIL))
+        self.assertEqual(len(long), A.SIZES[b"M"])
+        # the rules, every one off, and the players
+        e = A.msg_e()
+        self.assertEqual((len(e), A.u16s(e[2:], 7)), (16, [0, 0, 0, 0, 0, 0, 2]))
+        f = A.msg_f([(A.PERSON, "ann", 0), (A.REMOTE, "bert", 1), (A.COMPUTER, "bot", 2), (A.NONE, "ParlorNet", 3)])
+        self.assertEqual(len(f), A.SIZES[b"F"])
+        recs = [f[2 + 84 * i:86 + 84 * i] for i in range(4)]
+        self.assertEqual([A.u16s(r, 2) for r in recs], [[2, 100], [3, 100], [1, 100], [0, 100]])
+        self.assertEqual([A.cstr(r[4:25]) for r in recs], ["ann", "bert", "bot", "ParlorNet"])
+        self.assertEqual(A.u16s(recs[1][74:], 2), [1, 1])         # connected, its seat
+        self.assertEqual(A.u16s(recs[0][74:], 2), [0, 0])
 
-    def test_the_hosts_play_as_a_move(self):
-        """The captured J: PLEA across the center, from h8's left (the board is empty)."""
-        play = A.parse_play(captured("J"))
-        bag = []
-        for p in play[:7]:
-            if p[0] != A.OFF:
-                bag.append((p[1] + 1, p[0] + 1, A.letter(p[2]), False))
-        self.assertEqual(A.play_move(bag, {}), ["PLAY", "6", "8", "H", "PLEA"])
-        # a tile at the end of a word on the board, and a blank
+    def test_tiles_and_words(self):
+        """The ParlorNet configuration's tile set; a play as PLAY tokens; the core's refusals as M's code."""
+        self.assertEqual(A.TILESET[:3] + A.TILESET[-3:], "__AYYZ")
+        self.assertEqual(len(A.TILESET), 100)
+        self.assertEqual(A.letter(A.EMPTY), "")
+        self.assertEqual(A.play_move([(6, 8, "P", False), (7, 8, "L", False), (8, 8, "E", False),
+                                      (9, 8, "A", False)], {}), ["PLAY", "6", "8", "H", "PLEA"])
         tiles = {(8, 8): "C", (9, 8): "A"}
         self.assertEqual(A.play_move([(10, 8, "T", True)], tiles), ["PLAY", "8", "8", "H", "CA_T"])
         self.assertEqual(A.play_move([(8, 9, "A", False), (8, 10, "T", False)], tiles),
                          ["PLAY", "8", "8", "V", "CAT"])
         self.assertIsNone(A.play_move([(1, 1, "A", False), (2, 2, "B", False)], tiles))
-        self.assertEqual(A.parse_racks(["RK 0 AB_", "RK 1 -", "R x"]), {0: "AB_", 1: ""})
-        self.assertEqual(A.minus("AABC", "AC"), "AB")
+        self.assertIsNone(A.play_move([(1, 1, "A", False), (3, 1, "B", False)], tiles))     # a gap
+        self.assertEqual(A.refusal("not in the word list: QXZ ZZ"), (A.NOT_LISTED, "QXZ"))
+        # the program's own messages for the other reasons (each seen in the stock program), 7 for the rest
+        self.assertEqual(A.refusal("the word must join the words already on the board"), (A.NOT_CONNECTED, ""))
+        self.assertEqual(A.refusal("the first word must cover the center square h8"), (A.NOT_CENTER, ""))
+        self.assertEqual(A.refusal("a play needs at least one tile from your rack"), (A.NO_TILES, ""))
+        self.assertEqual(A.refusal("the first word needs two letters or more", "A"), (A.TOO_SHORT, "A"))
+        self.assertEqual(A.refusal("your rack has no Q", "QI"), (A.NOT_LISTED, ""))
+        self.assertEqual((A.minus("AABC", "AC"), A.common("AABC", "CAX")), ("AB", "AC"))
+        v = A.parse_open_view(["X 8 8 C", "R AB", "RK 0 AB", "RK 1 -", "BO QZ", "BO E", "W 1"])
+        self.assertEqual((v["racks"], v["bagtiles"], v["turn"]), ({0: "AB", 1: ""}, "QZE", 1))
 
 
-# ---- Networdz as the host ----------------------------------------------------------------------------------
+class Tiles(unittest.TestCase):
+    def game(self, seed=1):
+        st = P.op_new({"players": 3, "options": {}, "seed": seed, "rules": "classic"})["state"]
+        racks = {s: r for s, r in enumerate(st["racks"])}
+        return st, A.Tiles(racks, st["bag"], random.Random(seed))
 
-class NwHost:
-    """Networdz 2.0 hosting a game with one Person (seat 0) and remote players at the parlor (seats 1 to n)."""
+    def test_every_tile_starts_in_the_bag_and_the_deal_is_the_tables(self):
+        st, t = self.game()
+        self.assertEqual(sorted(t.bag_letters()), sorted(A.TILESET))
+        self.assertEqual(sorted(n for n in t.full_bag()), list(range(100)))
+        # another seat's draw: Q with the places of the tiles the table dealt it
+        places = t.places_for(st["racks"][1])
+        before, draws = t.draw(1, places)
+        self.assertEqual((before, sorted(draws)), ([A.EMPTY] * 7, sorted(places)))
+        self.assertEqual(sorted(t.rack_letters(1)), sorted(st["racks"][1]))
+        # the guest's draw: A holds only its tiles, so its random pick takes them all
+        places = t.places_for(st["racks"][0])
+        short = t.short_bag(places)
+        self.assertEqual(sorted(A.letter(n) for n in short if n != A.EMPTY), sorted(st["racks"][0]))
+        draws = [A.EMPTY] * 7
+        for slot, p in zip(random.Random(2).sample(range(7), 7), places):
+            draws[slot] = p
+        self.assertEqual(sorted(t.took(0, [A.EMPTY] * 7, draws)), sorted(places))
+        self.assertEqual(sorted(t.rack_letters(0)), sorted(st["racks"][0]))
+        self.assertEqual(len(t.bag_letters()), 86)
+        # a draw from a place that is empty, or a rack that is not Networdz's, is out of step
+        with self.assertRaises(A.Desync):
+            t.took(2, [A.EMPTY] * 7, [places[0]] + [A.EMPTY] * 6)
+        with self.assertRaises(A.Desync):
+            t.took(0, [A.EMPTY] * 7, [A.EMPTY] * 7)
+        with self.assertRaises(A.Desync):
+            A.Tiles({0: "QQ"}, "")
 
-    def __init__(self, port, name, remotes=1, words=None):
-        self.name, self.port = name, port
-        self.in_game = False
-        self.words = words or (CORE_WORDS - REFUSED)
-        self.socks, self.readers = {}, {}
-        self.names = {0: name}
-        self.chats = []             # (seat, text), as Networdz's chat window shows them
-        self.got = []               # every message from the parlor, in order: (seat of the link, kind, bytes)
-        self.inbox = []
-        self.closed = set()
-        for s in range(1, remotes + 1):
-            k = socket.create_connection(("127.0.0.1", port), timeout=WAIT)
-            self.socks[s], self.readers[s] = k, A.Reader()
-            k.sendall(b"X" + bytes([s]) + b"C" + bytes([s]))
-            self.wait(lambda s=s: s in self.names, "D for seat %d" % s)
-        self.over = False
+    def test_plays_and_exchanges(self):
+        st, t = self.game()
+        rack = "CATSXYZ"
+        t = A.Tiles({0: rack, 1: st["racks"][1], 2: st["racks"][2]},
+                    A.minus(A.TILESET, rack + st["racks"][1] + st["racks"][2]), random.Random(3))
+        for s, r in ((0, rack), (1, st["racks"][1]), (2, st["racks"][2])):
+            t.draw(s, t.places_for(r))
+        recs = t.play(0, [(8, 8, "C"), (9, 8, "A"), (10, 8, "T")])
+        self.assertEqual(sorted((r[0], r[1]) for r in recs if r[0] != A.OFF), [(7, 7), (7, 8), (7, 9)])
+        self.assertEqual(len(recs), 7)
+        self.assertEqual(t.tiles(), {(8, 8): "C", (9, 8): "A", (10, 8): "T"})
+        self.assertEqual(sorted(t.rack_letters(0)), sorted("SXYZ"))
+        with self.assertRaises(A.Desync):
+            t.play(0, [(1, 1, "Q")])
+        # an exchange: the tiles put back are out until the draw is over, then in the bag again
+        left = len(t.bag_letters())
+        slots = t.put_back(0, "XZ")
+        self.assertEqual(len(slots), 2)
+        self.assertEqual((t.rack_letters(0).count("X"), len(t.bag_letters())), (0, left))
+        t.back_in_bag()
+        self.assertEqual(len(t.bag_letters()), left + 2)
+        # the guest's own play is checked against its rack
+        n = t.racks[1][0]
+        placed = t.guest_play(1, [(7, 10, n, "")] + [(A.OFF, A.OFF, t.racks[1][i], "") for i in range(1, 7)])
+        self.assertEqual(placed, [(11, 8, A.letter(n), False, 0)])
+        with self.assertRaises(A.Desync):
+            t.guest_play(1, [(7, 10, n + 1 if n + 1 != t.racks[1][0] else n + 2, "")])
+
+    def test_the_racks_at_the_start(self):
+        """A seat that played before Networdz heard of the start: its first rack held what it placed."""
+        now = {0: "ABCDEFG", 1: "HIJKLMN"}
+        backlog = [("TURN", ["0"], None, {}),
+                   ("PLAY", ["0", "8", "8", "H", "QI", "22"], ["8", "8", "Q", "9", "8", "i"], {}),
+                   ("X", ["8", "8", "Q", "9", "8", "i"], None, {}), ("DRAW", ["0", "2"], None, {}),
+                   ("TURN", ["1"], None, {})]
+        self.assertEqual(A.start_racks(now, backlog, 1), {0: "ABCDEQ_", 1: "HIJKLMN"})
+        self.assertEqual(A.start_racks(now, [], 1), now)
+
+
+# ---- a stock Networdz copy answering, connected to the parlor ----------------------------------------------
+
+class NwGuest:
+    """Networdz 2.0 in Answer mode (the module's docstring), connected to the extension."""
+
+    def __init__(self, port, name):
+        self.name = name
+        self.sock = socket.create_connection(("127.0.0.1", port), timeout=WAIT)
+        self.reader = A.Reader()
+        self.seat = None
+        self.players = []
+        self.chats = []             # (seat, text), as the chat window shows them
+        self.got = []               # every message, in order: (kind, bytes)
+        self.bag = []
+        self.racks = {}
+        self.board = {}             # (x, y) -> letter (lower case: a blank)
+        self.turn = None
+        self.new_turn = None
+        self.over = None            # "S", "Y" or "Z" once the game is over
+        self.verdicts = []          # (code, word) on my plays
+        self.pending = None         # my play, until its verdict
+        self.rules = None
+        self.order = []
+        self.crashed = None
+        self.asked_discards = False
+        self.draws = 0
+        self.wait(lambda: self.seat is not None, "X")
 
     def close(self):
-        for k in self.socks.values():
-            k.close()
+        self.sock.close()
 
     # ---- the wire
-    def send(self, msg, to=None, but=None):
-        for s, k in self.socks.items():
-            if (to is None or s == to) and s != but and s not in self.closed:
-                k.sendall(msg)
+    def send(self, msg):
+        self.sock.sendall(msg)
 
-    def pump(self, timeout=0.5):
-        live = [k for s, k in self.socks.items() if s not in self.closed]
-        if not live:
-            raise AssertionError("every connection closed; log %r" % LOG[-15:])
-        ready, _, _ = select.select(live, [], [], timeout)
-        for k in ready:
-            s = next(x for x, y in self.socks.items() if y is k)
-            data = k.recv(65536)
-            if not data:
-                self.closed.add(s)
-                continue
-            for kind, m in self.readers[s].feed(data):
-                assert kind != "junk", "Networdz cannot read %r" % m[:16]
-                # a seat speaks for itself; the parlor's own lines may also come from a seat nobody has
-                # (Networdz shows ": text")
-                assert m[1] == s or (kind == "B" and m[1] not in self.socks and m[1] != 0), \
-                    "seat %d's connection sent a message for seat %d: %r" % (s, m[1], m)
-                self.got.append((s, kind, m))
-                if kind == "D":
-                    # during a game Networdz takes a D for a move out of turn
-                    assert not self.in_game, "D during a game: %r" % m
-                    self.names[s] = A.cstr(m[2:])
-                elif kind == "B":
-                    self.chats.append((s, A.cstr(m[2:])))
-                else:
-                    self.inbox.append((s, kind, m))
+    def pump(self, timeout=0.3):
+        ready, _, _ = select.select([self.sock], [], [], timeout)
+        if not ready:
+            return
+        data = self.sock.recv(65536)
+        if not data:
+            raise AssertionError("the parlor closed the connection; log %r" % LOG[-15:])
+        for kind, m in self.reader.feed(data):
+            assert kind != "junk", "Networdz cannot read %r" % m[:16]
+            assert not self.crashed, "a message after Networdz stopped: %r" % m
+            self.got.append((kind, m))
+            getattr(self, "on_" + kind, lambda m: None)(m)
 
     def wait(self, until, what, timeout=WAIT):
         end = time.time() + timeout
@@ -196,24 +256,15 @@ class NwHost:
             if got:
                 return got
             if time.time() > end:
-                raise AssertionError("waited for %s; %r; chats %r; log %r" % (what, getattr(self, "differs", ""), self.chats[-8:], LOG[-20:]))
+                if os.environ.get("NETWORDZ_TRACE"):
+                    with open(os.environ["NETWORDZ_TRACE"], "w") as f:
+                        f.write("\n".join(LOG))
+                raise AssertionError("waited for %s; chats %r; log %r" % (what, self.chats[-6:], LOG[-20:]))
             self.pump()
-
-    def expect(self, seat, kinds):
-        """The next message from a seat, of one of the kinds; anything else fails."""
-        def first():
-            for i, (s, k, m) in enumerate(self.inbox):
-                if s == seat:
-                    return self.inbox.pop(i)
-            return None
-        s, k, m = self.wait(first, "%s from seat %d" % (kinds, seat))
-        assert k in kinds, "seat %d sent %s, Networdz waits for %s: %r" % (seat, k, kinds, m)
-        self.send(m, but=seat)          # the host passes every remote message on to the other remotes
-        return k, m
 
     def say(self, text):
         n = len(self.chats)
-        self.send(A.msg_b(0, text))
+        self.send(A.msg_b(self.seat, text))
         return n
 
     def said(self, text, since=0):
@@ -222,241 +273,145 @@ class NwHost:
     def wait_chat(self, text, since=0):
         return self.wait(lambda: self.said(text, since), repr(text))
 
-    # ---- the game
-    @property
-    def seats(self):
-        return [0] + sorted(self.socks)
+    # ---- what the host sends
+    def on_X(self, m):
+        assert m[2] == ord("C") and m[1] == m[3]
+        assert m[1] != self.seat, "X for the seat Networdz has: it drops what comes with it"
+        self.seat = m[1]
+        self.send(b"D" + bytes([self.seat]) + A.text_field(self.name, 21))
 
-    def new_game(self, rules=None, tiles=None):
-        r = {"hints": 0, "racks": 1, "tournament": 0, "four": 0, "trade": 0, "timed": 0, "minutes": 2}
-        r.update(rules or {})
-        self.in_game = True
-        self.send(b"E\x04" + b"".join(bytes([r[k], 0]) for k in
-                                      ("racks", "hints", "tournament", "four", "trade", "timed", "minutes")))
-        f = b"F\x04"
-        for i in range(4):
-            if i in self.seats:
-                kind, name, addr = (A.PERSON, self.name, "") if i == 0 else (A.REMOTE, self.names[i], "127.0.0.1")
-                e = bytes([kind, 0, 100, 0]) + A.text_field(name, 21) + A.text_field(addr, 49) \
-                    + (bytes([1, 0, i, 0]) if i else b"\0" * 4)
-            else:
-                e = bytes([0, 0, 100, 0])
-            f += e.ljust(84, b"\0")
-        self.send(f)
-        n = tiles or len(A.TILESET)
-        self.bag = list(range(n))
-        random.shuffle(self.bag)
-        self.send_bag()
-        self.racks = {s: [A.EMPTY] * A.RACK for s in self.seats}
-        self.cells = "." * 225
-        self.passes = 0
+    def on_E(self, m):
+        self.rules = A.u16s(m[2:], 7)
+        self.board, self.racks, self.over, self.turn = {}, {}, None, None
 
-    def send_bag(self):
-        self.send(b"A\x04" + bytes(self.bag + [0] * (A.BAG - len(self.bag))))
+    def on_F(self, m):
+        self.players = [(A.u16s(m[2 + 84 * i:], 1)[0], A.cstr(m[6 + 84 * i:27 + 84 * i])) for i in range(4)]
 
-    def pick_start(self):
-        """G to each seat; the lowest tile starts (blanks lowest), the first such seat on a tie. Then the bag again,
-        R and every seat's draw, and I."""
-        picks = {}
-        for s in self.seats:
-            self.send(b"G" + bytes([s]))
-            if s == 0:
-                place = random.choice([i for i, t in enumerate(self.bag) if t != A.EMPTY])
-                self.send(A.msg_h(0, 0, place))
-            else:
-                _, m = self.expect(s, "H")
-                slots = list(m[2:2 + A.RACK])
-                place = slots[2 * s]            # Networdz reads seat n's pick in slot 2n
-                assert place != A.EMPTY and slots.count(A.EMPTY) == A.RACK - 1, "a pick in the wrong slot: %r" % m
-            picks[s] = A.TILESET[self.bag[place]]
-        first = min(self.seats, key=lambda s: (A.TILESET.index(picks[s]), s))
-        i = self.seats.index(first)
-        self.order = self.seats[i:] + self.seats[:i]
-        random.shuffle(self.bag)
-        self.send_bag()
-        self.send(b"R\x04" + b"".join(bytes([s, 0]) for s in (self.order + [0] * 4)[:4]))
-        for s in self.order:
-            self.draw(s)
-        self.turn = first
-        self.send(b"I" + bytes([first, 1, 0]))
-        return first
+    def on_B(self, m):
+        seat = m[1]
+        name = self.players[seat][1] if seat < len(self.players) else ""
+        self.chats.append((seat, "%s: %s" % (name, A.cstr(m[2:]))))
 
-    def letters(self, s):
-        return A.letters_of(self.racks[s])
+    def on_A(self, m):
+        self.bag = list(m[2:2 + A.BAG])
 
-    def draw(self, s):
-        self.send(b"P" + bytes([s]))
-        if s == 0:
-            rack, draws = self.racks[0], [A.EMPTY] * A.RACK
-            before = list(rack)
-            for i in range(A.RACK):
-                left = [p for p, t in enumerate(self.bag) if t != A.EMPTY]
-                if rack[i] == A.EMPTY and left:
-                    p = random.choice(left)
-                    rack[i], draws[i], self.bag[p] = self.bag[p], p, A.EMPTY
-            self.send(A.msg_q(0, before, draws))
+    def on_R(self, m):
+        self.order = A.u16s(m[2:], 4)
+
+    def on_P(self, m):
+        if m[1] != self.seat:
             return
-        _, m = self.expect(s, "Q")
-        rack, draws = list(m[2:2 + A.RACK]), list(m[12:12 + A.RACK])
-        for i in range(A.RACK):
-            if draws[i] != A.EMPTY:         # Q: the rack before the draw, and the place drawn for each slot
-                assert self.bag[draws[i]] != A.EMPTY, "seat %d drew place %d twice" % (s, draws[i])
-                assert rack[i] == A.EMPTY == self.racks[s][i], "seat %d drew into a full slot %d" % (s, i)
-                rack[i], self.bag[draws[i]] = self.bag[draws[i]], A.EMPTY
-            else:
-                assert rack[i] == self.racks[s][i], "seat %d's rack changed without a draw" % s
-        self.racks[s] = rack
+        rack = self.racks.setdefault(self.seat, [A.EMPTY] * 7)
+        before = list(rack)
+        draws = [A.EMPTY] * 7
+        for slot in range(7):                   # at random among the places the bag holds, as the program does
+            places = [p for p in range(100) if self.bag[p] != A.EMPTY and p not in draws]
+            if rack[slot] == A.EMPTY and places:
+                draws[slot] = random.choice(places)
+        for slot, p in enumerate(draws):
+            if p != A.EMPTY:
+                rack[slot], self.bag[p] = self.bag[p], A.EMPTY
+        self.draws += 1
+        self.send(A.msg_q(self.seat, before, draws))
 
-    def bag_left(self):
-        return sum(1 for t in self.bag if t != A.EMPTY)
+    def on_Q(self, m):
+        rack = self.racks.setdefault(m[1], [A.EMPTY] * 7)
+        before, draws = A.parse_draw(m)
+        assert before == rack, "seat %d's rack before its draw: %r, Networdz has %r" % (m[1], before, rack)
+        for slot, p in enumerate(draws):
+            if p != A.EMPTY:
+                assert rack[slot] == A.EMPTY and self.bag[p] != A.EMPTY, "a draw into a full slot or from no tile"
+                rack[slot], self.bag[p] = self.bag[p], A.EMPTY
 
-    def next_turn(self, same=False):
-        if not same:
-            i = self.order.index(self.turn)
-            self.turn = self.order[(i + 1) % len(self.order)]
-        self.send(b"I" + bytes([self.turn, 0 if same else 1, 0]))
+    def on_I(self, m):
+        self.turn, self.new_turn = m[1], m[2]
 
-    def apply(self, s, placed):
-        """placed: [(x, y, tile, blank's letter)] -> the words it makes, or None when the host refuses them."""
-        letters = "".join((b.lower() if b else A.TILESET[t]) for x, y, t, b in placed)
-        cells = list(self.cells)
-        for x, y, t, b in placed:
-            cells[(y - 1) * 15 + x - 1] = b.lower() if b else A.TILESET[t]
-        st = {"cells": self.cells, "racks": ["".join(("_" if b else A.TILESET[t]) for _, _, t, b in placed)]}
-        tokens = A.play_move([(x, y, (b or A.TILESET[t]), bool(b)) for x, y, t, b in placed],
-                             {(i % 15 + 1, i // 15 + 1): c for i, c in enumerate(self.cells) if c != "."})
-        assert tokens, "not in a line: %r" % letters
-        r = P.evaluate(st, 0, int(tokens[1]), int(tokens[2]), tokens[3], tokens[4], None)
-        if any(w.upper() not in self.words for w in r["words"]):
-            return None, [w.upper() for w in r["words"] if w.upper() not in self.words][0]
-        self.cells = r["cells"]
-        return r["words"], None
+    def on_J(self, m):
+        rack = self.racks[m[1]]
+        for slot, (row, col, tile, bl) in enumerate(A.parse_play(m)[:7]):
+            assert tile == rack[slot] or row == A.OFF, "seat %d played a tile it lacks" % m[1]
+            if row != A.OFF:
+                c = A.letter(tile)
+                self.board[(col + 1, row + 1)] = bl.lower() if c == "_" else c
+                rack[slot] = A.EMPTY
 
-    def remote_turn(self):
-        """A remote seat's turn, as Networdz runs it -> ("play", words) / ("refused", word) / ("pass", put back)."""
-        s = self.turn
-        k, m = self.expect(s, "JK")
-        if k == "J":
-            recs = A.parse_play(m)
-            placed = [(c + 1, r + 1, t, b) for r, c, t, b in recs[:A.RACK] if r != A.OFF]
-            for i, (r, c, t, b) in enumerate(recs[:A.RACK]):
-                assert t == self.racks[s][i], "seat %d's J has another tile in slot %d" % (s, i)
-            words, bad = self.apply(s, placed)
-            if words is None:
-                self.send(b"M" + bytes([s, 7, 1, 0]) + A.text_field(bad, 13))
-                self.next_turn(same=True)
-                return "refused", bad
-            self.send(b"M" + bytes([s, 0, 0, 1]) + b"\0" * 13)
-            self.passes = 0
-            for i, (r, c, t, b) in enumerate(recs[:A.RACK]):
-                if r != A.OFF:
-                    self.racks[s][i] = A.EMPTY
-            if self.bag_left():
-                self.draw(s)
-            if not self.letters(s) and not self.bag_left():
-                self.end()
-                return "play", words
-            self.next_turn()
-            return "play", words
-        if not self.bag_left():
-            self.passes += 1
-            if self.passes >= len(self.seats):
-                self.end()
-                return "pass", []
-            self.next_turn()
-            return "pass", []
-        self.send(b"N" + bytes([s]))
-        _, o = self.expect(s, "O")
-        flags = A.u16s(o[14:], A.RACK)
-        put = [i for i in range(A.RACK) if flags[i]]
-        back = [self.racks[s][i] for i in put]
-        for i in put:
-            self.racks[s][i] = A.EMPTY
-        if put:
-            self.draw(s)
-            spots = [i for i, t in enumerate(self.bag) if t == A.EMPTY]
-            for t in back:
-                self.bag[spots.pop(random.randrange(len(spots)))] = t
-            self.send_bag()
-            self.passes = 0
-        else:
-            self.passes += 1
-        self.next_turn()
-        return "pass", put
+    def on_M(self, m):
+        if m[1] != self.seat:
+            return
+        code, word = m[2], A.cstr(m[5:11])
+        if code != A.TAKEN and m[11:] != A.TAIL:
+            self.crashed = "Internal Error A3"
+            return
+        self.verdicts.append((code, word))
+        if code == A.TAKEN and self.pending:
+            for slot, (x, y, c) in self.pending.items():
+                self.board[(x, y)] = c
+                self.racks[self.seat][slot] = A.EMPTY
+        self.pending = None
 
-    def host_play(self, words):
-        """The host's own turn: its best play from words, or a pass."""
-        best = None
-        rack = self.letters(0)
-        st = {"cells": self.cells, "racks": [rack]}
-        for w in sorted(words):
-            for d in "HV":
-                dx, dy = (1, 0) if d == "H" else (0, 1)
-                for y in range(1, 16 - dy * (len(w) - 1)):
-                    for x in range(1, 16 - dx * (len(w) - 1)):
-                        left, ok, text = list(rack), True, ""
-                        for i, ch in enumerate(w):         # a quick look before the plugin's full check
-                            c = self.cells[(y - 1 + dy * i) * 15 + x - 1 + dx * i]
-                            if c != ".":
-                                ok = ok and c.upper() == ch
-                                text += ch
-                            elif ch in left:
-                                left.remove(ch)
-                                text += ch
-                            elif "_" in left:
-                                left.remove("_")
-                                text += "_" + ch
-                            else:
-                                ok = False
-                            if not ok:
-                                break
-                        if not ok or len(left) == len(rack):
-                            continue
-                        try:
-                            r = P.evaluate(st, 0, x, y, d, text, words)
-                        except P.Illegal:
-                            continue
-                        if best is None or r["score"] > best[0]:
-                            best = (r["score"], r)
-        if best is None:
-            self.send(b"K\x00")
-            if self.bag_left():
-                self.send(b"N\x00")
-                self.send(A.msg_o(0, self.racks[0], []))
-            self.passes += 1
-            if not self.bag_left() and self.passes >= len(self.seats):
-                self.end()
-            else:
-                self.next_turn()
-            return None
-        r = best[1]
-        recs, used = [], set()
-        for px, py, c in r["placed"]:
-            want = "_" if c.islower() else c
-            i = next(i for i, t in enumerate(self.racks[0]) if i not in used and t != A.EMPTY
-                     and A.TILESET[t] == want)
-            used.add(i)
-            recs.append((i, (py - 1, px - 1, self.racks[0][i], c.upper() if c.islower() else "")))
-        slots = dict(recs)
-        j = [slots.get(i, (A.OFF, A.OFF, self.racks[0][i], "")) for i in range(A.RACK)]
-        self.send(A.msg_j(0, j))
-        self.send(b"M\x00\x00\x00\x01" + b"\0" * 13)
-        self.cells = r["cells"]
-        self.passes = 0
-        for i in used:
-            self.racks[0][i] = A.EMPTY
-        if self.bag_left():
-            self.draw(0)
-        if not self.letters(0) and not self.bag_left():
-            self.end()
-        else:
-            self.next_turn()
-        return r["words"]
+    def on_O(self, m):
+        rack = self.racks[m[1]]
+        for slot in A.parse_discards(m):
+            rack[slot] = A.EMPTY
 
-    def end(self):
-        self.send(b"S\x04")
-        self.over = True
-        self.in_game = False
+    def on_N(self, m):
+        if m[1] == self.seat:
+            self.asked_discards = True
+
+    def on_S(self, m):
+        self.over = "S"
+
+    def on_Y(self, m):
+        self.over = "Y"
+
+    def on_Z(self, m):
+        self.over = "Z"
+
+    # ---- my player
+    def letters(self, seat=None):
+        return "".join(A.letter(n) for n in self.racks.get(self.seat if seat is None else seat, []) if n != A.EMPTY)
+
+    def my_turn(self):
+        return self.turn == self.seat and self.over is None
+
+    def play(self, tokens):
+        """PLAY x y d word (the table's form) -> J with the tiles from my rack."""
+        x, y, d, word = int(tokens[1]), int(tokens[2]), tokens[3], tokens[4]
+        dx, dy = (1, 0) if d == "H" else (0, 1)
+        rack = self.racks[self.seat]
+        recs = [(A.OFF, A.OFF, n, "") for n in rack]
+        used, i, blank = {}, 0, False
+        for ch in word:
+            if ch == "_":
+                blank = True
+                continue
+            cx, cy = x + dx * i, y + dy * i
+            i += 1
+            if (cx, cy) in self.board:
+                blank = False
+                continue
+            want = "_" if blank else ch
+            slot = next(s for s in range(7) if s not in used and rack[s] != A.EMPTY and A.letter(rack[s]) == want)
+            used[slot] = (cx, cy, ch.lower() if blank else ch)
+            recs[slot] = (cy - 1, cx - 1, rack[slot], ch if blank else "")
+            blank = False
+        self.pending = used
+        self.turn = None                # until the next I
+        self.send(A.msg_j(self.seat, recs + [(0, 0, 0, "")]))
+
+    def pass_turn(self, put_back=()):
+        """K; then, when the host asks (N), O with these slots put back (none: a pass)."""
+        self.asked_discards = False
+        self.turn = None                # until the next I
+        self.send(A.msg_k(self.seat))
+        end = time.time() + 3
+        while time.time() < end and not self.asked_discards and self.turn is None:
+            self.pump(0.2)
+        if self.asked_discards:
+            self.send(A.msg_o(self.seat, self.racks[self.seat], list(put_back)))
+            for s in put_back:
+                self.racks[self.seat][s] = A.EMPTY
+        return self.asked_discards
 
 
 class Stack(unittest.TestCase):
@@ -468,7 +423,8 @@ class Stack(unittest.TestCase):
         cls.keys = make_keys("networdz", "bot")
         cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password"),
                      spawn(*adapter_args("adapters.networdz", cls.port, cls.fe, cls.keys, "networdz"),
-                           "--poll", "0.2", "--chat-gap", "0", "--keep", "3")]
+                           "--poll", "0.2", "--chat-gap", "0", "--turn", "10m",
+                           *(["--trace"] if os.environ.get("NETWORDZ_TRACE") else []))]
         cls.procs.append(spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", cls.keys + "/bot.key",
                                "--think", "0,0", "--pace", "0", "--poll", "0.3"))
         del LOG[:]
@@ -498,218 +454,207 @@ class Stack(unittest.TestCase):
         self.addCleanup(n.close)
         return n
 
-    @staticmethod
-    def agree(nat, tid, h):
-        """The table's view (a seated player's, with every rack) and the host's game: the same board, racks and
-        turn (the table's seat n is Networdz's seat n here)."""
-        lines = nat.req("VUE %s" % tid)
-        v, racks = G.parse_view(lines), A.parse_racks(lines)
-        board = {(i % 15 + 1, i // 15 + 1): c for i, c in enumerate(h.cells) if c != "."}
-        h.differs = (v["tiles"] == board, {s: (racks.get(s), h.letters(s)) for s in h.seats}, v["turn"], h.turn)
-        return (v["tiles"] == board and all(sorted(racks.get(s, "")) == sorted(h.letters(s)) for s in h.seats)
-                and v["turn"] == h.turn)
+    def guest(self, name):
+        g = NwGuest(self.port, name)
+        self.addCleanup(g.close)
+        return g
 
-    def host(self, name, remotes=1):
-        h = NwHost(self.port, name, remotes)
-        self.addCleanup(h.close)
-        return h
-
-    def signed_in(self, name, remotes=1):
+    def signed_in(self, name):
         pw = self.signup(name)
-        h = self.host(name, remotes)
-        h.wait_chat("To sign in, type /signin NAME PASSWORD")
-        n = h.say("/signin %s %s" % (name, pw))
-        h.wait_chat("Signed in as %s." % name, n)
-        return h, pw
+        g = self.guest(name)
+        g.wait_chat("To sign in, type /signin NAME PASSWORD")
+        n = g.say("/signin %s" % pw)                # the name Networdz sent in D
+        g.wait_chat("Signed in as %s." % name, n)
+        return g, pw
+
+    def agree(self, nat, tid, g):
+        """The table and Networdz: the same board, my rack, the bag's size and whose turn it is."""
+        v = G.parse_view(nat.req("VUE %s" % tid))
+        board = {xy: c for xy, c in g.board.items()}
+        return (v["tiles"] == board and sorted(v["rack"]) == sorted(g.letters())
+                and v["bag"] == sum(1 for n in g.bag[:100] if n != A.EMPTY) and v["turn"] == g.turn)
+
+    def my_move(self, nat, tid, g, words=CORE_WORDS):
+        """My turn: the best play from the test list, or a pass."""
+        g.wait(lambda: self.agree(nat, tid, g), "the table to agree with Networdz")
+        found = best_play(nat.req("VUE %s" % tid), words)
+        if found:
+            g.play(found[1])
+            g.wait(lambda: g.pending is None, "the verdict")
+            return "play"
+        g.pass_turn()
+        return "pass"
+
+    def table_of(self, nat, name):
+        return next(l.split()[1] for l in nat.req("LST") if l.startswith("TAB ") and name in l.split()[6].split(","))
 
 
+@slow
 class Service(Stack):
-    def test_hello_sign_in_and_rules(self):
-        h = self.host("ann")
-        self.assertEqual(h.names[1], "ParlorNet")
-        h.wait_chat("To sign in, type /signin NAME PASSWORD")
-        self.assertTrue(all(s == 1 for s, _ in h.chats))        # the parlor's own seat speaks
-        n = h.say("hello")
-        h.wait_chat("Sign in first", n)
-        n = h.say("/signin ann wrong")
-        h.wait_chat("There is no account ann here", n)
+    def test_hello_sign_in_and_commands(self):
+        g = self.guest("ann")
+        self.assertEqual(g.seat, A.LOBBY_SEAT)
+        g.wait(lambda: g.players[:2] == [(A.PERSON, "ParlorNet"), (A.REMOTE, "ann")], "the players, named")
+        g.wait_chat("To sign in, type /signin NAME PASSWORD")
+        self.assertTrue(all(c[1].startswith("ParlorNet: ") for c in g.chats))       # the parlor's own seat
+        n = g.say("hello")
+        g.wait_chat("Sign in first", n)
+        n = g.say("/signin ann wrong")
+        g.wait_chat("There is no account ann here", n)
         pw = self.signup("ann")
-        n = h.say("/signin ann %s" % pw)
-        h.wait_chat("Signed in as ann.", n)
-        h.wait_chat("1 remote seat here", n)
-        n = h.say("/help")
-        h.wait_chat("/invite NAME", n)
-        # rules the parlor does not play, and another tile set, are refused in the chat
-        n = h.say("/invite bot")
-        h.wait_chat("You invited the bot", n)
-        n = len(h.chats)
-        h.new_game(rules={"trade": 1, "four": 1})
-        h.wait_chat("ParlorNet plays without Trade Blanks or Exchange 4 of a kind", n)
-        n = len(h.chats)
-        h.new_game(tiles=104)
-        h.wait_chat("Load PARLOR.CFG", n)
+        n = g.say("/signin ann %s" % pw)
+        g.wait_chat("Signed in as ann.", n)
+        n = g.say("/top")
+        g.wait_chat("meant for", n)
+        self.assertTrue(all(len(t) <= len("ParlorNet: ") + A.TEXT_LEN - 1 for _, t in g.chats))
+        for cmd, answer in (("/help", "/invite NAME"), ("/time", "Server time"), ("/top", "meant for"),
+                            ("/score", "ann:"), ("/tables ann", "ann sits at no table."), ("/list", "No open tables"),
+                            ("/open 5", "/open 3 or /open 4")):
+            n = g.say(cmd)
+            g.wait_chat(answer, n)
 
-    def test_a_game_with_the_bot(self):
-        """The host's player and the bot: every move both ways, the host's dictionary refusing the bot's words
-        (taken back at the parlor, and a pass after the second refusal), and the end. The table and Networdz
-        must agree at every step."""
-        h, pw = self.signed_in("bea")
-        n = h.say("/invite bot")
-        h.wait_chat("You invited the bot", n)
-        h.wait(lambda: h.names.get(1) == "bot", "the bot's name on seat 1")
+    def test_a_whole_game_with_the_bot(self):
+        """One guest and the bot to the end: Networdz and the table agree at each of the guest's turns, a word
+        the list lacks is refused (M 7 with the word, then the turn again), an exchange and a pass, chat both
+        ways, and at the end the same board and racks on both sides, so the same scores."""
+        g, pw = self.signed_in("bea")
+        n = g.say("/invite bot")
+        g.wait_chat("You invited the bot", n)
         nat = self.native("bea", pw)
-        tid = next(l.split()[1] for l in nat.req("LST") if " bea," in l)
-        lst = nat.req("LST")
-        self.assertTrue(any(l.startswith("TAB %s gridwords/1 classic 2/2 playing bea,bot" % tid)
-                            and l.endswith(" integrity=false") for l in lst), lst)
-        self.assertIn("INT false the host's Networdz deals the tiles", nat.req("VUE %s" % tid))
-        notes = nat.req("NOTE %s" % tid)
-        self.assertTrue(any("integrity=false: the host's Networdz deals the tiles" in l for l in notes), notes)
-        h.new_game()
-        h.pick_start()
-        refused = plays = 0
-        for turn in range(40):          # then the host ends the game (S), as it does once the bag is empty
-            if h.over:
+        tid = g.wait(lambda: self.table_of(nat, "bea"), "bea's table")
+        lst = [l for l in nat.req("LST") if l.startswith("TAB %s " % tid)]
+        self.assertTrue(lst[0].endswith(" integrity=false"), lst)
+        self.assertIn("INT false " + A.REASON, nat.req("VUE %s" % tid))
+        g.wait(lambda: g.rules is not None, "New Game")
+        g.wait_chat("Integrity: %s." % A.REASON)
+        self.assertEqual(g.rules, [0, 0, 0, 0, 0, 0, 2])
+        self.assertEqual(g.players[:3], [(A.REMOTE, "bea"), (A.COMPUTER, "bot"), (A.NONE, "ParlorNet")])
+        self.assertEqual((g.seat, g.order[:2]), (0, [0, 1]))
+        g.wait_chat("bot: Hello!")          # the bot's greeting, under its seat's name in Networdz
+        g.say("hello from Networdz")
+        g.wait(lambda: any("hello from Networdz" in l for l in nat.req("SIN %s 0" % tid)), "the chat at the table")
+        refused = exchanged = passed = False
+        for turn in range(80):
+            g.wait(lambda: g.my_turn() or g.over, "my turn or the end")
+            if g.over:
                 break
-            if h.turn == 0:     # the table and Networdz agree: the board, both racks and whose turn it is
-                h.wait(lambda: self.agree(nat, tid, h), "the table to agree with Networdz")
-                h.host_play(CORE_WORDS - REFUSED)
-            else:
-                kind, what = h.remote_turn()
-                if kind == "refused":
-                    refused += 1
-                elif kind == "play":
-                    plays += 1
-        if not h.over:
-            if h.turn != 0:
-                h.remote_turn()
-            h.wait(lambda: self.agree(nat, tid, h), "the table to agree with Networdz")
-            h.end()
-        end = h.wait(lambda: G.parse_view(nat.req("VUE %s" % tid))["turn"] == -1 or None, "the table's end")
-        self.assertTrue(end)
-        self.assertGreater(plays, 0)
+            if not refused:             # a word the list lacks: refused, and the turn comes back
+                g.wait(lambda: self.agree(nat, tid, g), "the table to agree with Networdz")
+                bad = self.bad_play(nat, tid, g)
+                if bad:
+                    g.play(bad)
+                    g.wait(lambda: g.verdicts and g.pending is None, "the verdict")
+                    self.assertEqual(g.verdicts[-1][0], A.NOT_LISTED)
+                    g.wait(lambda: g.my_turn() and g.new_turn == 0, "the same turn again")
+                    g.wait_chat("Not in the word list")
+                    refused = True
+            if not exchanged and len(g.bag) and sum(1 for n in g.bag[:100] if n != A.EMPTY) >= 7:
+                self.assertTrue(g.pass_turn(put_back=[0, 1]))
+                exchanged = True
+                continue
+            if exchanged and not passed:
+                g.pass_turn()
+                passed = True
+                continue
+            self.my_move(nat, tid, g)
+        g.wait(lambda: g.over, "the end")
+        self.assertEqual(g.over, "S")
+        self.assertTrue(refused and exchanged and passed)
+        self.assertIsNone(g.crashed)
         log = nat.req("SIN %s 0" % tid)
-        self.assertTrue(any(" END " in l for l in log), log[-5:])
-        if refused:
-            self.assertTrue(any(" VOID 1 " in l for l in log))
+        end = [l for l in log if " END " in l]
+        self.assertTrue(end, log[-5:])
+        adj = {int(l.split()[4]): l.split()[6] for l in log if " ADJ " in l}
+        for s, left in adj.items():         # the racks at the end, so the points each loses or gains
+            self.assertEqual(sorted(g.letters(s)), sorted("" if left == "-" else left), (s, g.letters(s), left))
+        v = G.parse_view(nat.req("VUE %s" % tid))
+        self.assertEqual(v["tiles"], g.board)
+        self.assertTrue(any(" EXCH 0 2" in l for l in log))
         turns = nat.req("TRN %s" % tid)
         self.assertTrue(any("TRX PROG Networdz 2.0" in l for l in turns), turns)
-        self.assertFalse(any(re.match(r"TRN \S+ \d+ \S+ 0 bea", l) and i + 1 < len(turns)
-                             and not turns[i + 1].startswith("TRX MOVE") for i, l in enumerate(turns)), turns)
 
-    def test_two_remote_seats_a_player_and_the_bot(self):
-        """Three players: the host, a native player and the bot. The native player's exchange and pass reach
-        Networdz as K, O and Q, and their chat as a line from their seat; the host's chat reaches the table."""
-        h, pw = self.signed_in("cy", remotes=2)
-        pw_d = self.signup("dee")
-        n = h.say("/invite dee")
-        h.wait_chat("dee is not online now. Your invitation waits.", n)
-        dee = self.native("dee", pw_d)
-        tid = next(l.split()[1] for l in dee.req("IVL") if l.startswith("IVT"))
-        self.assertTrue(dee.req("JON %s" % tid)[-1].startswith("OK 1"))
-        h.wait(lambda: h.names.get(1) == "dee", "dee's name on seat 1")
-        n = h.say("/invite bot")
-        h.wait_chat("You invited the bot", n)
-        h.wait(lambda: h.names.get(2) == "bot", "the bot's name on seat 2")
-        h.new_game()
-        h.pick_start()
-        n = h.say("good luck")
-        cht = dee.req("SIN %s 0" % tid)
-        h.wait(lambda: any("good luck" in l for l in dee.req("SIN %s 0" % tid)), "the host's chat at the table")
-        dee.req("CHT %s hello from the web" % tid)
-        h.wait_chat("hello from the web", n)
-        self.assertTrue(any(s == 1 and t == "hello from the web" for s, t in h.chats))
-        for turn in range(30):
-            if h.over:
-                break
-            if h.turn == 0:
-                h.host_play(CORE_WORDS - REFUSED)
-            elif h.turn == 1:
-                h.wait(lambda: G.parse_view(dee.req("VUE %s" % tid))["turn"] == 1, "dee's turn at the table")
-                rack = G.parse_view(dee.req("VUE %s" % tid))["rack"]
-                if turn < 6:
-                    give = rack[:2].replace("_", "") or rack[:1]
-                    self.assertTrue(dee.req("MOV %s EXCH %s" % (tid, give))[-1].startswith("OK"))
-                    kind, put = h.remote_turn()
-                    self.assertEqual((kind, len(put) >= 1), ("pass", True))
+    def bad_play(self, nat, tid, g):
+        """A play my rack can make that the list lacks: two of my tiles beside the board's tiles."""
+        v = G.parse_view(nat.req("VUE %s" % tid))
+        rack = [c for c in v["rack"] if c != "_"]
+        if len(rack) < 2:
+            return None
+        if not v["tiles"]:
+            word = "".join(rack[:2])
+            return None if word in CORE_WORDS else ["PLAY", "8", "8", "H", word]
+        for (x, y) in sorted(v["tiles"]):
+            for tokens in (["PLAY", str(x), str(y + 1), "V"], ["PLAY", str(x + 1), str(y), "H"]):
+                word = "".join(rack[:2])
+                cx, cy = int(tokens[1]), int(tokens[2])
+                if tokens[3] == "V" and all((cx, cy + i) not in v["tiles"] and cy + i <= 15 for i in range(3)) \
+                        and (cx, cy - 1) in v["tiles"]:
+                    tokens = ["PLAY", str(x), str(y), "V", v["tiles"][(x, y)].upper() + word]
+                elif tokens[3] == "H" and all((cx + i, cy) not in v["tiles"] and cx + i <= 15 for i in range(3)) \
+                        and (cx - 1, cy) in v["tiles"]:
+                    tokens = ["PLAY", str(x), str(y), "H", v["tiles"][(x, y)].upper() + word]
                 else:
-                    self.assertTrue(dee.req("MOV %s PASS" % tid)[-1].startswith("OK"))
-                    kind, put = h.remote_turn()
-                    self.assertEqual((kind, put), ("pass", []))
-                self.assertEqual(sorted(A.parse_racks(dee.req("VUE %s" % tid)).get(1, "")), sorted(h.letters(1)))
-            else:
-                h.remote_turn()
-        self.assertGreaterEqual(turn, 6)
-        self.assertNotIn("ERR", " ".join(cht))
+                    continue
+                chk = nat.req("CHK %s %s" % (tid, " ".join(tokens)))[-1]
+                if "not in the word list" in chk:
+                    return tokens
+        return None
 
-    def test_four_seats_take_an_invitation_each(self):
-        """Three Remote players: the table has four seats, and an invitation for each of the three free seats
-        is within the table's limit on invitations (twice its free seats)."""
-        h, pw = self.signed_in("hal", remotes=3)
-        self.signup("ivy")
-        self.signup("jo")
-        n = h.say("/invite ivy")
-        h.wait_chat("ivy is not online now. Your invitation waits.", n)
-        n = h.say("/invite jo")
-        h.wait_chat("jo is not online now. Your invitation waits.", n)
-        n = h.say("/invite bot")
-        h.wait_chat("You invited the bot", n)
-        h.wait(lambda: h.names.get(1) == "bot", "the bot's name on seat 1")
-        nat = self.native("hal", pw)
-        tab = [l for l in nat.req("LST mine") if l.startswith("TAB ") and " hal," in l]
-        self.assertEqual(len(tab), 1, tab)
-        self.assertIn(" 2/4 open hal,bot,-,- ", tab[0])
-        self.assertTrue(tab[0].endswith(" integrity=false"), tab[0])
-
-    def test_the_mark_is_for_server_extensions(self):
-        """INT from a player's own program is refused; an ordinary table shows no mark."""
-        pw = self.signup("eve")
-        nat = self.native("eve", pw)
-        tid = nat.req("NEW gridwords classic")[-1].split()[1]
-        self.assertTrue(nat.req("INT %s false my own reasons" % tid)[-1].startswith("ERR NOTFRONTEND"))
-        self.assertFalse(any("integrity" in l for l in nat.req("LST")))
-        self.assertFalse(any(l.startswith("INT") for l in nat.req("VUE %s" % tid)))
-
-    def test_who_sits_down_says_with_what(self):
-        """The line that says a player sat down says what they play with (the CLIENT event after JOIN), cut to
-        Networdz' line."""
-        h, pw = self.signed_in("hob", remotes=2)
-        pw_i, pw_j = self.signup("ira"), self.signup("jay")
-        n = h.say("/invite ira")
-        h.wait_chat("Your invitation waits", n)
-        ira = self.native("ira", pw_i)
-        ira.req("CLI PROG Xwords 1.2")
-        tid = next(l.split()[1] for l in ira.req("IVL") if l.startswith("IVT"))
-        self.assertTrue(ira.req("JON %s" % tid)[-1].startswith("OK 1"))
-        h.wait_chat("ira sits down at table %s with Xwords 1.2." % tid, n)
-        n = h.say("/invite jay")
-        h.wait_chat("Your invitation waits", n)
-        jay = self.native("jay", pw_j)
-        jay.req("CLI PROG GameMaster 1.0.0 + ParlorNet 0.5")
-        jay.req("CLI MACH Macintosh Quadra 840AV")
-        n = len(h.chats)
-        self.assertTrue(jay.req("JON %s" % tid)[-1].startswith("OK 2"))
-        h.wait_chat("jay sits down at table %s with GameMaster 1.0.0 + ParlorNet 0.5." % tid, n)
-        self.assertLessEqual(len(h.said("jay sits down", n)[0]), A.SAY_LEN, "the machine left out to fit")
-
-    def test_new_game_before_everyone_is_seated(self):
-        """New Game before the table is full waits at the first pick; the seat's name comes after the game."""
-        h, pw = self.signed_in("fay")
-        pw_g = self.signup("gus")
-        n = h.say("/invite gus")
-        h.wait_chat("Your invitation waits", n)
-        n = len(h.chats)
-        h.new_game()
-        h.send(b"G\x00" + A.msg_h(0, 0, 3))
-        h.send(b"G\x01")
-        h.wait_chat("waits for 1 more player", n)
+    def test_two_guests_and_a_native_player(self):
+        """Three players: two Networdz guests and a player on the native protocol (as the web pages play). Each
+        guest's Networdz shows the other as Remote and the native player as a Person, and both keep up with the
+        table. Then one guest quits: the table goes on, and that seat is a player who is away."""
+        g1, pw1 = self.signed_in("cy")
+        g2, pw2 = self.signed_in("dee")
+        pw3 = self.signup("eli")
+        n = g1.say("/open 3")
+        g1.wait_chat("open for 3 players", n)
+        nat1 = self.native("cy", pw1)
+        tid = self.table_of(nat1, "cy")
+        n = g2.say("/join %s" % tid)
+        g2.wait_chat("You sat down at table %s" % tid, n)
+        eli = self.native("eli", pw3)
+        self.assertTrue(eli.req("JON %s" % tid)[-1].startswith("OK 2"))
+        for g in (g1, g2):
+            g.wait(lambda g=g: g.rules is not None, "New Game")
+        self.assertEqual(g1.players[:4], [(A.REMOTE, "cy"), (A.REMOTE, "dee"), (A.PERSON, "eli"),
+                                          (A.NONE, "ParlorNet")])
+        self.assertEqual((g1.seat, g2.seat), (0, 1))
+        nat2 = self.native("dee", pw2)
+        moves = 0
+        for turn in range(12):
+            v = G.parse_view(eli.req("VUE %s" % tid))
+            if v["turn"] < 0 or moves >= 4:
+                break
+            if v["turn"] == 2:
+                found = best_play(eli.req("VUE %s" % tid), CORE_WORDS)
+                eli.req("MOV %s %s" % (tid, " ".join(found[1]) if found else "PASS"))
+                continue
+            g, nat = (g1, nat1) if v["turn"] == 0 else (g2, nat2)
+            g.wait(g.my_turn, "seat %d's turn in Networdz" % g.seat)
+            self.my_move(nat, tid, g)
+            moves += 1
+            g.wait(lambda g=g: G.parse_view(eli.req("VUE %s" % tid))["turn"] != g.seat, "the move at the table")
+        for g, nat in ((g1, nat1), (g2, nat2)):
+            g.wait(lambda g=g, nat=nat: G.parse_view(nat.req("VUE %s" % tid))["tiles"] == g.board,
+                   "seat %d's board" % g.seat)
+            g.wait(lambda g=g, nat=nat: [len(g.letters(s)) for s in range(3)]      # every rack, in each program
+                   == G.parse_view(nat.req("VUE %s" % tid))["counts"], "seat %d's racks" % g.seat)
+        self.assertGreater(moves, 3)
+        self.assertGreaterEqual(G.parse_view(eli.req("VUE %s" % tid))["turn"], 0, "the game is still running")
+        # dee quits: the table goes on, dee is still seated, and dee's clock runs as any absent player's
+        g2.send(b"Z\x01")
+        g2.close()
         time.sleep(1)
-        self.assertFalse([k for s, k, m in h.inbox if k == "H"])        # no pick until gus sits down
-        gus = self.native("gus", pw_g)
-        tid = next(l.split()[1] for l in gus.req("IVL") if l.startswith("IVT"))
-        self.assertTrue(gus.req("JON %s" % tid)[-1].startswith("OK 1"))
-        h.wait_chat("gus sits down (named after this game)", n)
-        _, m = h.expect(1, "H")
-        self.assertEqual(h.names[1], "ParlorNet")
-        h.end()
-        h.wait(lambda: h.names.get(1) == "gus", "gus's name after the game")
+        lst = [l for l in eli.req("LST") if l.startswith("TAB %s " % tid)]
+        self.assertIn(" playing cy,dee,eli ", lst[0])
+        v = G.parse_view(eli.req("VUE %s" % tid))
+        if v["turn"] == 0:
+            g1.wait(g1.my_turn, "cy's turn")
+            self.my_move(nat1, tid, g1)
+        elif v["turn"] == 2:
+            eli.req("MOV %s PASS" % tid)
+        self.assertTrue(G.parse_view(eli.req("VUE %s" % tid))["turn"] in (0, 1, 2))
+        self.assertTrue(nat2.req("RES %s" % tid)[-1].startswith("OK"))
+        g1.wait(lambda: g1.over, "the end at cy's Networdz")
+        self.assertEqual(g1.over, "Y")
+        g1.wait_chat("dee resigned")

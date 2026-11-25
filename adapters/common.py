@@ -673,6 +673,15 @@ def describe_racks_event(text, names):
     return None
 
 
+def describe_integrity_event(text):
+    """INT false why, the event of a table marked integrity=false (docs/protocol.md) -> "Integrity: why." (None
+    for other events)."""
+    p = text.split(" ", 2)
+    if len(p) == 3 and p[0] == "INT" and p[1] == "false":
+        return "Integrity: %s." % p[2].rstrip(".")
+    return None
+
+
 UNINVITE_TEXT = {"declined": "%s declined the invitation", "withdrawn": "%s's invitation was withdrawn",
                  "expired": "%s's invitation expired", "started": "%s's invitation ended because the game started",
                  "left": "%s's invitation ended because the player who sent it left"}

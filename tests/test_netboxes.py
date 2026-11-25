@@ -20,6 +20,7 @@ sys.path.insert(0, ROOT)
 from adapters import netboxeswire as W  # noqa: E402
 from adapters import nsp_netboxes as B  # noqa: E402
 from adapters import nspwire as N  # noqa: E402
+from speed import slow  # noqa: E402
 
 WAIT = 25
 LOG = []                # the extension's log, for a failing test's message
@@ -388,6 +389,7 @@ class Wire(unittest.TestCase):
         self.assertEqual([(f.what, f.frm, f.body) for f in frames], [(1, 1, b"xy"), (2, -1, b"")])
 
 
+@slow
 class Service(Netboxes):
     def test_a_wrong_password_said_in_the_chat_window(self):
         """NetBoxes never shows NetSprocket's join denial, so the reason comes in its chat window, and then the
@@ -541,6 +543,7 @@ class Service(Netboxes):
         self.assertIn("Check your ParlorNet name and password", N.read_pstr(frames[0].body))
 
 
+@slow
 class Pending(Netboxes):
     """Sign-up by email: the Join dialog cannot ask for the new password a mailed one leads to, so the reason,
     to sign in on the web or by telnet first, goes in the chat window; the log says so too."""

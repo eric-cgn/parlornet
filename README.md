@@ -24,8 +24,6 @@ Supported protocols and their usual ports (6500 HTTP 1997/2027, 6501 native, 650
 
 Daemon: `parlord`. Wire banner: `PARLORNET/1`. Each deployment is "a parlor"; federated parlors make up ParlorNet.
 
-Status: design draft. Name chosen; trademark clearance still to do before any release (the word PARLOR is a registered mark in software services for another company, so a formal search is needed).
-
 ## Run your own parlor
 
 ParlorNet is one Docker container. Get the source from https://github.com/eric-cgn/parlornet, build it from its top directory and start it:
@@ -76,6 +74,6 @@ docker run -d --name parlornet --restart unless-stopped -e PARLOR_NAME=games.exa
 
 ## Branches and releases
 
-The version is in `VERSION`. Changes go into `dev` by pull request, squashed; `main` takes only merges from `dev`, which is how a release is made. Every pull request and every push to `main` runs the whole test suite (`python3 -m unittest discover -s tests`, on Python 3.13) and builds the Docker image (`.github/workflows/ci.yml`), and a pull request into `main` fails unless it comes from `dev`. Every push to `dev` runs the same tests and build on the commit `dev` then has (`.github/workflows/dev.yml`). There is no dev pre-release: the server ships as its source, so the `dev` branch is the dev build.
+The version is in `VERSION`. Changes go into `dev` by pull request, squashed; `main` takes only merges from `dev`, which is how a release is made. Every pull request and every push to `main` runs the fast tests (`PARLOR_TESTS=fast python3 -m unittest discover -s tests`, on Python 3.13) and builds the Docker image (`.github/workflows/ci.yml`), and a pull request into `main` fails unless it comes from `dev`. Every push to `dev` runs the same tests and build on the commit `dev` then has (`.github/workflows/dev.yml`). The slow tests, whole games through the extensions and the bot, real timers and the long matrices, run with the fast ones nightly and by hand on `dev` (`.github/workflows/slow.yml`) and before a release is tagged (`.github/workflows/release.yml`); `tests/speed.py` says which tests are slow and how they are marked. `python3 -m unittest discover -s tests` runs everything. There is no dev pre-release: the server ships as its source, so the `dev` branch is the dev build.
 
 A push to `main` whose version has no release yet runs the release (`.github/workflows/release.yml`). It runs the tests, builds the image, tags the commit `v<version>` and publishes a GitHub Release of the source. No image is published, since each parlor builds its own. Every push to `main` also rebuilds the docs site and publishes it at http://docs.parlornet.org/ (`.github/workflows/docs.yml`).

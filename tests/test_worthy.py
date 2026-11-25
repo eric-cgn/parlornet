@@ -20,6 +20,7 @@ from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
 from adapters import worthy as W  # noqa: E402
+from speed import slow  # noqa: E402
 
 WAIT = 25
 LOG = []
@@ -470,6 +471,7 @@ class Stack(unittest.TestCase):
         return p
 
 
+@slow
 class Service(Stack):
     def test_hello_and_sign_in(self):
         p = self.pc("ann")

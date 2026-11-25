@@ -75,26 +75,11 @@ INFO = {
     "options": ["racks"],
 }
 
-# racks=open: every seated player's view also shows every rack and the bag in draw order (RK and BO lines).
-# It is for period programs whose link sends both racks and the whole bag to each player's machine; such a
-# program shows only its own player's rack. At a table with open
-# racks, a play may also carry OWN: the player's own program has checked its words against its own list, so
-# words missing from the server's list are accepted and named in an UNLISTED event.
+# racks=open: every seated player's view also shows every rack and the bag in draw order (RK and BO lines). The
+# core marks such a table integrity=false (docs/protocol.md). A view request may also carry "open": true, which the
+# core sends for a server extension whose program receives every rack and the bag (VUE O at a table marked
+# integrity=false): that view has the same lines.
 OPEN_RACKS = ("open", "hidden")
-
-# A table that keeps no integrity (the core's INT; docs/types/gridwords-1.md, Tables that keep no integrity):
-# a player's own program runs the game, as a hosting peer program does, and the table follows it. The core says
-# so in new ("integrity": false) with the seat of the table's creator, whose program it is ("authority"). Then
-# the state has "trust" and "auth", and:
-#   - every move hands the turn to the authority, and only the authority gives it on: TURN n;
-#   - the authority may take back the play just made by another seat, which its program refused: VOID, with
-#     the word it refused, which is then refused at the table too;
-#   - the authority may end the game when its program does: OVER, alone or after a move of its own;
-#   - a seat may say what its own rack holds, drawn by its own program from the same bag: RACK letters;
-#   - a play may carry OWN, and an exchange needs only as many tiles in the bag as it puts back;
-#   - turns without a word played never end the game: the authority's program decides.
-TRUST_VERBS = ("RACK", "TURN", "VOID", "OVER")
-REFUSED_KEEP = 200          # the words a table remembers that its authority's program refused (VOID word)
 
 
 def idle_limit(rules, np):
@@ -341,11 +326,6 @@ def result_text(st):
     return ("win %d %s" % (leaders[0], tally)) if len(leaders) == 1 else "draw %s" % tally
 
 
-def gone_out(st):
-    """The seat that has played its last tile with the bag empty, or None."""
-    return next((s for s, r in enumerate(st["racks"]) if not r), None) if not st["bag"] else None
-
-
 def finish(st, events, out_seat=None):
     """The game ends: every rack's points come off its owner's score; a player
     who went out gains the total of the others' racks."""
@@ -359,11 +339,7 @@ def finish(st, events, out_seat=None):
 
 
 def next_turn(st, events):
-    """The next seat moves; at a table that keeps no integrity the authority's program says who (TURN)."""
-    if st.get("trust") and st.get("auth", -1) >= 0:
-        st["turn"] = st["auth"]
-    else:
-        st["turn"] = (st["turn"] + 1) % st["np"]
+    st["turn"] = (st["turn"] + 1) % st["np"]
     events.append("TURN %d" % st["turn"])
 
 
@@ -378,73 +354,7 @@ def copy_state(st):
     out = dict(st)
     out["racks"] = list(st["racks"])
     out["scores"] = list(st["scores"])
-    if "undo" in out:
-        out["undo"] = None          # a move made since: the play before it can no longer be taken back (VOID)
     return out
-
-
-def trusted(req, move):
-    """A table that keeps no integrity: what a player's own program says (TRUST_VERBS). RACK is any seat's,
-    about its own rack; TURN, VOID and OVER are the authority's."""
-    st, seat, verb = req["state"], req.get("seat", -1), move[0].upper()
-    check = bool(req.get("check"))
-    if not 0 <= seat < st["np"]:
-        return {"error": "you are not playing"}
-    if verb != "RACK" and seat != st.get("auth"):
-        return {"error": "only the program that runs this table says that"}
-    if verb == "RACK":
-        if len(move) != 2:
-            return {"error": "RACK letters, like RACK AEIN_ST (_ is a blank)"}
-        want = "" if move[1] == "-" else move[1].upper()
-        if len(want) > RACK or not all(c == "_" or "A" <= c <= "Z" for c in want):
-            return {"error": "RACK letters, like RACK AEIN_ST (_ is a blank)"}
-        pool = list(st["racks"][seat] + st["bag"])     # the rack goes back under the bag, then the letters come out
-        for c in want:
-            if c not in pool:
-                return {"error": "the bag has no %s for that rack" % ("blank" if c == "_" else c)}
-            pool.reverse()
-            pool.remove(c)
-            pool.reverse()
-        if check:
-            return {"info": "0"}
-        new = copy_state(st)
-        new["undo"] = st.get("undo")        # saying a rack is no move: a play just made may still be taken back
-        new["racks"][seat] = want
-        new["bag"] = "".join(pool)
-        return {"state": new, "events": []}
-    if verb == "TURN":
-        if len(move) != 2 or not move[1].isdigit() or not 0 <= int(move[1]) < st["np"]:
-            return {"error": "TURN seat"}
-        if check:
-            return {"info": "0"}
-        new = copy_state(st)
-        new["turn"] = int(move[1])
-        return {"state": new, "events": ["TURN %d" % new["turn"]]}
-    if verb == "VOID":
-        undo = st.get("undo")
-        if len(move) > 2 or not undo:
-            return {"error": "there is no play to take back"}
-        word = move[1].upper() if len(move) == 2 else ""
-        if word and not (word.isascii() and word.isalpha() and len(word) <= SIZE):
-            return {"error": "VOID [word], the word the program refused"}
-        if check:
-            return {"info": "0"}
-        last = st["last"]
-        new = dict(undo, undo=None)
-        new["turn"] = last[0]
-        refused = list(st.get("refused") or [])
-        if word and word not in refused:        # not played again at this table: the program refuses it
-            refused = (refused + [word])[-REFUSED_KEEP:]
-        new["refused"] = refused
-        return {"state": new, "events": ["VOID %d %s" % (last[0], word or last[4]), "TURN %d" % last[0]]}
-    if len(move) != 1:                  # OVER alone: the authority's program ended the game
-        return {"error": "OVER, alone or after a move"}
-    if check:
-        return {"info": "0"}
-    new = copy_state(st)
-    events = ["OVER %d" % seat]
-    finish(new, events, out_seat=gone_out(new))
-    return {"state": new, "events": events, "end": new["result"]}
 
 
 # ---- the plugin operations ---------------------------------------------------------------
@@ -476,14 +386,7 @@ def op_new(req):
           "scores": [0] * n, "turn": 0, "idle": 0, "shuffles": 0, "last": None, "over": False, "result": ""}
     if shown == "open":
         st["open"] = True
-    if req.get("integrity") is False:       # the core's INT: the authority's program runs the game
-        auth = req.get("authority")
-        st["trust"] = True
-        st["auth"] = auth if isinstance(auth, int) and 0 <= auth < n else -1
-        st["undo"] = None
-        if st["auth"] >= 0:                 # the authority's program says who starts (TURN)
-            st["turn"] = st["auth"]
-    return {"state": st, "events": ["TURN %d" % st["turn"]]}
+    return {"state": st, "events": ["TURN 0"]}
 
 
 def geometry():
@@ -503,7 +406,7 @@ def op_view(req):
     wire = ["X " + " ".join(triples[i:i + 9]) for i in range(0, len(triples), 9)]
     if 0 <= seat < st["np"]:
         wire.append("R " + (st["racks"][seat] or "-"))
-        if st.get("open"):              # racks=open: every rack, and the bag with the next tile first
+        if st.get("open") or req.get("open"):      # every rack, and the bag with the next tile first
             wire += ["RK %d %s" % (s, r or "-") for s, r in enumerate(st["racks"])]
             order = st["bag"][::-1]
             wire += ["BO " + order[i:i + 60] for i in range(0, len(order), 60)] or ["BO -"]
@@ -549,31 +452,7 @@ def op_result(req):
 
 
 def op_apply(req):
-    """A move, or (check) whether it would be taken. At a table with open racks a move may end with
-    OVER: the mover's own program has ended the game after this turn by its own rule (it shows the end and
-    takes nothing more), so the table ends it too, as a game that ran out of scoring turns."""
-    move = req.get("move") or []
-    st = req["state"]
-    if st.get("trust") and move and move[0].upper() in TRUST_VERBS and not st["over"]:
-        return trusted(req, move)
-    if move and move[-1].upper() == "OVER":
-        if not (st.get("open") or st.get("trust")):
-            return {"error": "OVER is for tables with open racks"}
-        if st.get("trust") and req.get("seat") != st.get("auth"):
-            return {"error": "only the program that runs this table ends its game"}
-        r = op_apply(dict(req, move=move[:-1]))
-        if "state" in r and not r["state"]["over"]:
-            events = r["events"]
-            if events and events[-1].startswith("TURN "):
-                events.pop()
-            events.append("OVER %d" % req.get("seat", -1))
-            finish(r["state"], events, out_seat=gone_out(r["state"]))
-            r["end"] = r["state"]["result"]
-        return r
-    return apply_move(req)
-
-
-def apply_move(req):
+    """A move, or (check) whether it would be taken."""
     st, seat, move = req["state"], req.get("seat", -1), req.get("move") or []
     check = bool(req.get("check"))
     if st["over"]:
@@ -601,22 +480,13 @@ def apply_move(req):
 
 
 def play(st, seat, move, check, rules=None):
-    own = len(move) == 6 and move[5].upper() == "OWN"
-    if (len(move) != 5 and not own) or not move[1].isdigit() or not move[2].isdigit() \
-            or move[3].upper() not in ("H", "V"):
+    if len(move) != 5 or not move[1].isdigit() or not move[2].isdigit() or move[3].upper() not in ("H", "V"):
         raise Illegal("PLAY x y H|V letters, like PLAY 8 8 H WORD")
-    if own and not (st.get("open") or st.get("trust")):
-        raise Illegal("OWN is for tables with open racks")
     words = load_words()
     if not words:
         raise Illegal("this server has no word list")
     x, y, d = int(move[1]), int(move[2]), move[3].upper()
-    # OWN: the mover's own program checked the words against its own list; the server's list only names them
-    r = evaluate(st, seat, x, y, d, move[4], None if own else words)
-    refused = [w.upper() for w in r["words"] if w.upper() in (st.get("refused") or ())] if not own else []
-    if refused:
-        raise Illegal("the host's program does not take %s" % refused[0])
-    unlisted = [w.upper() for w in r["words"] if w.upper() not in words] if own else []
+    r = evaluate(st, seat, x, y, d, move[4], words)
     if check:
         info = str(r["score"])
         for w in r["words"]:
@@ -624,10 +494,7 @@ def play(st, seat, move, check, rules=None):
                 break
             info += " " + w
         return {"info": info}
-    before = st
     st = copy_state(st)
-    if st.get("trust") and seat != st.get("auth"):     # the authority's program may still refuse it (VOID)
-        st["undo"] = dict(before, undo=None)
     rack, k = draw(st, r["rack"], RACK - len(r["rack"]))
     st["racks"][seat] = rack
     st["cells"] = r["cells"]
@@ -638,13 +505,11 @@ def play(st, seat, move, check, rules=None):
     st["last"] = [seat, x, y, d, word, r["score"]]
     events = ["PLAY %d %d %d %s %s %d" % (seat, x, y, d, word, r["score"]),
               "X " + " ".join("%d %d %s" % p for p in r["placed"])]
-    if unlisted:
-        events.append(("UNLISTED %d %s" % (seat, " ".join(unlisted)))[:70])
     if k:
         events.append("DRAW %d %d" % (seat, k))
-    if not rack and not st["bag"] and not (st.get("trust") and seat != st.get("auth")):
-        finish(st, events, out_seat=seat)       # INT: another seat goes out once the authority's program takes
-        return {"state": st, "events": events, "end": st["result"]}     # the play and says OVER
+    if not rack and not st["bag"]:
+        finish(st, events, out_seat=seat)
+        return {"state": st, "events": events, "end": st["result"]}
     next_turn(st, events)
     return {"state": st, "events": events}
 
@@ -658,10 +523,7 @@ def exchange(st, seat, move, check, limit=None):
         if c not in rack:
             raise Illegal("your rack has no %s" % ("blank" if c == "_" else c))
         rack.remove(c)
-    if st.get("trust"):             # the hosting program's rule: as many tiles in the bag as go back
-        if len(st["bag"]) < len(give):
-            raise Illegal("the bag has only %d tiles" % len(st["bag"]))
-    elif len(st["bag"]) < RACK:
+    if len(st["bag"]) < RACK:
         raise Illegal("exchanging needs %d tiles in the bag" % RACK)
     if check:
         return {"info": "0"}
@@ -679,7 +541,7 @@ def idle_turn(st, events, limit=None):
     """A pass or an exchange. limit turns in a row without a word played end the game (by default two
     full rounds; idle_limit gives each ruleset's)."""
     st["idle"] += 1
-    if st["idle"] >= (limit or 2 * st["np"]) and not st.get("trust"):     # INT: the authority's program ends it
+    if st["idle"] >= (limit or 2 * st["np"]):
         finish(st, events)
         return {"state": st, "events": events, "end": st["result"]}
     next_turn(st, events)
@@ -694,8 +556,6 @@ def op_say(req):
     """A turn in a few words, from its events: "played FRAULEIN for 65", "exchanged 3 tiles", "passed"."""
     for e in req.get("events") or []:
         p = e.split()
-        if p[:1] == ["VOID"] and len(p) >= 3:      # the authority's program refused another seat's play
-            return {"say": "refused the play %s" % p[2]}
         if len(p) < 2 or p[1] != str(req.get("seat")):
             continue
         if p[0] == "PLAY" and len(p) >= 7:
@@ -704,9 +564,6 @@ def op_say(req):
             return {"say": "exchanged %s tile%s" % (p[2], "" if p[2] == "1" else "s")}
         if p[0] == "PASS":
             return {"say": "passed"}
-    for e in req.get("events") or []:      # OVER alone: the player's own program ended the game
-        if e == "OVER %s" % req.get("seat"):
-            return {"say": "ended the game"}
     return {"say": ""}
 
 
