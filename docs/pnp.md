@@ -424,7 +424,7 @@ where `from` is who invited them and `seat`, if present, the seat held for them.
 
 A player is online when they are signed in and have done something in the last half hour. The operator can change that time with the setting `presence.idle`. Signed in means a connection open on any frontend, or a web session that has not ended. `idle` is the number of seconds since the player last did something. `bot` marks the bot, which is online for as long as it runs.
 
-Signing in counts as doing something, and so do the requests that act: `NEW`, `JON`, `LVE`, `INV`, `UNV`, `RES`, `MOV`, `CHK`, `UND`, `END`, `CHT`, `OPR`, `PWD`, `PRF SET`, `PRF DEL` and `PFL SET`. Requests that only look never count. These include `LST`, `IVL`, `WHO`, `VUE`, `SIN`, `WAT`, `SEE` and `TIM`. That way a frontend that polls does not keep its player online forever. Some frontends have commands of their own that need no request, such as a chat they carry themselves. When the player uses one, the frontend sends `ACT`, and the server answers `OK`.
+Signing in counts as doing something, and so do the requests that act: `NEW`, `JON`, `LVE`, `INV`, `UNV`, `RES`, `MOV`, `CHK`, `UND`, `END`, `CHT`, `PWD`, `PRF SET`, `PRF DEL` and `PFL SET`. Requests that only look never count. These include `LST`, `IVL`, `WHO`, `VUE`, `SIN`, `WAT`, `SEE` and `TIM`. That way a frontend that polls does not keep its player online forever. Some frontends have commands of their own that need no request, such as a chat they carry themselves. When the player uses one, the frontend sends `ACT`, and the server answers `OK`.
 
 ### Tables
 
@@ -964,8 +964,7 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `LOCKED` | The name is locked after wrong answers, or the address has used up its wrong answers (with `wait=`). |
 | `NAMEINUSE` | `REG` for a name that has an account, or the name was taken by someone else while this sign-up ran (a pending account holds its name). |
 | `NOAUTH` | `PWD` on a server whose sign-in has no password. |
-| `NOASK` | `OPR table no` when nobody has asked to open the racks. |
-| `NOGAME` | `NEW` or `TOP` for a game this server does not host, or `RES`, `MOV`, `CHK` or `OPR` at a table whose game is not running. |
+| `NOGAME` | `NEW` or `TOP` for a game this server does not host, or `RES`, `MOV` or `CHK` at a table whose game is not running. |
 | `NOHELO` | The request needs a sign-in first (or `OUT` when not signed in). |
 | `NEWLINE` | A line that does not end with the connection's line ending; it was not carried out. |
 | `NOINVITE` | `UNV` for an invitation that does not exist. |
@@ -973,7 +972,6 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `NOMAIL` | The mail could not be sent, or the address cannot receive mail. |
 | `NOPLAYER` | `USER`, `INV` or `PFL` for a name with no account; or a second word on `HELO` for a name that is not signed up. |
 | `NOPROTO` | `PRD` for a protocol this connection did not declare. |
-| `NORACKS` | `OPR` in a game that has no racks to open. |
 | `NORULES` | `NEW` with a ruleset the game does not have, or one the operator turned off. |
 | `NOSCORES` | `TOP` on a server whose operator turned the leaderboard off. |
 | `NOSESSION` | `SES` with an unknown, expired or ended session. |
@@ -981,13 +979,13 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `NOTABLE` | No table with that id. |
 | `NOTAT` | `VUE`, `SIN`, `WAT` or `CHT` at a table where the player is neither seated nor watching. |
 | `NOTFRONTEND` | `SES`, `SRC`, `PRO`, `PRD`, `TDL`, `TDS`, `TDD` or `NFY` on the public port; they are for the extension channel. |
-| `NOTSEATED` | `MOV`, `CHK`, `RES`, `INV`, `UNV`, `OPR` or adding a `NOTE` by a player not seated at the table (`UNV` of one's own invitation excepted). |
+| `NOTSEATED` | `MOV`, `CHK`, `RES`, `INV`, `UNV` or adding a `NOTE` by a player not seated at the table (`UNV` of one's own invitation excepted). |
 | `PAUSED` | The operator paused email sign-up, or new sign-ups by mail are held. |
 | `PLUGIN` | The game failed to answer; try again. |
 | `PRIVATE` | `JON` or `SEE` at a private table without an invitation, or `NOTE` or `TRN` there by someone who may not see it. |
 | `PROTOCOL` | The connection did not start with `PARLORNET/1` within 20 seconds; the connection is closed. |
 | `RATE` | Too many requests too fast (the request was not done), or three failed `SES` on one connection. |
-| `RESERVED` | `REG` (or `HELO` for a free name) with a reserved word, `new` or `guest`; `USER`, `HELO` or `REG` with a bot's name (`bot`, `bot1` to `bot3`); `TDS` or `TDD` with a key the core keeps itself. |
+| `RESERVED` | `REG` (or `HELO` for a free name) with a reserved word, `new` or `guest`; `USER`, `HELO` or `REG` with a bot's name (`bot`, `bot1` to `bot3`). |
 | `SIGNEDOUT` | This connection's session was ended elsewhere; sign in again. |
 | `STATE` | Not now: already signed in, already seated, an `AUT` that answers nothing asked, a seat that has left the game. |
 | `SUSPENDED` | The operator suspended this name. |
@@ -1392,7 +1390,7 @@ Spec: [types/gridwords-1.md](types/gridwords-1.md).
 | Type | `gridwords/1`, rulesets `english` and `classic` |
 | Players | 2 to 4 (`players=n`) |
 | Flags | `nomoves` |
-| Options | `racks=open` or `racks=hidden` (default `hidden`): with `open`, every seated player's view also carries every rack and the bag |
+| Options | none |
 
 A crossword-building tile game on a 15 by 15 board. Every word a play makes must be in the server's word list (this server's is ENABLE 1.0, `plugins/gridwords/words.txt`). Squares are `x y`, 1 to 15, across from the left and down from the top; the center is `8 8` (`h8` on a frontend's screen).
 
@@ -1409,8 +1407,8 @@ A crossword-building tile game on a 15 by 15 board. Every word a play makes must
 | `T seat points` | Scores. |
 | `W seat` | Whose move; `-1` when the game is over. |
 | `LAST seat x y dir word points` | The last word played; `dir` is `H` (across) or `V` (down). |
-| `RK seat letters` | With open racks: every seat's rack (`RK seat -` when it is empty). |
-| `BO letters` | With open racks: the bag in draw order, the next tile first, up to 60 letters a line (`BO -` when it is empty). |
+| `RK seat letters` | Only for a server extension (`VUE table O` at a table marked integrity=false): every seat's rack (`RK seat -` when it is empty). |
+| `BO letters` | Only for a server extension, as `RK`: the bag in draw order, the next tile first, up to 60 letters a line (`BO -` when it is empty). |
 
 **Moves**: `PLAY x y H|V letters` writes the whole main word from its first square, across (`H`) or down (`V`), including letters already on the board; `_` before a letter plays a blank as that letter (`PLAY 8 8 H HEL_LO`). `EXCH letters` exchanges tiles (while the bag holds at least 7); `PASS` passes. Under `english` two full rounds of passes and exchanges end the game, under `classic` six in a row, however many play.
 
@@ -1418,9 +1416,9 @@ A crossword-building tile game on a 15 by 15 board. Every word a play makes must
 
 **CHK**: `CHK table PLAY ...` tries a word and answers `OK points word word ...` with every word the play makes, or the reason it is refused (`ERR ILLEGAL not in the word list: ...`). It works when it is not your turn too, so a player can plan while waiting. `CHK` of `EXCH` or `PASS` answers `OK 0` when allowed.
 
-**Hidden**: each rack. `R` is only in a seated player's own view; the others see the count (`K`), and `DRAW` never names a tile. At a table with open racks (`racks=open`, or opened later with `OPR`), every seated player's view also has `RK` and `BO`. Watchers see no rack.
+**Hidden**: each rack. `R` is only in a seated player's own view; the others see the count (`K`), and `DRAW` never names a tile. Watchers see no rack. `RK` and `BO` go only to a server extension whose program receives the bag and every rack, at a table marked integrity=false (below); a player's own program never gets them.
 
-**Tables marked integrity=false**: a table where the server gives out something it normally keeps, open racks or a Networdz player's seat (protocols.md, Networdz), carries `integrity=false` in `LST`, `INT false text` in its view, an `INT false text` event and a note (protocol.md, Tables marked integrity=false). Nothing else changes: the moves, the turns and the end are as at any table, and the rules for showing racks are the same. Show the event as a line in the table's log ("Integrity: text."), so the player knows.
+**Tables marked integrity=false**: a table where the server gives out something it normally keeps, today a table with a Networdz player (protocols.md, Networdz), carries `integrity=false` in `LST`, `INT false text` in its view, an `INT false text` event and a note (protocol.md, Tables marked integrity=false). Nothing else changes: the moves, the turns and the end are as at any table, and each player's view still shows only their own rack. Show the event as a line in the table's log ("Integrity: text."), so the player knows.
 
 **Sizes**: the geometry about 680 bytes once; a mid-game view about 600 bytes; a play is four events of 6 to 40 bytes.
 

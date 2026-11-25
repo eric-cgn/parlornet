@@ -793,16 +793,6 @@ var PN = (function () {
         S.table.loadNotes();
       });
     });
-    ["yes", "no"].forEach(function (a) {
-      $("b-racks-" + a).addEventListener("click", function () {
-        if (!S.table) return;
-        req("OPR " + S.table.tid + (a === "no" ? " no" : "")).then(function (r) {
-          if (!S.table) return;
-          if (!ok(r)) S.table.toast(PNNet.errText(r.final));
-          S.table.poll();
-        });
-      });
-    });
     $("b-resign").addEventListener("click", function () {
       if (!S.table) return;
       confirmBox("Resign this game?", "Your opponent wins. Leaving the page does not resign: your seat waits for you.").then(function (yes) {
@@ -838,14 +828,14 @@ var PN = (function () {
   function Table(tid) {
     this.tid = tid; this.seq = 0; this.seat = -1; this.names = []; this.key = null; this.mod = null;
     this.common = {}; this.timer = null; this.closed = false; this.over = false; this.stage = S.stage;
-    this.busy = false; this.wasMine = false; this.racks = null;
+    this.busy = false; this.wasMine = false;
     this.clients = {}; this.lastJoin = null;     // seat -> what its player plays with (CLIENT); the JOIN line just logged
   }
   Table.prototype.open = function () {
     var self = this;
     crumbs([["Lobby", "#/lobby"], ["Table " + this.tid]]);
     clear($("log")); clear($("game-panel")); clear($("players")); clear($("notes"));
-    $("racks-ask").hidden = true; $("f-note").hidden = true;
+    $("f-note").hidden = true;
     $("a-classic").href = CLASSIC + "table.htm?t=" + this.tid;
     return this.loadTab().then(function (tab) {
       if (self.seat < 0) return req("SEE " + self.tid);
@@ -999,7 +989,7 @@ var PN = (function () {
     return any;
   };
   // the events the shell itself describes; the rest are the game's (moves), which a turn's line can be about
-  var SHELL_EVENTS = ["JOIN", "CLIENT", "LEAVE", "START", "END", "CHT", "INVITE", "UNINVITE", "GONE", "RACKS", "TURN", "INT"];
+  var SHELL_EVENTS = ["JOIN", "CLIENT", "LEAVE", "START", "END", "CHT", "INVITE", "UNINVITE", "GONE", "TURN", "INT"];
   Table.prototype.event = function (text, quiet, seq) {
     var f = text.split(" "), kind = f[0], joined = this.lastJoin;
     this.lastJoin = null;
@@ -1009,12 +999,6 @@ var PN = (function () {
     if (kind === "INVITE" && f.length >= 3) { this.pendingInvites = (this.pendingInvites || []).concat([f[2]]); }
     if (kind === "UNINVITE" && f.length >= 3) { this.pendingInvites = (this.pendingInvites || []).filter(function (n) { return n !== f[2]; }); }
     if (kind === "END") { this.over = true; if (!quiet) sound("end"); }
-    if (kind === "RACKS" && f.length >= 3) {     // a request to open the racks: asked, agreed, refused or done
-      if (f[1] === "ask") this.racks = {seat: +f[2], why: f.slice(3).join(" "), agreed: [+f[2]]};
-      else if (f[1] === "yes" && this.racks) this.racks.agreed.push(+f[2]);
-      else if (f[1] === "no" || f[1] === "open") this.racks = null;
-      if (!quiet) this.loadNotes();
-    }
     if (this.mod && this.mod.event) this.mod.event(text, quiet, seq);
     var line = (this.mod && this.mod.describe && this.mod.describe(text)) || this.describe(text);
     if (line) this.log(line, kind === "CHT" ? "say" : "", kind === "CHT" ? f : null, seq, SHELL_EVENTS.indexOf(kind) < 0);
@@ -1052,16 +1036,10 @@ var PN = (function () {
       case "UNINVITE": return f[2] + "'s invitation ended" + (f[3] ? " (" + f[3] + ")" : "");
       case "GONE": return nm(f[1]) + " is out of the game (" + f[2] + ")";
       case "INT": return f[1] === "false" ? "Integrity: " + f.slice(2).join(" ").replace(/\.$/, "") + "." : null;
-      case "RACKS":
-        if (f[1] === "ask") return nm(f[2]) + " asks to open the racks" + (f.length > 3 ? " for " + f.slice(3).join(" ") : "");
-        if (f[1] === "yes") return nm(f[2]) + " agrees to open the racks";
-        if (f[1] === "no") return nm(f[2]) + " said no to opening the racks";
-        if (f[1] === "open") return "The racks are open now, as " + nm(f[2]) + " asked";
-        return null;
     }
     return null;
   };
-  // the table's notes (NOTE), and the question when another player asks this seat to open the racks
+  // the table's notes (NOTE)
   Table.prototype.loadNotes = function () {
     var self = this;
     return req("NOTE " + this.tid).then(function (r) {
@@ -1074,14 +1052,7 @@ var PN = (function () {
       });
       if (!ul.children.length) ul.appendChild(el("li", {cls: "muted", text: "No notes yet."}));
       $("f-note").hidden = self.seat < 0;
-      self.renderRacks();
     });
-  };
-  Table.prototype.renderRacks = function () {
-    var k = this.racks, mine = k && this.seat >= 0 && !this.over && k.agreed.indexOf(this.seat) < 0;
-    $("racks-ask").hidden = !mine;
-    if (mine) $("racks-text").textContent = this.nameOf(k.seat) + " asks to open the racks" + (k.why ? " for " + k.why : "") +
-      ". With open racks each player's program is sent both racks and the order of the bag. It cannot be undone.";
   };
   // a line in the table talk; seq: the event's number, move: a game's event (a turn's "with ... on ..." may
   // be added to it, annotate)

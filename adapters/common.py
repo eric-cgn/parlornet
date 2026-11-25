@@ -631,48 +631,6 @@ def parse_invites(lines):
     return out
 
 
-def parse_racks_asks(lines):
-    """IVR lines (the reply to IVL): the running games where another player asks me to open the racks ->
-    list of dicts, "from" the player who asked."""
-    return [{"id": p[1], "key": p[2], "rules": p[3], "from": p[4]}
-            for p in (l.split() for l in lines) if len(p) >= 6 and p[0] == "IVR" and p[5] == "racks"]
-
-
-def racks_pending(events, seat):
-    """EVT payloads in order -> the open request to open the racks that waits for this seat's answer, as
-    (the seat that asked, what for), or None (docs/protocol.md, Opening the racks)."""
-    ask, agreed = None, set()
-    for text in events:
-        p = text.split(" ", 3)
-        if len(p) < 3 or p[0] != "RACKS" or not p[2].isdigit():
-            continue
-        if p[1] == "ask":
-            ask, agreed = (int(p[2]), p[3] if len(p) > 3 else ""), {int(p[2])}
-        elif p[1] == "yes":
-            agreed.add(int(p[2]))
-        elif p[1] in ("no", "open"):
-            ask, agreed = None, set()
-    return ask if ask and seat >= 0 and seat not in agreed else None
-
-
-def describe_racks_event(text, names):
-    """RACKS events -> human text (None for other events)."""
-    p = text.split(" ", 3)
-    if len(p) < 3 or p[0] != "RACKS" or not p[2].isdigit():
-        return None
-    i = int(p[2])
-    who = names[i] if i < len(names) and names[i] != "-" else "seat %d" % (i + 1)
-    if p[1] == "ask":
-        return "%s asks to open the racks%s" % (who, " for " + p[3] if len(p) > 3 else "")
-    if p[1] == "yes":
-        return "%s agrees to open the racks" % who
-    if p[1] == "no":
-        return "%s said no to opening the racks" % who
-    if p[1] == "open":
-        return "The racks are open now, as %s asked" % who
-    return None
-
-
 def describe_integrity_event(text):
     """INT false why, the event of a table marked integrity=false (docs/protocol.md) -> "Integrity: why." (None
     for other events)."""
