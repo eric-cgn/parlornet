@@ -217,10 +217,10 @@ class DroppedModule(unittest.TestCase):
         _, reqs = ansi_screens(self, m, ["V testdummy/1 2", "W 0", "M poke"], 0,
                                keys=list("poke") + ["ENTER"])["ansi"]
         self.assertIn("MOV 3 poke", reqs)
-        # the welcome page's Games list, the games page and its own page: after the planned games
+        # the games page and its own page: after the planned games
         plain = lambda h: re.sub(r"</?font[^>]*>", "", h)  # noqa: E731
-        table = plain(W.games_table_html(self.hosted()))
-        self.assertIn('<td><a href="/games/testdummy.htm"><b>Test Dummy</b></a><br>2 players</td>', table)
+        table = plain(W.games_page(self.hosted()).decode("ascii"))
+        self.assertIn('<a href="/games/testdummy.htm"><b>Test Dummy</b></a></td><td align="center">2</td>', table)
         # the docs site's Clients page: its own section, saying it has no native client and linking to the
         # browsers and telnet programs, which are listed once at the bottom
         from adapters import clients as C
@@ -234,8 +234,8 @@ class DroppedModule(unittest.TestCase):
         self.assertEqual(names[:2], ["Reversi", "Backgammon"])
         self.assertEqual(names[-1], "Test Dummy")
         self.assertIn("Rummy Tile Classic", names)
-        self.assertIn("2 players, not on this server",
-                      plain(W.games_table_html(parse_games(["GAM reversi/1 standard R 2 2"]))))
+        self.assertIn('<td align="center">2</td><td>not on this server</td>',
+                      plain(W.games_page(parse_games(["GAM reversi/1 standard R 2 2"])).decode("ascii")))
         index = plain(W.games_page(self.hosted()).decode("ascii"))
         self.assertIn('<a name="testdummy"></a><a href="/games/testdummy.htm"><b>Test Dummy</b></a>', index)
         self.assertIn("Two players poke each other in turn.", index)
@@ -249,7 +249,7 @@ class DroppedModule(unittest.TestCase):
             self.assertIsNone(games.get("testdummy/1"))
             self.assertNotIn("testdummy/1", T.RENDERERS)
             self.assertNotIn("Test Dummy", lobby_html(self.hosted()).decode("ascii"))
-            self.assertNotIn("Test Dummy", W.games_table_html(None))
+            self.assertNotIn("Test Dummy", W.games_page(None).decode("ascii"))
             from adapters import clients as C
             from docsite import build
             self.assertNotIn("Test Dummy", C.frontends_body(build.games()))

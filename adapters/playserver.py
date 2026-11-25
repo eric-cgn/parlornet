@@ -87,7 +87,7 @@ PRL_SECS = 30               # the core's list of protocols (PRL), for the web ex
 WEB_KEY = "HTTP"            # the web extension's protocol key (web.PROTOCOL)
 CLASSIC_META = '<meta name="pn-classic" content="">'      # in index.html: the classic pages' address goes here
 PUSH_META = '<meta name="pn-push" content="">'            # ... and the VAPID public key, while push is on
-CLASSIC_LINKS = ("welcome.htm", "protocols.htm")         # index.html's links to them (href="/welcome.htm")
+CLASSIC_LINKS = ("welcome.htm",)                         # index.html's links to them (href="/welcome.htm")
 REASONS = {101: "Switching Protocols", 200: "OK", 302: "Found", 400: "Bad Request", 403: "Forbidden",
            404: "Not Found", 405: "Method Not Allowed", 426: "Upgrade Required", 503: "Service Unavailable"}
 _cache = {}

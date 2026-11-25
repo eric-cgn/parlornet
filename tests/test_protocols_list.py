@@ -1,6 +1,7 @@
 """The protocols list (docs/protocol.md, Protocols): server extensions declare their protocol (PRO, PRD) on the
-extension channel, the core lists what is connected (PRL) with its own PARLORNET/1 and the docs site's address,
-and the web's Protocols page renders that live list.
+extension channel, and the core lists what is connected (PRL) with its own PARLORNET/1 and the docs site's
+address. The web pages show no list of protocols or ports: /protocols.htm has moved to the docs site's
+protocols reference.
 
     python3 -m unittest discover -s tests -p "test_protocols_list.py"
 """
@@ -12,7 +13,7 @@ import time
 import unittest
 
 from test_core import ROOT, adapter_args, free_port, make_keys
-from test_adapters import Stack, plain, spawn
+from test_adapters import Stack, spawn
 
 sys.path.insert(0, ROOT)
 from adapters import declare  # noqa: E402
@@ -188,45 +189,55 @@ class Declarations(unittest.IsolatedAsyncioTestCase):
 
 @slow
 class LiveList(Stack):
-    """The running stack: the web and telnet extensions declare themselves; the web's Protocols page and the
-    welcome page show the live list, each key linking to its entry on the docs site; a stopped extension
-    leaves the list."""
+    """The running stack: the web and telnet extensions declare themselves and the core lists them (PRL) on its
+    public port; a stopped extension leaves the list. The web pages show none of it."""
+
+    def prl(self):
+        """PRL on the core's public port, before signing in: (docs url, {key: (port, name, what)})."""
+        import socket
+        from adapters import web
+        s = socket.create_connection(("127.0.0.1", self.core), timeout=5)
+        try:
+            s.sendall(b"PARLORNET/1\r\nPRL\r\n")
+            f = s.makefile("rb")
+            f.readline()                    # the greeting
+            lines = []
+            while True:
+                l = f.readline().decode("ascii").rstrip("\r\n")
+                if l.startswith(("OK", "ERR")) or not l:
+                    break
+                lines.append(l)
+        finally:
+            s.close()
+        url, rows = web.parse_protocols(lines)
+        return url, {k: (port, name, what) for k, port, name, what in rows}
 
     def protocols_page(self, want, absent=()):
-        """/protocols.htm once every key in want shows (and none in absent): its rows {key: (href, port, name,
-        what)}."""
+        """The core's list once every key in want shows (and none in absent): (docs url, rows)."""
         deadline = time.time() + 20
         while True:
-            page = plain(self.get("/protocols.htm")[3])
-            rows = {k: (h, int(port), name, what) for h, k, port, name, what in re.findall(
-                r'<td><a href="([^"]+)"><b>([^<]+)</b></a></td><td align="right">(\d+)</td><td>([^<]*)</td>'
-                r'<td>([^<]*)</td>', page)}
+            url, rows = self.prl()
             if set(want) <= set(rows) and not set(absent) & set(rows) or time.time() > deadline:
-                return page, rows
+                return url, rows
             time.sleep(0.3)
 
     def test_the_live_list(self):
         from adapters import telnet, web
-        from adapters.webstyle import protocol_anchor
-        page, rows = self.protocols_page(("HTTP", "TELNET", "PARLORNET/1"))
-        self.assertEqual(rows["HTTP"][1:], (self.web_port, web.PROTOCOL[1], web.PROTOCOL[2]))
-        self.assertEqual(rows["TELNET"][1:], (self.tel_port, telnet.PROTOCOL[1], telnet.PROTOCOL[2]))
-        self.assertEqual(rows["PARLORNET/1"][1], self.core)
+        url, rows = self.protocols_page(("HTTP", "TELNET", "PARLORNET/1"))
+        self.assertEqual(url, DOCS_URL)
+        self.assertEqual(rows["HTTP"], (self.web_port, web.PROTOCOL[1], web.PROTOCOL[2]))
+        self.assertEqual(rows["TELNET"], (self.tel_port, telnet.PROTOCOL[1], telnet.PROTOCOL[2]))
+        self.assertEqual(rows["PARLORNET/1"][0], self.core)
         for key in ("IOS", "FIBS", "OUTLAND"):            # not connected: not listed
             self.assertNotIn(key, rows)
-        for key, (href, *_rest) in rows.items():
-            self.assertEqual(href, DOCS_URL + "protocols.html#" + protocol_anchor(key))
-        self.assertEqual(rows["PARLORNET/1"][0], DOCS_URL + "protocols.html#PARLORNET-1")
-        ports = [r[1] for r in rows.values()]
+        ports = [r[0] for r in rows.values()]
         self.assertEqual(ports, sorted(ports))
-        self.assertNotIn("6505", page)                            # no table of ports of its own
-        welcome = plain(self.get("/welcome.htm")[3])
-        ways = welcome[welcome.index('<a name="ways-in">'):welcome.index('<a name="games">')]
-        self.assertIn("Type <tt>telnet parlornet.org %d</tt> to connect." % self.tel_port, ways)
-        for key in ("HTTP", "TELNET", "PARLORNET/1"):
-            self.assertIn('<a href="%sprotocols.html#%s"><b>%s</b></a> on port' % (DOCS_URL, protocol_anchor(key), key),
-                          ways)
-        self.assertIn('<a href="%sindex.html">Clients page</a>' % DOCS_URL, ways)
+        # the web pages list none of it: the old Protocols page is the docs site's reference now
+        st, loc, _, _ = self.get("/protocols.htm")
+        self.assertEqual((st, loc), (301, DOCS_URL + "protocols.html"))
+        welcome = re.sub(r"<[^>]+>", "", self.get("/welcome.htm")[3])
+        for key, (port, _, _) in rows.items():
+            self.assertNotIn(str(port), welcome, key)
 
     def test_an_extension_that_stops_leaves_the_list(self):
         port = free_port()
@@ -236,7 +247,7 @@ class LiveList(Stack):
         ios = spawn(*adapter_args("adapters.ios", port, self.fe, self.keys, "ios"), "--public-port", "7503")
         try:
             _, rows = self.protocols_page(("IOS",))
-            self.assertEqual(rows["IOS"][1], 7503)            # the port players connect to
+            self.assertEqual(rows["IOS"][0], 7503)            # the port players connect to
         finally:
             ios.kill()
             ios.wait()

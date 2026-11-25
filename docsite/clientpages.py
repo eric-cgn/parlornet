@@ -222,7 +222,7 @@ def client_body(c, link_fix=lambda u: u, host=C.HOST):
         out.append(h2("screenshots", "Screenshots") + "".join(shot_html(*s) for s in shots))
     links = [a(C.FRONTENDS_PAGE, "All clients")]
     if c.kind == "period" and not c.planned() and not c.unsupported():
-        links.append(a(C.PROTOCOLS_DOC + "#" + c.protocol, "The %s guide" % C.PROTOCOL_NAMES[c.protocol]))
+        links.append(a(c.guide(), "The %s guide" % C.PROTOCOL_NAMES[c.protocol]))
     links.append(a(EDIT_URL % c.id, EDIT_TEXT))
     out.append(p(" | ".join(links), 2))
     return "".join(out)
