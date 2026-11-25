@@ -82,6 +82,13 @@ class Start(unittest.IsolatedAsyncioTestCase):
         """Everything up to and including marker."""
         return await asyncio.wait_for(r.readuntil(marker), 2)
 
+    # ---- Control-C in a session hangs up ----
+
+    async def test_control_c_in_a_session_hangs_up(self):
+        r, w, got, _ = await self.start(OPEN + b"\r\n")
+        w.write(b"MOTD\x03")
+        self.assertEqual(await self.closed(r), b"\r\n")         # the greeting's ending, then closed: MOTD unrun
+
     def test_defaults(self):
         self.assertEqual(C.Limits.first_line_secs, 20.0)
         self.assertEqual(C.Limits.ending_secs, 0.25)
