@@ -24,8 +24,6 @@ Supported protocols and their usual ports (6500 HTTP 1997/2027, 6501 native, 650
 
 Daemon: `parlord`. Wire banner: `PARLORNET/1`. Each deployment is "a parlor"; federated parlors make up ParlorNet.
 
-Status: design draft. Name chosen; trademark clearance still to do before any release (the word PARLOR is a registered mark in software services for another company, so a formal search is needed).
-
 ## Run your own parlor
 
 ParlorNet is one Docker container. Get the source from https://github.com/eric-cgn/parlornet, build it from its top directory and start it:
