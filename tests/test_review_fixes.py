@@ -263,8 +263,12 @@ class F01Adapters(unittest.TestCase):
         t.settimeout(5)
         data = b""
         end = time.time() + 10
+        titled = False
         while b"Login (" not in data and time.time() < end:
             data += t.recv(4096)
+            if b"Press Enter" in data and not titled:
+                titled = True
+                t.sendall(b"\r\n")                  # the title page
         t.close()
         self.assertIn(b"Login (", data)
 
