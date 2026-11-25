@@ -258,6 +258,7 @@ class Session:
         self.over = False
         self.over_at = 0.0
         self.won_on_mac = False     # the Mac's wn came (it hangs up after it)
+        self.hung_up = False        # our wn went out: the Mac hangs up on it, so nothing more is sent
         self.dirty = False          # the Mac's board has a stone the server does not
         self.broken = False         # a move the core did not take: the Mac is out of step
         self.closing = False
@@ -269,7 +270,7 @@ class Session:
     async def send(self, *parts, quiet=False):
         """Messages to the Mac, in one write (NetLuff reads a message as its parts arrive)."""
         data = b"".join(parts)
-        if not data:
+        if not data or self.hung_up:
             return
         async with self.send_lock:
             self.w.write(data)
@@ -681,6 +682,9 @@ class Session:
             parts += self.lines("%s made %s in a row: %s wins." % (
                 self.opp, F.COUNT_WORDS.get(len(line), str(len(line))), self.opp))
             parts.append(wn(line))
+            await self.send(*parts)
+            self.hung_up = True
+            return
         elif end:
             await self.send(*parts)
             await self.ended(end)
