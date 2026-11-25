@@ -811,20 +811,22 @@ PERIOD = [
                       "played here. The program itself is not changed.", "2026-11-24"),)),
     Client("networdz", "Networdz 2.0", "period", "1996",
            "Lance Frohman's Networdz 2.0, the first version that plays over a network, is dated October 1996.",
-           "Windows 3.1 and later, Winsock", (("win", ("x86",)),),
+           "Windows 3.1 and later (Wine tested)", (("win", ("x86",)),),
            ((ARCHIVE, "Discmaster (Giga Games 5, Walnut Creek, June 1997)",
              DISCMASTER + "file/10566/Giga%20Games%205%20(Walnut%20Creek)%20(June%201997).iso/windows/puzzles/"
              "networdz.zip",
-             "`networdz.zip`, the program, its help file and dictionaries. US$12 shareware."),),
-           version="2.0", games=("gridwords",), port=6516, protocol="networdz", style="networdz", status="untested",
-           status_note="The parlor is the host for Networdz 2.0. The stock program cannot connect yet: a copy in "
-                       "Answer mode waits for its host to connect, and the parlor never connects out. A patch that "
-                       "makes it connect out to the parlor is a later step.",
+             "`networdz.zip`, the program, its help file and dictionaries. US$12 shareware."),
+            (OTHER, "ParlorNet Link", "https://github.com/eric-cgn/parlornet-networdz-link/releases",
+             "`PNLINK.ZIP`, ParlorNet's own program that connects Networdz to the parlor. MIT license.")),
+           version="2.0", games=("gridwords",), port=6516, protocol="networdz", style="networdz",
+           status_note="Networdz 2.0 has played whole games on the parlor through ParlorNet Link, under Wine.",
            ratings=(
-               Rating(NOT_RATED, "win", ("x86",), "2.0",
-                      "The stock program cannot connect yet; a patch that makes it connect out to the parlor is a "
-                      "later step. The parlor's side was tested against the stock program in Answer mode under "
-                      "Wine 8.0 on 32-bit Debian, with a test-only helper in the patch's place. " + A_REAL_TEST),)),
+               Rating(GOLD, "win", ("x86",), "2.0 with ParlorNet Link 1.0",
+                      "Stock Networdz 2.0 under Wine 8.0 (32-bit Debian), with ParlorNet Link 1.0 beside it, played "
+                      "a whole game against the bot to the end, its scores the parlor's, with a refused word and an "
+                      "exchange, and a game with chat of two Networdz PCs and a web player. The Link is an add-on, "
+                      "not a patch. Real Windows is not yet tried.",
+                      "2026-11-25", short="2.0, Windows (x86)"),)),
     Client("rscards", "RSCARDS (GEnie)", "period", "1987",
            "J. Weaver Jr.'s front ends for GEnie's graphics games date from 1984 to 1994; GEnie ran the games from "
            "about 1987 to 1995. The Mac version 5.0 is dated January 1994 and the IBM PC version 5.02 October 1994.",
