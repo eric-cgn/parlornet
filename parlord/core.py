@@ -105,7 +105,7 @@ class Limits:
     tdata_key_len = 8        # a key: 1 to 8 of a-z 0-9 _ -, so "TDS table key value" fits the line
     tdata_value_len = 56     # a value: 1 to 56 printable ASCII characters
     racks_why_len = 20       # what open racks are for (OPR table text), as the notes name it
-    integrity_why_len = 40   # why a table keeps no integrity (INT table false text), so its note fits
+    integrity_why_len = note_core_len - len("Integrity: ")     # 49: why a table is marked integrity=false
     notices_keep = 1000      # notices kept for NFY (in memory only)
     notice_wait = 30         # the longest NFY waits for one
     # Clients and machines (CLI), the turns played (TRN, FEED) and profiles (PFL); docs/protocol.md.
@@ -145,9 +145,11 @@ SCORE_REASONS = ("win", "draw", "loss", "resign", "timeout")
 
 TDATA_KEY_RE = re.compile(r"^[a-z0-9_-]+\Z")
 TDATA_CORE = ("racks",)     # the keys of a table's data that the core keeps itself (TDS and TDD refuse them)
-# A table that keeps no integrity (INT): the core keeps "false why" under this key of the table's data. It is
-# longer than a key TDS takes, so no server extension can set or forget it there.
+# A table marked integrity=false (INT; docs/protocol.md, Tables marked integrity=false): the server has given
+# out something it normally keeps, such as every rack. The core keeps "false why" under this key of the table's
+# data. It is longer than a key TDS takes, so no server extension can set or forget it there.
 INTEGRITY_KEY = "integrity"
+OPEN_RACKS_WHY = "each player's program receives the bag and racks"     # racks=open, or opened later (OPR)
 
 
 def printable(text):
@@ -395,7 +397,7 @@ class Table:
 
     @property
     def no_integrity(self):
-        """Why this table keeps no integrity (INT), or None for a table the server keeps."""
+        """Why this table is marked integrity=false (INT), or None for a table that is not."""
         v = self.data.get(INTEGRITY_KEY, "")
         return v.split(" ", 1)[1] if v.startswith("false ") else None
 
@@ -1542,6 +1544,8 @@ class Server:
         self.next_id += 1
         self.store.set("next_id", self.next_id)
         self.tables[t.id] = t
+        if opts.get("racks") == "open":         # every seated player's view will carry every rack and the bag
+            self.disclose(t, OPEN_RACKS_WHY)
         self.save(t)
         return [ok(t.id)]
 
@@ -1625,13 +1629,8 @@ class Server:
             if e:
                 return [e]
             if starts:
-                call = {"op": "new", "rules": t.rules, "players": len(t.seats), "options": t.options, "seed": t.seed}
-                if t.no_integrity is not None:      # INT: the creator's program runs the game (docs/plugins.md)
-                    after = [(s_ if i != seat else name) or "" for i, s_ in enumerate(t.seats)]
-                    low = [s_.lower() for s_ in after]
-                    call["integrity"] = False
-                    call["authority"] = low.index(t.owner.lower()) if t.owner.lower() in low else -1
-                r = await t.plugin.call(call)
+                r = await t.plugin.call({"op": "new", "rules": t.rules, "players": len(t.seats), "options": t.options,
+                                         "seed": t.seed})
                 if "error" in r:
                     return [err("BADOPT", r["error"])]
             else:
@@ -1852,7 +1851,10 @@ class Server:
         if t.state is None:
             out.append("S Waiting for players")
         else:
-            r = await t.plugin.call({"op": "view", "rules": t.rules, "state": t.state, "seat": seat})
+            call = {"op": "view", "rules": t.rules, "state": t.state, "seat": seat}
+            if "O" in flags and sess.frontend and seat >= 0 and t.no_integrity is not None:
+                call["open"] = True     # every rack and the bag, for the extension whose program receives them
+            r = await t.plugin.call(call)
             wire, status = r.get("wire", []), r.get("status", "")
             if t.status == "done" and "Game over" not in status:
                 # The server ended the game (a resignation, a clock run out, the operator): the game's own
@@ -1875,7 +1877,7 @@ class Server:
                         for mv in m.get("moves", [])]
         if "C" in flags and self.clients_visible(sess, t):     # what each player plays with
             out += self.client_lines(t)
-        if t.no_integrity is not None:      # INT: the table keeps no integrity, and why
+        if t.no_integrity is not None:      # INT: the table is marked integrity=false, and why
             out.append("INT false " + t.no_integrity)
         sess.cursor[t.id] = t.seq
         return out + [ok()]
@@ -1939,8 +1941,8 @@ class Server:
             t.steps = (seat, evs)
             return
         t.steps = (-1, [])
-        if not evs or all(e.startswith("TURN ") for e in evs):
-            return          # nothing played: only the turn passed on (a hosting program's word, INT)
+        if not evs:
+            return
         name = sess.player.name
         row = {"table_id": t.id, "seq": t.seq, "at": time.time(), "gtype": "%s/%d" % (t.type, t.ver), "vis": t.vis,
                "seat": seat, "name": name, "client": sess.prog, "machine": sess.mach,
@@ -2255,13 +2257,25 @@ class Server:
             self.set_data(t, key, None)
         return [ok()]
 
-    # ---- a table that keeps no integrity (INT) ------------------------------------------------------------
+    # ---- a table marked integrity=false (INT) ------------------------------------------------------------
+    def disclose(self, t, why):
+        """Mark a table integrity=false: the server gives out something it normally keeps (every rack, the bag),
+        and why says what. One way: the mark stays for the rest of the game and the game goes on as before. The
+        first reason is kept; marking again changes nothing. The core shows the mark (LST, VUE), writes a note
+        and tells the table with the event INT false why. The caller saves the table."""
+        if t.no_integrity is not None:
+            return False
+        self.set_data(t, INTEGRITY_KEY, "false " + why)
+        self.add_note(t, "", "Integrity: " + why)
+        self.event(t, "INT false " + why)
+        return True
+
     async def cmd_int(self, sess, args, line):
-        """INT table false text (extension channel only): mark an open table as one whose secrets the server
-        cannot keep and whose game it does not decide, because a player's own program runs it (a hosting peer
-        program deals the tiles, say); text says why. The mark is informational: the core shows it (LST, VUE,
-        a note) and tells the game's plugin at the start, which then takes what the players' programs say
-        (docs/protocol.md, Tables that keep no integrity). One way: it is never taken off."""
+        """INT table false text (extension channel only): the extension's program receives what the server
+        normally keeps at this table (Networdz is sent every rack and the bag), so the table is marked
+        integrity=false, with text saying what (docs/protocol.md, Tables marked integrity=false). Only a player
+        seated there or its creator may, before the game is over. One way: OK when the table is marked already,
+        which keeps its first reason."""
         if not sess.frontend:
             return [err("NOTFRONTEND", "INT is only for server extensions")]
         t, e = self.table_for(args)
@@ -2277,14 +2291,11 @@ class Server:
             name = sess.player.name
             if t.seat_of(name) < 0 and name.lower() != t.owner.lower():
                 return [err("NOTSEATED", "only the table's creator or a player seated there can mark it")]
-            if t.status != "open":
-                return [err("STATE", "a table is marked before its game starts")]
-            if t.no_integrity is not None:
-                return [err("STATE", "the table is marked already")]
-            self.set_data(t, INTEGRITY_KEY, "false " + why)
-            self.add_note(t, "", "integrity=false: " + why)
-            self.save(t)
-            t.cond.notify_all()
+            if t.status == "done":
+                return [err("STATE", "the game is over")]
+            if self.disclose(t, why):
+                self.save(t)
+                t.cond.notify_all()
         return [ok()]
 
     # ---- opening the racks of a running table (OPR) ----------------------------------------------
@@ -2356,6 +2367,7 @@ class Server:
                 self.event(t, "RACKS open %d" % agreed[0])
                 self.add_note(t, "", "%s agreed: the racks are open" % name if ask else
                               "%s opened the racks%s" % (name, " for " + purpose if purpose else ""))
+                self.disclose(t, OPEN_RACKS_WHY)
                 answer = "open"
             else:
                 self.set_data(t, "racks", "ask %s %s" % (",".join(map(str, agreed)), purpose))

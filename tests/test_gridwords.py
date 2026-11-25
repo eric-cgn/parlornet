@@ -380,8 +380,7 @@ class Turns(WordList):
 # ---- a whole game over the protocol ------------------------------------------------------
 
 class OpenRacks(WordList):
-    """racks=open, for period programs whose link sends both racks and the bag, and the OWN plays of their
-    seats."""
+    """racks=open: every seated player's view carries every rack and the bag."""
 
     def open_state(self, seed=3):
         r = P.op_new({"players": 2, "options": {"racks": "open"}, "seed": seed, "rules": "classic"})
@@ -404,166 +403,24 @@ class OpenRacks(WordList):
         r = P.op_apply({"state": st, "seat": 0, "move": ["PLAY", "8", "8", "H", "CAT"], "rules": "classic"})
         self.assertEqual(sorted(r["state"]["racks"][0]), sorted("SXYZ" + order[:3]))
 
-    def test_own_plays_at_classic_open_tables(self):
+    def test_an_open_view_on_request(self):
+        """"open": true in a view request (the core's VUE O, for an extension at a table marked integrity=false)
+        gives a seated player the same lines at a table with hidden racks; a watcher still gets none."""
+        hidden = P.op_new({"players": 2, "options": {}, "seed": 3})["state"]
+        wire = P.op_view({"state": hidden, "seat": 0, "open": True})["wire"]
+        self.assertIn("RK 1 %s" % hidden["racks"][1], wire)
+        self.assertEqual("".join(l[3:] for l in wire if l.startswith("BO ")), hidden["bag"][::-1])
+        self.assertFalse(any(l.startswith(("RK", "BO")) for l in P.op_view({"state": hidden, "seat": -1,
+                                                                           "open": True})["wire"]))
+
+    def test_moves_are_checked_as_anywhere(self):
+        """Open racks change what a view shows, not the rules: every word is checked against the list."""
         st = self.open_state()
         st["racks"][0] = "QXZTEAB"
-        move = ["PLAY", "8", "8", "H", "QXZ"]
-        self.assertIn("not in the word list", apply(st, 0, *move)["error"])
-        r = P.op_apply({"state": st, "seat": 0, "move": move + ["OWN"], "rules": "classic"})
-        self.assertIn("UNLISTED 0 QXZ", r["events"])
-        chk = P.op_apply({"state": st, "seat": 0, "move": move + ["OWN"], "rules": "classic", "check": True})
-        self.assertEqual(chk["info"], "%d QXZ" % r["state"]["scores"][0])
-        r = P.op_apply({"state": st, "seat": 0, "move": ["PLAY", "8", "8", "H", "TEA", "OWN"], "rules": "classic"})
-        self.assertFalse(any(e.startswith("UNLISTED") for e in r["events"]))   # every word listed: no event
-        # at any table with open racks (an english table whose racks were opened, OPR), never with hidden ones
-        r = P.op_apply({"state": st, "seat": 0, "move": move + ["OWN"], "rules": "english"})
-        self.assertIn("UNLISTED 0 QXZ", r["events"])
-        hidden = new_state(racks=["QXZTEAB", "AAAAAAA"])
-        r = P.op_apply({"state": hidden, "seat": 0, "move": move + ["OWN"], "rules": "classic"})
-        self.assertEqual(r["error"], "OWN is for tables with open racks")
-        # OVER: the mover's program ended the game after this turn
-        r = P.op_apply({"state": st, "seat": 0, "move": ["PASS", "OVER"], "rules": "classic"})
-        self.assertTrue(r["state"]["over"])
-        self.assertEqual(r["events"][:2], ["PASS 0", "OVER 0"])
-        self.assertTrue(r["events"][2].startswith("ADJ 0 -") and r["end"].startswith(("win", "draw")))
-        r = P.op_apply({"state": hidden, "seat": 0, "move": ["PASS", "OVER"], "rules": "classic"})
-        self.assertEqual(r["error"], "OVER is for tables with open racks")
-        self.assertEqual(G.describe_event("OVER 1", ["ann", "bob"]), "bob's own program ended the game")
-        self.assertEqual(G.unlisted_lines(["QXZ"]), ["QXZ is not in this server's word list.",
-                                                     "A ParlorNet player could not have played it."])
-        long = G.unlisted_lines(["ABCDEFGHIJKLMNO", "QXZ"])
-        self.assertTrue(all(len(l) <= 48 for l in long) and long[0].startswith("ABCDEFGHIJKLMNO, QXZ are"))
-        self.assertEqual(G.describe_event("UNLISTED 0 QXZ", ["ann", "bob"]),
-                         "QXZ is not in this server's word list. A ParlorNet player could not have played it")
-
-
-class NoIntegrity(WordList):
-    """A table that keeps no integrity (the core's INT): the authority's program runs the game (adapters/networdz.py)."""
-
-    def trust_state(self, players=3):
-        r = P.op_new({"players": players, "options": {"racks": "open"}, "seed": 5, "rules": "classic",
-                      "integrity": False, "authority": 0})
-        self.assertEqual(r["events"], ["TURN 0"])
-        return r["state"]
-
-    def test_the_authority_gives_the_turn(self):
-        st = self.trust_state()
-        self.assertEqual((st["trust"], st["auth"]), (True, 0))
-        self.assertIn("only the program", apply(st, 1, "TURN", "1")["error"])
-        r = apply(st, 0, "TURN", "1")
-        self.assertEqual(r["events"], ["TURN 1"])
-        st = r["state"]
-        st["racks"][1] = "CATSEEN"
-        r = apply(st, 1, "PLAY", "8", "8", "H", "CAT")
-        self.assertEqual(r["events"][-1], "TURN 0")             # back to the authority after every move
-        self.assertEqual(r["state"]["turn"], 0)
-        self.assertIn("not your turn", apply(r["state"], 2, "PASS")["error"])
-        self.assertEqual(P.op_say({"seat": 0, "events": ["VOID 1 CAT", "TURN 1"]}), {"say": "refused the play CAT"})
-        # the authority's program refused it: taken back, and the player goes again
-        v = apply(r["state"], 0, "VOID")
-        self.assertEqual(v["events"], ["VOID 1 CAT", "TURN 1"])
-        self.assertEqual((v["state"]["racks"][1], v["state"]["scores"], v["state"]["cells"]),
-                         ("CATSEEN", [0, 0, 0], st["cells"]))
-        self.assertEqual(v["state"]["bag"], st["bag"])
-        self.assertIn("no play to take back", apply(v["state"], 0, "VOID")["error"])
-        # with the word the program refused, the table refuses it from then on
-        v2 = apply(r["state"], 0, "VOID", "cat")
-        self.assertEqual(v2["state"]["refused"], ["CAT"])
-        self.assertIn("does not take CAT", apply(v2["state"], 1, "PLAY", "8", "8", "H", "CAT", check=True)["error"])
-        # once the turn has gone on, the play stands
-        after = apply(r["state"], 0, "TURN", "2")["state"]
-        self.assertIn("no play to take back", apply(after, 0, "VOID")["error"])
-        self.assertIn("only the program", apply(r["state"], 2, "VOID")["error"])
-        self.assertEqual(G.describe_event("VOID 1 CAT", ["ann", "bob", "cy"]),
-                         "bob's CAT is refused by the host's program and taken back")
-
-    def tile_set(self, st):
-        """Every tile at the table, the board's, the racks' and the bag's, as the set's letters in order."""
-        board = ["_" if c.islower() else c for c in st["cells"] if c != "."]
-        return sorted(board + list("".join(st["racks"])) + list(st["bag"]))
-
-    def test_racks_the_programs_drew(self):
-        full = sorted(c for c, (_, n) in P.TILES.items() for _ in range(n))
-        st = self.trust_state(2)
-        self.assertEqual((st["racks"], len(st["bag"])), (["", ""], 100))     # the authority's program deals
-        r = apply(st, 0, "RACK", "KAEIN_T")
-        self.assertEqual(r["events"], [])
-        st = r["state"]
-        self.assertEqual(st["racks"][0], "KAEIN_T")
-        r = apply(st, 0, "RACK", "QUOD", "1")                   # another seat's rack, as its program dealt it
-        self.assertEqual(r["events"], [])
-        st = r["state"]
-        self.assertEqual(st["racks"], ["KAEIN_T", "QUOD"])
-        self.assertEqual((len(st["bag"]), self.tile_set(st)), (89, full))
-        self.assertNotIn("K", st["bag"])
-        self.assertIn("RACK letters [seat]", apply(st, 0, "RACK", "AB", "2")["error"])
-        # another seat says only its own rack, from the bag
-        self.assertIn("another seat's rack", apply(st, 1, "RACK", "AB", "0")["error"])
-        self.assertIn("the bag has no K", apply(st, 1, "RACK", "QUODK")["error"])
-        r2 = apply(st, 1, "RACK", "QUODS")
-        self.assertEqual((r2["state"]["racks"][1], len(r2["state"]["bag"])), ("QUODS", 88))
-        # a play draws nothing at the table: the authority's RACK says what came
-        r = apply(st, 0, "PLAY", "8", "8", "H", "KAIN", "OWN")
-        self.assertFalse(any(e.startswith("DRAW") for e in r["events"]), r["events"])
-        st = r["state"]
-        self.assertEqual((st["racks"][0], len(st["bag"]), self.tile_set(st)), ("E_T", 89, full))
-        hidden = new_state()
-        self.assertIn("error", apply(hidden, 0, "RACK", hidden["racks"][0]))
-
-    def test_the_hosts_rack_with_a_tile_the_table_gave_another_seat(self):
-        """The authority's program and the table disagree about where a tile is: its RACK holds the K the table
-        has on another seat's rack, and so not in its bag. The program deals, so the table takes it, and the
-        bag comes right once the program says the other seat's rack too."""
-        full = sorted(c for c, (_, n) in P.TILES.items() for _ in range(n))
-        st = self.trust_state(2)
-        st["racks"][1] = "".join(sorted([c for c in st["bag"] if c != "K"][-6:] + ["K"]))   # the one K, at seat 1
-        P.rebag(st)
-        self.assertNotIn("K", st["bag"])
-        hosts = sorted(st["bag"][:6] + "K")             # the host's program dealt it the K
-        r = apply(st, 0, "RACK", "".join(hosts))
-        self.assertNotIn("error", r)
-        st = r["state"]
-        self.assertEqual(sorted(st["racks"][0]), hosts)
-        self.assertNotIn("K", st["bag"])
-        other = st["racks"][1].replace("K", "E", 1)
-        st = apply(st, 0, "RACK", other, "1")["state"]          # and seat 1's rack, as it dealt that
-        self.assertEqual((len(st["bag"]), self.tile_set(st)), (86, full))
-        # at a table that keeps its integrity the bag still decides
-        kept = new_state(racks=["ABCDEFG", "K"], bag="")
-        self.assertIn("error", apply(kept, 0, "RACK", "K"))
-
-    def test_the_program_ends_the_game(self):
-        st = self.trust_state(2)
-        st = apply(st, 0, "RACK", "QXZTEAB")["state"]
-        for i in range(8):                                     # scoreless turns never end it by themselves
-            seat = i % 2
-            st = apply(st, 0, "TURN", str(seat))["state"] if seat else st
-            st = apply(st, seat, "PASS")["state"]
-            self.assertFalse(st["over"])
-        st["bag"] = st["bag"][:3]
-        st = apply(st, 0, "EXCH", st["racks"][0][:3])["state"]   # as many tiles as the bag has
-        self.assertEqual((st["racks"][0], len(st["bag"])), ("TEAB", 6))     # back in the bag; its program deals
-        st["bag"] = st["bag"][:3]
-        self.assertIn("only 3 tiles", apply(st, 0, "EXCH", st["racks"][0][:4])["error"])
-        self.assertIn("only the program", apply(st, 1, "OVER")["error"])
-        r = apply(st, 0, "OVER")
-        self.assertEqual(r["events"][0], "OVER 0")
-        self.assertTrue(r["state"]["over"] and r["end"])
-        self.assertEqual(P.op_say({"seat": 0, "events": r["events"]}), {"say": "ended the game"})
-        # another seat going out: the table waits for the authority's program, then the out bonus as usual
-        out = self.trust_state(2)
-        out = apply(out, 0, "TURN", "1")["state"]
-        out["bag"], out["racks"][1], out["racks"][0] = "", "CAT", "QZ"
-        r = apply(out, 1, "PLAY", "8", "8", "H", "CAT")
-        self.assertFalse(r["state"]["over"])
-        self.assertEqual(r["events"][-1], "TURN 0")
-        self.assertEqual(apply(r["state"], 0, "VOID")["state"]["racks"][1], "CAT")     # it could still refuse it
-        r = apply(r["state"], 0, "OVER")
-        self.assertIn("ADJ 1 +20 -", r["events"])
-        self.assertIn("ADJ 0 -20 QZ", r["events"])
-        st["racks"][0] = "QXZTEAB"
-        r = apply(st, 0, "PLAY", "8", "8", "H", "QXZ", "OWN")      # its program's words
-        self.assertIn("UNLISTED 0 QXZ", r["events"])
+        self.assertIn("not in the word list", apply(st, 0, "PLAY", "8", "8", "H", "QXZ")["error"])
+        self.assertIn("error", P.op_apply({"state": st, "seat": 0, "move": ["PLAY", "8", "8", "H", "QXZ", "OWN"],
+                                           "rules": "classic"}))
+        self.assertIn("error", P.op_apply({"state": st, "seat": 0, "move": ["PASS", "OVER"], "rules": "classic"}))
 
 
 class Client:

@@ -810,16 +810,15 @@ PERIOD = [
              DISCMASTER + "file/10566/Giga%20Games%205%20(Walnut%20Creek)%20(June%201997).iso/windows/puzzles/"
              "networdz.zip",
              "`networdz.zip`, the program, its help file and dictionaries. US$12 shareware."),),
-           version="2.0", games=("gridwords",), port=6516, protocol="networdz", style="networdz",
-           status_note="Networdz 2.0 has hosted whole games through the parlor against the bot and against a player "
-                       "on the web pages, under Wine.",
+           version="2.0", games=("gridwords",), port=6516, protocol="networdz", style="networdz", status="untested",
+           status_note="The parlor is the host for Networdz 2.0. The stock program cannot connect yet: a copy in "
+                       "Answer mode waits for its host to connect, and the parlor never connects out. A patch that "
+                       "makes it connect out to the parlor is a later step.",
            ratings=(
-               Rating(GOLD, "win", ("x86",), "2.0",
-                      "Networdz 2.0 hosted whole games through the parlor, one against the bot and one against a "
-                      "player on the web pages, each to its end with the same final scores on both sides, with the "
-                      "ParlorNet configuration. It ran under Wine 8.0 on 32-bit Debian, not on Windows itself. Words the "
-                      "1996 dictionary lacks are refused for the other players, as Known quirks says.",
-                      "2026-11-24"),)),
+               Rating(NOT_RATED, "win", ("x86",), "2.0",
+                      "The stock program cannot connect yet; a patch that makes it connect out to the parlor is a "
+                      "later step. The parlor's side was tested against the stock program in Answer mode under "
+                      "Wine 8.0 on 32-bit Debian, with a test-only helper in the patch's place. " + A_REAL_TEST),)),
     Client("rscards", "RSCARDS (GEnie)", "period", "1987",
            "J. Weaver Jr.'s front ends for GEnie's graphics games date from 1984 to 1994; GEnie ran the games from "
            "about 1987 to 1995. The Mac version 5.0 is dated January 1994 and the IBM PC version 5.02 October 1994.",
