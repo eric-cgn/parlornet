@@ -37,14 +37,14 @@ When the session ends (Open-Apple-Q), the program says goodbye to the parlor, th
 What the card is connected to decides what to set:
 
 - **A WiFi modem or a modem emulator** (tcpser, or an emulator's modem): press P.
-- **A Unix shell login:** install pndial as `ATZ` and press P (below).
+- **A Unix shell login:** install ATZ and press P (below).
 - **A bridge to the parlor's port**, such as ser2net or socat on a computer, or a null-modem cable to a machine that relays the line to the parlor's native port: empty the number in the settings, then press P.
 
 [serial.md](serial.md) covers every way over a serial line, with the cable.
 
 ### Through a Unix shell
 
-If the serial line leads to a Unix shell (a login on a Linux machine or a Raspberry Pi, say), the shell can play the modem with pndial ([serial.md](serial.md#pndial-for-programs-that-dial)). Install it so that the command `ATZ` runs it: a link, `ln -s pndial ~/.local/bin/ATZ` with pndial in `~/.local/bin` on your PATH, or `alias ATZ='pndial -z'` in the shell's startup file. Log the line in once from the console (C), then go back to the start screen with Open-Apple-Q and press P. The program's `ATZ` reaches the shell, which echoes it and runs pndial; pndial answers OK, as a modem answers a reset. The program then dials, pndial says CONNECT and joins the line to the parlor with nc, and the program signs in, with no console step and no Open-Apple-P race. After Open-Apple-Q pndial waits for the next dial, and P dials again. To get the shell prompt back, press C for the console and Control-C. If the parlor is still connected there, the first Control-C hangs it up (pndial says NO CARRIER) and the second ends pndial.
+If the serial line leads to a Unix shell (a login on a Linux machine or a Raspberry Pi, say), the shell can play the modem with ATZ, a short program installed under that name on the shell's PATH ([serial.md](serial.md#atz-for-programs-that-dial)). Log the line in once from the console (C), then go back to the start screen with Open-Apple-Q and press P. The program's `ATZ` reaches the shell, which echoes it and runs ATZ, and ATZ answers OK, as a modem answers a reset. The program then dials, ATZ connects to the parlor and says CONNECT, and the program signs in, with no console step and no Open-Apple-P race. After Open-Apple-Q, ATZ waits for the next dial, and P dials again. To get the shell prompt back, press C for the console and Control-C. If a connection is still up there, hang it up first as with a modem: wait a moment, type `+++`, wait, then `ATH` and Return.
 
 The shell can also open the connection by hand with netcat. Press C for the console, log in, and type:
 

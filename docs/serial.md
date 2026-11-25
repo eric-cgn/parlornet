@@ -43,48 +43,34 @@ stty raw -echo; nc parlornet.org 6501; stty sane
 
 The versions of nc differ in one way that matters here. The traditional nc (Debian's netcat-traditional), BusyBox's nc, GNU netcat and the nc of macOS end as soon as the parlor hangs up. OpenBSD's nc (netcat-openbsd, the usual one on Debian and Ubuntu) and Nmap's ncat do not notice the hang-up until the program sends something more: the next key or two you press ends them, and those keys go nowhere. OpenBSD nc's `-N` and `-q` options are about the end of your own input, which never comes from a terminal, so they do not change this. If it bothers you, use `busybox nc` or install the traditional nc.
 
-### pndial, for programs that dial
+### ATZ, for programs that dial
 
-Many period programs expect a modem: they send AT commands, dial a number and wait for CONNECT. pndial is a short shell script that plays that modem in the shell, so such a program can dial the parlor through a Unix login. It is [tools/pndial](../tools/pndial) in ParlorNet's source. Copy it to the Unix machine, for example with `curl -O https://raw.githubusercontent.com/eric-cgn/parlornet/main/tools/pndial`, and make it executable with `chmod +x pndial`. It needs only sh, stty, tr and nc, and it runs under dash, bash, BusyBox sh and the sh of macOS, with any of the versions of nc above.
-
-Log in from the program's terminal, run pndial, then let the program dial:
+Many period programs expect a modem: they reset it with `ATZ`, send other AT commands, dial a number and wait for CONNECT. ATZ is a short Python program that plays that modem in the shell, so such a program can dial out through a Unix login with no one typing at the shell. Installed under the name ATZ on the shell's PATH, it is started by the program's own reset: the program sends `ATZ` and a carriage return to the shell prompt, the shell echoes the line, as a modem echoes a command, and runs it, and it answers OK, as the modem's reply to the reset. It is [tools/ATZ](../tools/ATZ) in ParlorNet's source, and it needs Python 3.8 or later and nothing outside Python's standard library, which Linux, the BSDs and macOS already have. To install it in `~/.local/bin`, which most Linux systems put on the PATH of a login shell:
 
 ```
-pndial [-z] [host [port]]
+mkdir -p ~/.local/bin
+curl -o ~/.local/bin/ATZ https://raw.githubusercontent.com/eric-cgn/parlornet/main/tools/ATZ
+chmod +x ~/.local/bin/ATZ
 ```
 
-The host and port are where a dial goes when the number does not name a parlor itself. They default to parlornet.org and 6501, so for a program that does not speak PARLORNET/1, give the port it needs from the table above. The number dialed chooses the parlor like this:
+Typed at the shell, `ATZ [host [port]]` starts it the same way. The host and port are where a dial goes when the number does not name a host itself. They default to parlornet.org and 6501, so for a program that does not speak PARLORNET/1, give the port it needs from the table above. The number dialed chooses where to go like this:
 
 - `ATDT host:port` dials that host and port, such as `ATDT parlornet.org:6520`.
-- `ATDT host` dials that host on the port given to pndial. The name must have a dot in it, such as `ATDT myparlor.example.org`.
-- Any other number, such as `ATDT5551212` or `ATDT parlornet`, dials the host and port given to pndial. A program that can only dial digits, or that still holds an old phone number, works unchanged this way.
+- `ATDT host` dials that host on the default port. The name must have a dot in it, such as `ATDT myparlor.example.org`.
+- Any other number, such as `ATDT5551212` or `ATDT parlornet`, dials the default host and port. A program that can only dial digits, or that still holds an old phone number, works unchanged this way.
 
-#### pndial as ATZ
+ATZ echoes the commands it is sent, as a modem does, until `ATE0` turns that off. It answers every other AT command with OK, and a line that does not start with AT gets no answer. On a dial it connects and says CONNECT with the line's speed (`CONNECT 9600`), or NO CARRIER when the host cannot be reached, and then passes every byte both ways unchanged and unechoed. When either side hangs up it says NO CARRIER and waits for the next command, as a modem would, so a program can dial again without anyone typing at the shell.
 
-A program that dials usually resets its modem first with `ATZ`. Installed under that name, pndial lets the program start it, so a plain shell login answers like a modem with no one typing at the shell. Make a link named ATZ to pndial in a directory on your PATH:
-
-```
-ln -s pndial ~/.local/bin/ATZ
-```
-
-(with pndial in `~/.local/bin` too), or add an alias to the shell's startup file, such as `~/.bashrc`, which suits a system where links are awkward:
-
-```
-alias ATZ='pndial -z'
-```
-
-The program sends `ATZ` and a carriage return to the shell prompt. The shell echoes the line, as a modem echoes a command, and runs pndial, which skips its banner and answers just OK, as the modem's reply to the reset. It then waits for commands as usual: any further command gets OK, and the dial gets CONNECT. A lowercase `atz` link works too, and `-z` gives the same start from the command line. Host and port arguments can follow, in the alias or after `-z`, for numbers that do not name a parlor.
+It keeps the Hayes escape, as a real modem does: a second with nothing sent, `+++`, and another second with nothing sent bring back the commands with OK while the connection stays up. Then `ATH` (or `ATZ`) hangs up, and `ATO` goes back to the connection. The seconds of quiet are what make the escape safe: a `+++` among a program's data, with bytes just before or after it, is passed on as data, so it works under any protocol. By hand at the program's terminal, wait a moment, type `+++`, wait again, then type `ATH` and Return. Control-C or Control-D at the commands ends ATZ and gives the shell back.
 
 Some examples:
 
-- For ParlorNet for the Apple IIe, install pndial as ATZ, log the line in to the shell once from the program's console (C), then press Open-Apple-Q for the start screen and P. The program sends ATZ, pndial answers OK, the program dials `ATDTparlornet.org:6501` (the number in its settings), and on CONNECT it signs in at once, so there is no race with the parlor's 20 seconds. When you close the connection with Open-Apple-Q, the parlor hangs up; OpenBSD's nc notices when the program sends `+++` after it, and pndial says NO CARRIER and waits for the next dial, which P makes. Control-C in the console ends pndial and brings back the shell prompt. Without the ATZ name, run `pndial` in the console, then press Open-Apple-Q and P.
-- For RSCARDS on a Mac, run `pndial parlornet.org 6520` and leave the front end's dial string as it is. It still holds GEnie's number, which now dials the parlor. Command-D dials.
-- For RSCARDS on an IBM PC, run `pndial parlornet.org 6520`, dial from DOS with `echo ATDT5551212 > COM1`, then start `RSCARDS 1`.
-- For Worthy Opponent, run `pndial parlornet.org 6519` and dial any entry of the phone book, or put `ATDT parlornet.org:6519` in it as its page says.
+- For ParlorNet for the Apple IIe, install ATZ, log the line in to the shell once from the program's console (C), then press Open-Apple-Q for the start screen and P. The program sends ATZ, which answers OK, dials `ATDTparlornet.org:6501` (the number in its settings), and on CONNECT signs in at once, so there is no race with the parlor's 20 seconds. When you close the connection with Open-Apple-Q, the parlor hangs up, and ATZ says NO CARRIER and waits for the next dial, which P makes. Control-C in the console ends ATZ and brings back the shell prompt.
+- For RSCARDS on a Mac, run `ATZ parlornet.org 6520` and leave the front end's dial string as it is. It still holds GEnie's number, which now dials the parlor. Command-D dials.
+- For RSCARDS on an IBM PC, run `ATZ parlornet.org 6520`, dial from DOS with `echo ATDT5551212 > COM1`, then start `RSCARDS 1`.
+- For Worthy Opponent, run `ATZ parlornet.org 6519` and dial any entry of the phone book, or put `ATDT parlornet.org:6519` in it as its page says.
 
-pndial echoes the commands it is sent, as a modem does, until `ATE0` turns that off. It answers every other AT command with OK, and a line that does not start with AT gets no answer. On a dial it says CONNECT with the line's speed (`CONNECT 9600`), joins the line to the parlor with nc and passes every byte both ways unchanged and unechoed. When either side hangs up it says NO CARRIER, puts the line back into command mode and waits for the next dial, as a modem would, so a program can dial again without anyone typing at the shell. Control-C or Control-D while it waits puts the terminal back as it was and ends pndial.
-
-It is a few dozen lines on purpose, and not a full modem. It says CONNECT before the connection is made, so a parlor that cannot be reached gives CONNECT and then NO CARRIER. During a connection every key goes to the parlor, Control-C included, and there is no `+++` escape. On the native port, 6501, the parlor takes Control-C as a hang-up: it closes the connection, nc ends and pndial says NO CARRIER, and a second Control-C ends pndial. On the other ports, hang up from the program by signing off or closing its connection. It has no numeric result codes, no S-registers and no answering of calls. With OpenBSD's nc or ncat, NO CARRIER waits for the program's next key or two, as described above; run it as `NC='busybox nc' pndial` to use BusyBox's nc instead. For more than this, use tcpser or a WiFi modem.
+It is short on purpose, and not a full modem: it has no numeric result codes, no S-registers (the escape's character and seconds are fixed) and no answering of calls. What comes from the far end while it is at the commands is dropped. For more than this, use tcpser or a WiFi modem.
 
 ## tcpser
 
@@ -108,5 +94,5 @@ A dial-up service for real modems is planned: a phone number that a period modem
 
 - Most computers' serial ports are wired the same way, as terminals, so a cable between two computers needs its send and receive lines crossed: a null-modem cable, or a null-modem adapter on a straight one. A modem, WiFi or not, takes a straight cable. Some serial cards, such as the Apple's Super Serial Card, have a jumper block that sets them for a modem or a terminal and so can do the crossing themselves.
 - Both ends must use the same speed and format. Use 8N1: 8 data bits, no parity and 1 stop bit. 9600 or 19200 bit/s suits the Apple IIe program, RSCARDS runs at 1200 or 2400 and Worthy Opponent at 1200. On Linux the getty sets the line's speed, or `stty -F /dev/ttyUSB0 9600` for a bridge.
-- For flow control use RTS/CTS, with a cable that carries those lines and both ends set for it (`stty crtscts` on Linux), or none. XON/XOFF does not survive a raw line: once the terminal is raw, as with nc, pndial or socat, the XON and XOFF characters go to the parlor as data.
+- For flow control use RTS/CTS, with a cable that carries those lines and both ends set for it (`stty crtscts` on Linux), or none. XON/XOFF does not survive a raw line: once the terminal is raw, as with nc, ATZ or socat, the XON and XOFF characters go to the parlor as data.
 - With `agetty -L` the Linux side ignores carrier detect. Without `-L` the login waits for carrier detect, which a null-modem cable usually takes from the period computer's DTR line.
