@@ -34,6 +34,7 @@ import sys
 from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urlsplit
 
 from parlord import DOCS_URL, PROJECT_URL
+from parlord.auth import NEW_NAME_RULE
 from parlord.frontends import read_key
 
 from .common import (BG_HOME_PREF, BG_HOMES, CoreClient, CoreError, NeedAuth, Refused, addr_key, claim_text,
@@ -725,7 +726,7 @@ def signup_page(auth, message="", name="", raw=False):
     """/signup.htm: a new account, through the server's sign-up steps."""
     body = (h1("New account") + note_html(message, raw) + p(esc(signup_steps(auth))) +
             callout(signup_form(name)) +
-            p("%s Already have an account? %s." % (esc(NAMES_RULE), a(SIGNIN_PAGE, "Sign in")), 2))
+            p("%s Already have an account? %s." % (esc(NEW_NAME_RULE), a(SIGNIN_PAGE, "Sign in")), 2))
     return respond(200, page("ParlorNet: new account", body, current=SIGNUP_PAGE))
 
 
@@ -762,7 +763,7 @@ def welcome(req, message="", auth=("password", "Password", "password"), motd=(),
     else:
         start = (h2("signin", "Sign in") + callout(signin_form(auth)) +
                  h2("new", "New account") +
-                 p("%s %s" % (esc(signup_steps(auth)), esc(NAMES_RULE)), 2) +
+                 p("%s %s" % (esc(signup_steps(auth)), esc(NEW_NAME_RULE)), 2) +
                  callout(signup_form()))
     body = (h1("Welcome") + (motd_html(motd) if motd else "") + note_html(message) + start +
             machines_html(play_link(host_of(req), protocols)))
@@ -1752,7 +1753,7 @@ class Web:
         self.sweep_signins()
         name = (q.get("n") or [""])[0].strip()
         if not NAME_RE.match(name):
-            return await self.signup_page(req, NAMES_RULE)
+            return await self.signup_page(req, NEW_NAME_RULE)
         if not self.make_room(req["src"]):
             return notice(BUSY[0], BUSY[1], BUSY[2], status=503)
         core = await self.connect(req)

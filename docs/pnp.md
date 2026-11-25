@@ -963,6 +963,7 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `LIMIT` | `NEW` or `JON` by a player playing as many games as the server allows, or waiting at as many open tables of that game (Tables, above), a table has twice as many invitations out as free seats, or 20 notes, `PRF SET` would pass 16 keys or 1024 bytes, `TDS` 16 keys, or a connection would declare more than 4 protocols with `PRO`. |
 | `LOCKED` | The name is locked after wrong answers, or the address has used up its wrong answers (with `wait=`). |
 | `NAMEINUSE` | `REG` for a name that has an account, or the name was taken by someone else while this sign-up ran (a pending account holds its name). |
+| `NAMERULE` | `REG` (or `HELO` for a free name) with a name outside the rule for new names: it starts with a letter, and `-` and `_` go only between letters or digits. Names from before the rule still sign in. |
 | `NOAUTH` | `PWD` on a server whose sign-in has no password. |
 | `NOGAME` | `NEW` or `TOP` for a game this server does not host, or `RES`, `MOV` or `CHK` at a table whose game is not running. |
 | `NOHELO` | The request needs a sign-in first (or `OUT` when not signed in). |
@@ -985,7 +986,7 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `PRIVATE` | `JON` or `SEE` at a private table without an invitation, or `NOTE` or `TRN` there by someone who may not see it. |
 | `PROTOCOL` | The connection did not start with `PARLORNET/1` within 20 seconds; the connection is closed. |
 | `RATE` | Too many requests too fast (the request was not done), or three failed `SES` on one connection. |
-| `RESERVED` | `REG` (or `HELO` for a free name) with a reserved word, `new` or `guest`; `USER`, `HELO` or `REG` with a bot's name (`bot`, `bot1` to `bot3`). |
+| `RESERVED` | `REG` (or `HELO` for a free name) with a reserved word: `new` or `guest`, or a name that would pass for the server or its staff (`parlornet`, the server's own name, `admin`, `administrator`, `sysop`, `system`, `server`, `operator`, `moderator`, `staff`, `root`); `USER`, `HELO` or `REG` with a bot's name (`bot`, `bot1` to `bot3`). |
 | `SIGNEDOUT` | This connection's session was ended elsewhere; sign in again. |
 | `STATE` | Not now: already signed in, already seated, an `AUT` that answers nothing asked, a seat that has left the game. |
 | `SUSPENDED` | The operator suspended this name. |
