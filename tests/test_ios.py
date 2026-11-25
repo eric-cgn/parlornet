@@ -246,6 +246,15 @@ class Eclipse:
         self.s.close()
 
 
+def leave(c, port):
+    """Quit and wait until the IOS service has let the client's name go, so the next login with it is not
+    "logged in already". The service shows a login its first <ios> line before it counts the name as logged
+    in, so first wait for the answer to the who that login() sent: by then the name is counted."""
+    c.who()
+    c.close()
+    logged_out(port, c.name)
+
+
 def logged_out(port, name, timeout=10):
     """Wait until the IOS service no longer has name logged in (a client that quit is gone only once the
     service has seen its connection close). Each look sends the name at login: and hangs up at password:,
@@ -544,14 +553,12 @@ class IosPassword(unittest.TestCase):
         self.assertNotIn("Choose a password: ", text)          # answered by the password field
         self.assertNotIn("token", text.lower())
         self.assertEqual(c.raw_line(), " [mac1(-) connected")
-        c.close()
-        logged_out(self.ios, "mac1")
+        leave(c, self.ios)
         d = Eclipse(self.ios)                                  # back: the password field, nothing asked
         ok, asked, text = d.login("mac1", "mac1-Pass-word")
         self.assertTrue(ok, text)
         self.assertEqual(asked, {"login:": 1, "password:": 1})
-        d.close()
-        logged_out(self.ios, "mac1")
+        leave(d, self.ios)
         e = Eclipse(self.ios)                                  # a wrong password: the reason, then closed
         ok, asked, text = e.login("mac1", "wrongpw")
         self.assertFalse(ok)
@@ -565,8 +572,7 @@ class IosPassword(unittest.TestCase):
         self.assertTrue(ok, text)
         self.assertEqual(asked, {"login:": 1, "password:": 1, "typed": 1})
         self.assertIn("\r\nPassword: ", text)
-        c.close()
-        logged_out(self.ios, "tyra")                           # else: "tyra is logged in already"
+        leave(c, self.ios)
         for name, password, reason in (("waytoolongname", "", "Names are"),
                                        ("tyra", "", "No answer came to: Password.")):    # prompted, nothing typed
             c = Eclipse(self.ios)
@@ -772,14 +778,12 @@ class IosEmail(unittest.TestCase):
                      "New password (8 or more characters): ", "Type it again: "):
             self.assertIn(want, text)
         self.assertEqual(c.raw_line(), " [tia(-) connected")
-        c.close()
-        logged_out(self.ios, "tia")
+        leave(c, self.ios)
         d = Eclipse(self.ios)                  # from then on, the password of their own
         ok, asked, text = d.login("tia", "Tia-own-pass1")
         self.assertTrue(ok, "not signed in")
         self.assertEqual(asked, {"login:": 1, "password:": 1})
-        d.close()
-        logged_out(self.ios, "tia")
+        leave(d, self.ios)
         e = Eclipse(self.ios)                  # sign up from the client's window: y, address, then sign in
         ok, asked, text = e.login("sue", "", typed=["y", "sue@example.org",
                                                     lambda: mailed_password(self.mails, "sue@example.org"),
@@ -791,8 +795,7 @@ class IosEmail(unittest.TestCase):
             self.assertIn(want, text)
         self.assertLess(text.index("Sign up as sue?"), text.index("Email address"))
         self.assertEqual(e.raw_line(), " [sue(-) connected")
-        e.close()
-        logged_out(self.ios, "sue")
+        leave(e, self.ios)
         for name, password, reason in (
                 ("newbie", "x", "newbie is not signed up on this server. Sign up as newbie? (y/n): "),
                 ("tia", "", "No answer came to: Password."),
