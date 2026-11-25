@@ -17,6 +17,7 @@ from test_matrix import Conn, table, until
 from adapters import outland as O  # noqa: E402
 from adapters.games import backgammon as BG  # noqa: E402
 from adapters.games import reversi as RV  # noqa: E402
+from speed import slow  # noqa: E402
 
 
 def view(conn, module, tid):
@@ -36,6 +37,7 @@ def ended(conn, tid):
     return [l.split(" ", 3)[3] for l in conn.req("SIN %s 0" % tid) if l.startswith("EVT ")][-1]
 
 
+@slow
 class Ios(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -114,6 +116,7 @@ def full_move(v, seat):
         out.append((f, t))
 
 
+@slow
 class Fibs(TF.Stack):
     def test_backgammon(self):
         x, w = self.client(TF.FibsW), self.client(TF.FibsW)
@@ -163,6 +166,7 @@ class Fibs(TF.Stack):
         until(lambda: ended(oracles["mxxav"], tid).startswith("END"), "the end")
 
 
+@slow
 class Outland(TO.LiveBase):
     def test_backgammon(self):
         req = self.native("mxwes")

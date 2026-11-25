@@ -21,6 +21,7 @@ from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 sys.path.insert(0, ROOT)
 from adapters import gamemaster as GM  # noqa: E402
 from bot.play import LocalGame  # noqa: E402
+from speed import slow  # noqa: E402
 
 TIMEOUT = 20
 
@@ -680,6 +681,7 @@ class Native:
 
 # ---- with a server ---------------------------------------------------------------------------------
 
+@slow
 class WithAServer(WebPlayers, unittest.TestCase):
     """A core (sign-in none), the web, the GameMaster extension and the bot."""
 

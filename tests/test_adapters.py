@@ -15,6 +15,7 @@ from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
 from adapters import telnet as T  # noqa: E402
+from speed import slow  # noqa: E402
 
 
 def plain(html):
@@ -701,6 +702,7 @@ class NewTableWeb(Stack):
         self.assertEqual(plain(nia.get("/lobby.htm")[3]).count("<td>Mancala</td>"), 1)
 
 
+@slow
 class WebExpiry(Stack):
     """Sessions run out: a cookieless browser's s= stops working after the idle limit."""
     auth = "none"
@@ -766,6 +768,7 @@ class MailCapture:
         raise AssertionError("no mail %d to %s" % (n, addr))
 
 
+@slow
 class PasswordEmail(MailCapture, Stack):
     """Sign-in password with sign-up email, through the web and telnet: sign-up mails a temporary password,
     the first sign-in with it asks for a password of the player's own before anything else, that password
@@ -1157,6 +1160,7 @@ class TelnetBase(Stack):
         return out
 
 
+@slow
 class Telnet(TelnetBase):
     def test_play_by_telnet(self):
         a, b = Client(self.tel_port), Client(self.tel_port)
@@ -1218,6 +1222,7 @@ class TelnetNone(TelnetBase):
         a.close()
 
 
+@slow
 class TelnetFullScreen(TelnetBase):
     """The ANSI menu and board, driven by raw key bytes."""
 
@@ -1306,6 +1311,7 @@ def new_rows():
     return len(games.all_games())
 
 
+@slow
 class TelnetBackgammon(TelnetBase):
     """Backgammon by telnet: a table started from the menu, steps played
     with keys, the turn ended, the other player sees it."""
@@ -1370,6 +1376,7 @@ class TelnetBackgammon(TelnetBase):
             self.assertNotIn("\x1b[?1000h", c.raw.decode("latin-1"))   # no terminal type: no mouse
 
 
+@slow
 class TelnetMouse(TelnetBase):
     """An xterm gets mouse reports switched on; clicks drive the menu, the
     pickers and the Reversi board."""

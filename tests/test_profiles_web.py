@@ -231,7 +231,7 @@ class TelnetProfiles(Stack):
         s.sendall(b"join %s\r\n" % tid.encode())
         self.until(s, ">", 5)
         ann.act("/move.htm?t=%s&mv=d3" % tid)
-        time.sleep(1.0)
+        self.assertIn("ann plays d3", self.until(s, "ann plays d3"))     # tess's turn now
         s.sendall(b"c3\r\n")
         deadline = time.time() + 10
         while time.time() < deadline:

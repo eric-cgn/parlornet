@@ -29,6 +29,7 @@ from test_gridwords import P, WORDS, write_words
 sys.path.insert(0, ROOT)
 from adapters import networdz as A  # noqa: E402
 from adapters.games import gridwords as G  # noqa: E402
+from speed import slow  # noqa: E402
 
 WAIT = 30
 LOG = []                    # the extension's log, for a failing test's message
@@ -528,6 +529,7 @@ class Stack(unittest.TestCase):
         return h, pw
 
 
+@slow
 class Service(Stack):
     def test_hello_sign_in_and_rules(self):
         h = self.host("ann")

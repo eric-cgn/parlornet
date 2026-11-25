@@ -1,5 +1,7 @@
-# Every push to main and every pull request: the whole test suite and the Docker image. A pull request into
-# main fails unless it comes from dev: features go into dev, and main only takes dev, as a release.
+# Every push to main and every pull request: the fast tests and the Docker image. A pull request into main
+# fails unless it comes from dev: features go into dev, and main only takes dev, as a release. The slow tests
+# (whole games through the extensions and the bot, timers, the matrices; tests/speed.py) run nightly and by
+# hand on dev (slow.yml) and before a release is tagged (release.yml).
 # Python 3.13, as in the Dockerfile: the extension channel needs its TLS pre-shared keys, and the tests that use
 # it skip on an older Python.
 name: CI
@@ -15,7 +17,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45   # the suite takes about a quarter of an hour
+    timeout-minutes: 15   # the fast tests take a few minutes
     steps:
       - name: Into main only from dev
         if: github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref != 'dev'
@@ -26,7 +28,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.13"
-      - name: Test
+      - name: Test (fast)
+        env:
+          PARLOR_TESTS: fast
         run: python3 -m unittest discover -s tests
       - name: Docker image
         run: docker build -t parlornet .

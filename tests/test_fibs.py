@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlsplit
 from test_adapters import WebPlayers, spawn
 from test_backgammon import bg
 from test_core import adapter_args, free_port, make_keys, stack_args
+from speed import slow  # noqa: E402
 
 WAIT = 15
 
@@ -524,6 +525,7 @@ class Stack(WebPlayers, unittest.TestCase):
         return done
 
 
+@slow
 class Fibs(Stack):
     def test_board_line_layout(self):
         """The start of a 3 point match, O rolled 6-2: the CLIP specification's example."""
@@ -938,6 +940,7 @@ class Fibs(Stack):
         self.assertFalse(any(l.startswith("** xoan") for l in c.seen), "xoan's program said nothing")
 
 
+@slow
 class FibsNoAuth(Stack):
     """--auth none: a name alone signs in, the password is ignored."""
     auth = "none"
@@ -1043,9 +1046,12 @@ class FibsNeverVolunteers(unittest.TestCase):
                 mac = MacFIBS(port)
                 mac.login(name, "pia-Pass-word")
                 mac.close()
-                time.sleep(0.3)
                 # a login signs in only (USER); under sign-in none the name is the whole sign-in (HELO)
-                self.assertIn("%s %s" % ("HELO" if signin == "none" else "USER", name), core.lines)
+                first = "%s %s" % ("HELO" if signin == "none" else "USER", name)
+                deadline = time.time() + 10
+                while not (first in core.lines and all(w in core.lines for w in want)) and time.time() < deadline:
+                    time.sleep(0.05)
+                self.assertIn(first, core.lines)
                 self.assertEqual([l for l in core.lines if "pia-Pass-word" in l], want, signin)
             finally:
                 proc.kill()

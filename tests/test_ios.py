@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 from test_adapters import Browser, spawn
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 import json
+from speed import slow
 
 DIRS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
 
@@ -245,6 +246,36 @@ class Eclipse:
         self.s.close()
 
 
+def logged_out(port, name, timeout=10):
+    """Wait until the IOS service no longer has name logged in (a client that quit is gone only once the
+    service has seen its connection close). Each look sends the name at login: and hangs up at password:,
+    before anything reaches the core."""
+    end = time.time() + timeout
+    while True:
+        s = socket.create_connection(("127.0.0.1", port), timeout=5)
+        try:
+            text = b""
+            while b"login:" not in text:
+                d = s.recv(4096)
+                if not d:
+                    raise AssertionError("closed before login: %r" % text[-200:])
+                text += d
+            s.sendall(name.encode() + b"\n\r")
+            text = b""
+            while b"password:" not in text and b"logged in already" not in text:
+                d = s.recv(4096)
+                if not d:
+                    break
+                text += d
+        finally:
+            s.close()
+        if b"password:" in text:
+            return
+        if time.time() > end:
+            raise AssertionError("%s still logged in to the IOS service: %r" % (name, text[-200:]))
+        time.sleep(0.05)
+
+
 class IosClient:
     """A terminal user: plain lines, LF ends."""
 
@@ -280,6 +311,7 @@ class IosClient:
         return self.until("%s%% " % name)
 
 
+@slow
 class Ios(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -513,13 +545,13 @@ class IosPassword(unittest.TestCase):
         self.assertNotIn("token", text.lower())
         self.assertEqual(c.raw_line(), " [mac1(-) connected")
         c.close()
-        time.sleep(0.3)
+        logged_out(self.ios, "mac1")
         d = Eclipse(self.ios)                                  # back: the password field, nothing asked
         ok, asked, text = d.login("mac1", "mac1-Pass-word")
         self.assertTrue(ok, text)
         self.assertEqual(asked, {"login:": 1, "password:": 1})
         d.close()
-        time.sleep(0.3)
+        logged_out(self.ios, "mac1")
         e = Eclipse(self.ios)                                  # a wrong password: the reason, then closed
         ok, asked, text = e.login("mac1", "wrongpw")
         self.assertFalse(ok)
@@ -534,6 +566,7 @@ class IosPassword(unittest.TestCase):
         self.assertEqual(asked, {"login:": 1, "password:": 1, "typed": 1})
         self.assertIn("\r\nPassword: ", text)
         c.close()
+        logged_out(self.ios, "tyra")                           # else: "tyra is logged in already"
         for name, password, reason in (("waytoolongname", "", "Names are"),
                                        ("tyra", "", "No answer came to: Password.")):    # prompted, nothing typed
             c = Eclipse(self.ios)
@@ -587,6 +620,7 @@ class RecordingCore:
                            "--key", os.path.join(self.keys, name + ".key"), "--prompt-wait", "2")
 
 
+@slow
 class IosNeverVolunteers(unittest.TestCase):
     """The IOS password goes to the core only as the answer to a credential
     question: never on HELO, never under none, never for an email sign-up's
@@ -682,6 +716,7 @@ def mailed_password(path, to):
     return re.search(r"Password:\s+(\S+)", read_mail(path, to)).group(1)
 
 
+@slow
 class IosEmail(unittest.TestCase):
     """--auth password --signup email, the live server's methods: a sign-up mails a password; the first
     sign-in with it from an IOS client asks for a password of the player's own in the client's window."""
@@ -738,13 +773,13 @@ class IosEmail(unittest.TestCase):
             self.assertIn(want, text)
         self.assertEqual(c.raw_line(), " [tia(-) connected")
         c.close()
-        time.sleep(0.3)
+        logged_out(self.ios, "tia")
         d = Eclipse(self.ios)                  # from then on, the password of their own
         ok, asked, text = d.login("tia", "Tia-own-pass1")
         self.assertTrue(ok, "not signed in")
         self.assertEqual(asked, {"login:": 1, "password:": 1})
         d.close()
-        time.sleep(0.3)
+        logged_out(self.ios, "tia")
         e = Eclipse(self.ios)                  # sign up from the client's window: y, address, then sign in
         ok, asked, text = e.login("sue", "", typed=["y", "sue@example.org",
                                                     lambda: mailed_password(self.mails, "sue@example.org"),
@@ -757,7 +792,7 @@ class IosEmail(unittest.TestCase):
         self.assertLess(text.index("Sign up as sue?"), text.index("Email address"))
         self.assertEqual(e.raw_line(), " [sue(-) connected")
         e.close()
-        time.sleep(0.3)
+        logged_out(self.ios, "sue")
         for name, password, reason in (
                 ("newbie", "x", "newbie is not signed up on this server. Sign up as newbie? (y/n): "),
                 ("tia", "", "No answer came to: Password."),

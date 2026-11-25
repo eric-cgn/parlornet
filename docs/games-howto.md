@@ -207,6 +207,8 @@ Run everything before committing:
 python3 -W ignore -m unittest discover -s tests -p "test_*.py"
 ```
 
+CI runs only the fast tests (`PARLOR_TESTS=fast`). Mark a game's whole games through a real server and its other long tests `@slow` (`tests/speed.py`): they run nightly and before each release.
+
 ## Reversi, file by file
 
 - `plugins/reversi/plugin.py`: `INFO` (`reversi`, version 1, `standard`, 2 players, option `size`), `new` (the four center discs), `view` (`BRD`, `R` rows, `C` counts, `W`, `S`), `moves`, `apply` (`PUT seat sq FLP ...`, `PASS`, `END`), `result`.

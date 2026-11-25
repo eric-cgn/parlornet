@@ -30,6 +30,7 @@ from test_gridwords import WORDS, apply, best_play, form_fields, new_state, put,
 sys.path.insert(0, ROOT)
 from adapters import doom as D  # noqa: E402
 from adapters.common import MOTD_BOTTOM, MOTD_TOP  # noqa: E402
+from speed import slow  # noqa: E402
 
 WAIT = 20
 MOTD = ["Welcome to the test parlor.", "Be kind."]
@@ -425,6 +426,7 @@ class Stack(WebPlayers, unittest.TestCase):
         return {w.upper() for w in WORDS.split()}
 
 
+@slow
 class Doom(Stack):
     def test_banner_login_motd_and_the_bot_sentence(self):
         pw = self.signup("dora")

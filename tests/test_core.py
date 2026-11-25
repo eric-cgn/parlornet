@@ -10,6 +10,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "plugins", "reversi"))
 import plugin as rv  # noqa: E402
+from speed import slow  # noqa: E402
 
 
 def new(n=8):
@@ -339,6 +340,7 @@ class Persistence(unittest.IsolatedAsyncioTestCase):
         await c.req("HELO ned " + tc)
         self.assertEqual(await c.req("IVL"), ["OK"])                   # used up, also after a restart
 
+    @slow
     async def test_turn_timer_forfeits(self):
         a, b = await Client.connect(self.port), await Client.connect(self.port)
         await a.req("HELO cat")
@@ -388,6 +390,7 @@ class Persistence(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(l.endswith(" END resign 2") for l in r), r)
         self.assertIn("NOGAME", (await c.req("RES 1"))[0])
 
+    @slow
     async def test_one_of_three_times_out_and_the_others_play_on(self):
         (a, b, c), _ = await self.three_seats(["rae", "sol", "tam"], "2s")
         evs, seq = await self.events(a, 1)

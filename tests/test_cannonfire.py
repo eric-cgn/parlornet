@@ -12,6 +12,7 @@ from test_adapters import Native, Stack
 from test_core import ROOT, Client, free_port
 
 from adapters.games import cannonfire as G  # noqa: E402
+from speed import slow  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("cf_plugin", os.path.join(ROOT, "plugins", "cannonfire", "plugin.py"))
 cf = importlib.util.module_from_spec(_spec)
@@ -632,6 +633,7 @@ def harmless(st, seat):
     raise AssertionError("no harmless shot")
 
 
+@slow
 class OverProtocol(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.port = free_port()

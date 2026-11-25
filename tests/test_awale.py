@@ -20,6 +20,7 @@ from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
 from adapters import awale as A  # noqa: E402
+from speed import slow  # noqa: E402
 
 WAIT = 25
 LOG = []                # the extension's log, for a failing test's message
@@ -351,6 +352,7 @@ class Stack(unittest.TestCase):
         return a, pw
 
 
+@slow
 class Service(Stack):
     def test_sign_in_and_commands(self):
         pw = self.signup("ada")

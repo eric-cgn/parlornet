@@ -19,6 +19,7 @@ from adapters import declare  # noqa: E402
 from adapters.common import CoreClient  # noqa: E402
 from parlord import DOCS_URL, frontends  # noqa: E402
 from parlord.core import Server  # noqa: E402
+from speed import slow  # noqa: E402
 
 
 class Declarations(unittest.IsolatedAsyncioTestCase):
@@ -185,6 +186,7 @@ class Declarations(unittest.IsolatedAsyncioTestCase):
             srv.close()
 
 
+@slow
 class LiveList(Stack):
     """The running stack: the web and telnet extensions declare themselves; the web's Protocols page and the
     welcome page show the live list, each key linking to its entry on the docs site; a stopped extension
