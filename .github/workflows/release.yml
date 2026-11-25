@@ -1,0 +1,63 @@
+# Every push to main: if VERSION names a version with no release yet, run the whole test suite, build the
+# Docker image, tag the commit v<version> and publish a GitHub Release of the source. No image is published:
+# each parlor builds its own from the source (README.md, "Run your own parlor"). A push that keeps the
+# version does nothing. Run it by hand on main to release a version whose push did not run it.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One at a time, so two quick landings can't both release the same version
+concurrency: release
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45   # the suite takes about a quarter of an hour
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - id: version
+        name: A new version?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(cat VERSION)
+          if ! echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::VERSION holds \"$v\", not a version such as 1.2.3"
+            exit 1
+          fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          if gh release view "v$v" >/dev/null 2>&1; then
+            echo "ParlorNet $v is already released"
+            echo "new=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=yes" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        if: steps.version.outputs.new == 'yes'
+        with:
+          python-version: "3.13"
+      - name: Test
+        if: steps.version.outputs.new == 'yes'
+        run: python3 -m unittest discover -s tests
+      - name: Docker image
+        if: steps.version.outputs.new == 'yes'
+        run: docker build -t parlornet .
+      - name: Release
+        if: steps.version.outputs.new == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            echo "ParlorNet $VERSION: the server (parlord), its server extensions, the game plugins and the bot, as"
+            echo "source. No image is published. Build one from the source with \`docker build -t parlornet .\` and run it"
+            echo "as README.md shows under \"Run your own parlor\". The clients for each game and each kind of computer, the"
+            echo "protocols and the docs are on the docs site, http://docs.parlornet.org/."
+          } > "$notes"
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "ParlorNet $VERSION" --notes-file "$notes"
