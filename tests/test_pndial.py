@@ -92,7 +92,7 @@ class Pndial(unittest.TestCase):
         # host:port dials the parlor; every byte passes as it is
         self.assertEqual(self.say(b"ATDT 127.0.0.1:%d\r" % self.port, b"CONNECT"), b"\r\nCONNECT 9600\r\n")
         self.assertEqual(self.say(b"PARLORNET/1\r\n", b"\r\n"), b"PARLORNET/1 test AUTH=none SIGNUP=none\r\n")
-        self.assertTrue(self.say(b"\x03\x11\x13\r\n", b"\r\n").startswith(b"ERR "))
+        self.assertTrue(self.say(b"\x11\x13\r\n", b"\r\n").startswith(b"ERR "))   # XON, XOFF pass as data
         self.assertIn(b"GAM reversi/1", self.say(b"GAM\r\n", b"OK\r\n"))
         got = self.say(b"BYE\r\n", b"NO CARRIER\r\n", 2.0)
         for _ in range(3):                      # OpenBSD's nc and ncat notice the hang-up at the next key
@@ -101,6 +101,14 @@ class Pndial(unittest.TestCase):
             got += self.say(b"\r", b"NO CARRIER\r\n", 2.0)
         self.assertTrue(got.endswith(b"OK\r\n\r\nNO CARRIER\r\n"), got)
         self.assertEqual(self.say(b"ATZ\r", b"OK\r\n"), b"\r\nOK\r\n")             # commands again
+        self.assertEqual(self.say(b"ATDT127.0.0.1:%d\r" % self.port, b"CONNECT"), b"\r\nCONNECT 9600\r\n")
+        self.say(b"PARLORNET/1\r\n", b"\r\n")
+        got = self.say(b"\x03", b"NO CARRIER\r\n", 3.0)    # the parlor hangs up on Control-C
+        for _ in range(3):                      # OpenBSD's nc and ncat notice the hang-up at the next key
+            if b"NO CARRIER" in got:
+                break
+            got += self.say(b"\r", b"NO CARRIER\r\n", 2.0)
+        self.assertIn(b"NO CARRIER", got)
         os.write(self.fd, b"\x03")              # Ctrl-C while it waits ends it
         end = time.monotonic() + 5
         while time.monotonic() < end and self.status is None:
