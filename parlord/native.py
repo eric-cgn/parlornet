@@ -25,6 +25,7 @@ tunnel (adapters/gamemaster.py) starts the same way.
 import asyncio
 
 CR, LF = 13, 10
+HANG_UP = 3               # Control-C: the parlor closes the connection, so a bridge (pndial's nc) ends
 NAMES = {b"\r\n": "CR LF", b"\r": "CR", b"\n": "LF", b"\n\r": "LF CR"}
 NAME = b"PARLORNET/"      # the opening is NAME and VERSION, then the line ending
 VERSION = b"1"
@@ -74,7 +75,10 @@ class Lines:
         data = await asyncio.wait_for(self.r.read(1024), timeout)
         if not data:
             return False
-        self.buf += data
+        if self.eol is not None and HANG_UP in data:
+            self.buf.clear()                        # Control-C in a session hangs up, the line it ends unrun:
+            return False                            # the protocol is printable text (before the opening a
+        self.buf += data                            # telnet client's negotiation can hold the byte)
         return True
 
     def _opening(self):
