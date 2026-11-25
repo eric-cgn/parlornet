@@ -20,6 +20,7 @@ from adapters import chatcmd as CC  # noqa: E402
 from adapters.common import CoreClient  # noqa: E402
 from parlord import frontends  # noqa: E402
 from parlord.core import MAXLINE, Server  # noqa: E402
+from speed import slow  # noqa: E402
 
 TIM_RE = re.compile(r"^TIM (\d+) (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)\Z")
 
@@ -205,6 +206,7 @@ class TimeCommand(unittest.TestCase):
         self.assertTrue(re.match(r"^Connected 12:3[45]\. Server time \d\d:\d\d UTC\.\Z", said[0]), said)
 
 
+@slow
 class TelnetTime(TelnetBase):
     """The telnet menu's typed command time, in plain text and on the full screen."""
     auth = "none"

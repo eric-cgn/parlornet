@@ -18,6 +18,7 @@ import test_gridwords as TG
 import test_navalcombat as TN
 from adapters import board as B, games, web as W
 from adapters.games import cannonfire as CF, gridwords as GW, navalcombat as NC
+from speed import slow  # noqa: E402
 
 # a view of each game with something to click, as (lines, seat, sel)
 SAMPLES = {
@@ -377,6 +378,7 @@ class Live(Stack):
         return head, body
 
 
+@slow
 class Craters(Stack):
     """Cannon Fire: after a hit, every viewer's page and board image, and a telnet screen, show the new
     ground; the crater (radius 7) is plain to see, the freshly dug ground in its own shade."""

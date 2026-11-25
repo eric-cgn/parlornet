@@ -31,6 +31,7 @@ from adapters.games import gridwords as GW  # noqa: E402
 from adapters import telnet as T  # noqa: E402
 from adapters import web as W  # noqa: E402
 from adapters.common import group_games, parse_games, parse_tables  # noqa: E402
+from speed import slow  # noqa: E402
 
 
 def _plugin(name):
@@ -1016,30 +1017,37 @@ class Matrix:
             fe.after_end(p, mark_of(end_text) if fe.kind == "telnet" else end_text)
 
 
+@slow
 class TelnetPc(Matrix, unittest.TestCase):
     FE, PREFIX = ("telnet", "pc"), "tp"
 
 
+@slow
 class TelnetUtf8(Matrix, unittest.TestCase):
     FE, PREFIX = ("telnet", "utf8"), "tu"
 
 
+@slow
 class TelnetAnsi(Matrix, unittest.TestCase):
     FE, PREFIX = ("telnet", "ansi"), "ta"
 
 
+@slow
 class TelnetIjkl(Matrix, unittest.TestCase):
     FE, PREFIX = ("telnet", "pc", "ijkl"), "tk"
 
 
+@slow
 class TelnetPlain(Matrix, unittest.TestCase):
     FE, PREFIX = ("telnet", "plain"), "tl"
 
 
+@slow
 class Web(Matrix, unittest.TestCase):
     FE, PREFIX = ("web",), "wb"
 
 
+@slow
 class Native(Matrix, unittest.TestCase):
     FE, PREFIX = ("native",), "nt"
 

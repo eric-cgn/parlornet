@@ -19,6 +19,7 @@ sys.path.insert(0, ROOT)
 from adapters.common import Refused  # noqa: E402
 from adapters.games import gridwords as G  # noqa: E402
 from parlord.core import Limits, Server  # noqa: E402
+from speed import slow  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("gw_plugin", os.path.join(ROOT, "plugins", "gridwords", "plugin.py"))
 P = importlib.util.module_from_spec(_spec)
@@ -673,6 +674,7 @@ class CoreInProcess(WordList, unittest.IsolatedAsyncioTestCase):
 
 
 class OverProtocol(CoreInProcess):
+    @slow
     async def test_a_whole_game(self):
         words = P.load_words()
         a, b = await self.client("ann"), await self.client("bob")
@@ -759,6 +761,7 @@ class OverProtocol(CoreInProcess):
         self.assertTrue(any(" END " in l for l in r))
 
 
+@slow
 class WebForms(CoreInProcess):
     """The web adapter against the core, signed in with sessions (a browser signs up with a password and
     keeps the cookie): /move.htm builds the play from the form's three fields (MOVE_FIELDS), /check.htm

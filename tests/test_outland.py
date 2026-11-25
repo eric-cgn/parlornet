@@ -28,6 +28,7 @@ sys.path.insert(0, ROOT)
 from adapters import outland as O  # noqa: E402
 from adapters.common import parse_reversi_view, parse_tables  # noqa: E402
 from parlord.auth import NEWPASS_TEXT  # noqa: E402
+from speed import slow  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("bg_rules", os.path.join(ROOT, "plugins", "backgammon", "plugin.py"))
 rules = importlib.util.module_from_spec(_spec)
@@ -680,6 +681,7 @@ class LiveBase(WebPlayers, unittest.TestCase):
         return new, moves
 
 
+@slow
 class Live(LiveBase):
 
     def test_outland_against_a_web_player(self):
@@ -944,6 +946,7 @@ class Live(LiveBase):
         self.assertTrue(any(f.ftype == O.T_NAK for f in g.frames))
 
 
+@slow
 class LivePassword(LiveBase):
     """Sign-in and sign-up password: the Gateway's password answers the
     credential question. The login only signs in, as on Outland: a name with
@@ -1137,6 +1140,7 @@ def drain(proc):
     threading.Thread(target=lambda: [None for _ in iter(proc.stdout.readline, b"")], daemon=True).start()
 
 
+@slow
 class LiveReversi(WebPlayers, unittest.TestCase):
     """Outland Reversi against a web player, the bot, another Outland player and an invitation from the
     web: a core (sign-in none), the Outland and web extensions and the bot."""

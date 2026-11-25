@@ -29,6 +29,7 @@ from bot import games, play, service  # noqa: E402
 from bot.games import gridwords  # noqa: E402
 from parlord import bots  # noqa: E402
 from parlord.core import Server  # noqa: E402
+from speed import slow  # noqa: E402
 
 GAMES = [("reversi", "standard"), ("backgammon", "standard"), ("checkers", "american"), ("fiveinarow", "freestyle"),
          ("dotsandboxes", "standard"), ("mancala", "kalah"), ("navalcombat", "classic"), ("gridwords", "english"),
@@ -126,6 +127,7 @@ async def local_game(game, rules, n, seed, styles):
     raise AssertionError("%s: no end after 4000 rounds" % game)
 
 
+@slow
 class Strategies(unittest.TestCase):
     """Each game's strategy beats a random player most of the time (seeded, both seats)."""
 
@@ -193,6 +195,7 @@ async def events(c, tid):
     return [l.split(" ", 3)[3] for l in data if l.startswith("EVT ")]
 
 
+@slow
 class WithAServer(unittest.TestCase):
     """A core (sign-in none), the web and telnet adapters, and the bot (python -m bot) with no pause before
     its turns."""

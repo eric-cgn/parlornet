@@ -1,5 +1,5 @@
-# Every push to dev: the whole test suite and the Docker image, on the commit dev now has. There is no dev
-# pre-release: the server ships as its source, and each parlor builds its own image from it, so the dev
+# Every push to dev: the fast tests and the Docker image, on the commit dev now has (the slow tests run
+# nightly on dev, slow.yml). There is no dev pre-release: the server ships as its source, and each parlor builds its own image from it, so the dev
 # branch is the dev build.
 name: Dev build
 
@@ -18,13 +18,15 @@ permissions:
 jobs:
   dev:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45   # the suite takes about a quarter of an hour
+    timeout-minutes: 15   # the fast tests take a few minutes
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: "3.13"
-      - name: Test
+      - name: Test (fast)
+        env:
+          PARLOR_TESTS: fast
         run: python3 -m unittest discover -s tests
       - name: Docker image
         run: docker build -t parlornet .

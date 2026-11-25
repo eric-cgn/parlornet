@@ -14,6 +14,7 @@ from game_checks import ROOT, FakeIO, ScreenCore, T, session
 from test_adapters import LONG, TABS, Client, FakeCore, TelnetBase
 
 from adapters import games as G
+from speed import slow  # noqa: E402
 
 SETS = ["ijkl", "esdf", "wasd", "hjkl"]
 LETTERS = {m: T.MOVE_SETS[m][1] for m in SETS}         # up, down, left, right
@@ -338,6 +339,7 @@ class SplitArrows(unittest.TestCase):
         self.assertEqual(g.cur, (1, 2))                     # up, left, and a: left again
 
 
+@slow
 class Login(TelnetBase):
     """The login offers the movement keys when the terminal type suggests no arrow keys."""
     auth = "none"

@@ -1,0 +1,34 @@
+# The whole test suite, the slow tests with the fast ones (tests/speed.py), on dev: nightly, and by hand with
+# "gh workflow run slow.yml --ref dev". CI (ci.yml, dev.yml) runs only the fast tests; release.yml runs the
+# whole suite again before it tags a release. GitHub starts scheduled runs only from the default branch, so the
+# nightly run begins once this file is on main; until then a push to dev that changes this file runs it there.
+name: Slow tests
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths: [.github/workflows/slow.yml]
+
+concurrency:
+  group: slow
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  slow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45   # the whole suite takes about a quarter of an hour
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Test (fast and slow)
+        run: python3 -m unittest discover -s tests

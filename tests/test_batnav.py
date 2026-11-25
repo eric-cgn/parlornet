@@ -17,6 +17,7 @@ from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
 from adapters import batnav as A  # noqa: E402
+from speed import slow  # noqa: E402
 
 WAIT = 25
 LOG = []                # the extension's log, for a failing test's message
@@ -266,6 +267,7 @@ class Wire(unittest.TestCase):
         self.assertEqual(m[21:25], b"bot\0")
 
 
+@slow
 class Service(Stack):
     def test_signin(self):
         self.signup("ada")
