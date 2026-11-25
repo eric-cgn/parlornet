@@ -1,0 +1,9 @@
+.git
+.claude
+**/__pycache__
+**/*.pyc
+*.db
+*.db-*
+tests
+deploy/local
+deploy/*.sh

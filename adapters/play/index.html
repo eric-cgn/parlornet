@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#16191d">
+<meta name="pn-classic" content="">
+<meta name="pn-push" content="">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Play">
+<title>ParlorNet Play</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="play.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+<header class="bar" id="bar">
+  <a class="brand" href="#/lobby" aria-label="ParlorNet Play, the lobby"><img src="icon.svg" alt="" width="28" height="28"><span>ParlorNet <em>Play</em></span></a>
+  <nav class="crumbs" id="crumbs" aria-label="Where you are"></nav>
+  <div class="tools">
+    <span class="who" id="who"></span>
+    <button type="button" class="icon" id="b-activity" aria-label="Activity" title="Activity: the latest turns" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12.5h4l3-7.5 5 14 3-6.5h4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button type="button" class="icon" id="b-motd" aria-label="Message of the day" title="Message of the day"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9l-4.3 3.4A.4.4 0 0 1 4 20.1V17a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm2 4v2h12V8zm0 4v2h8v-2z"/></svg></button>
+    <button type="button" class="icon" id="b-settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8zm9 4.6v-2.4l-2.5-.5a7 7 0 0 0-.7-1.7l1.4-2.1-1.7-1.7-2.1 1.4a7 7 0 0 0-1.7-.7L13.2 3h-2.4l-.5 2.5a7 7 0 0 0-1.7.7L6.5 4.8 4.8 6.5l1.4 2.1a7 7 0 0 0-.7 1.7L3 10.8v2.4l2.5.5c.2.6.4 1.2.7 1.7l-1.4 2.1 1.7 1.7 2.1-1.4c.5.3 1.1.5 1.7.7l.5 2.5h2.4l.5-2.5c.6-.2 1.2-.4 1.7-.7l2.1 1.4 1.7-1.7-1.4-2.1c.3-.5.5-1.1.7-1.7z"/></svg></button>
+    <button type="button" class="icon" id="b-full" aria-label="Full screen" title="Full screen (F)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5v2H6v3zm11-5h5v5h-2V6h-3zM4 15h2v3h3v2H4zm14 0h2v5h-5v-2h3z"/></svg></button>
+    <button type="button" class="text" id="b-out" hidden>Sign out</button>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+  <section id="v-connect" class="view center">
+    <div class="card narrow"><h1>ParlorNet Play</h1><p id="connect-msg">Connecting to the game server...</p>
+      <p><button type="button" id="b-retry" hidden>Try again</button></p></div>
+  </section>
+
+  <section id="v-signin" class="view center" hidden>
+    <div class="card narrow signin">
+      <h1 id="signin-title">Sign in</h1>
+      <p class="muted" id="server-line"></p>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="t-signin" aria-selected="true">Sign in</button>
+        <button type="button" role="tab" id="t-signup" aria-selected="false">New account</button>
+      </div>
+      <form id="f-name" autocomplete="on">
+        <label for="i-name">Your name</label>
+        <input id="i-name" name="username" autocomplete="username" maxlength="12" pattern="[A-Za-z0-9_\-]{1,12}" required spellcheck="false" autocapitalize="off">
+        <p class="hint">Letters, digits, - and _, up to 12.</p>
+        <button type="submit" class="primary" id="b-name">Sign in</button>
+      </form>
+      <form id="f-step" hidden autocomplete="off">
+        <div id="step-info" class="info"></div>
+        <label for="i-step" id="l-step"></label>
+        <input id="i-step" maxlength="64">
+        <div class="yn" id="step-yn" hidden><button type="button" class="primary" data-a="y">Yes</button><button type="button" data-a="n">No</button></div>
+        <div class="row"><button type="submit" class="primary" id="b-step">Continue</button><button type="button" id="b-cancel">Cancel</button></div>
+      </form>
+      <p class="msg" id="signin-msg" role="alert"></p>
+      <p class="muted small classic">Every way in reaches the same players and tables. The <a href="/welcome.htm">classic pages</a> work in any browser.</p>
+    </div>
+  </section>
+
+  <section id="v-lobby" class="view" hidden>
+    <div class="lobby">
+      <div class="col main-col">
+        <section class="card" aria-labelledby="h-tables">
+          <div class="card-head"><h2 id="h-tables">Tables</h2><span class="muted small" id="tables-note"></span></div>
+          <div id="tables" class="tables"></div>
+        </section>
+        <section class="card" aria-labelledby="h-new">
+          <h2 id="h-new">Start a table</h2>
+          <form id="f-new" class="newtable">
+            <div class="games" id="new-games" role="radiogroup" aria-label="Game"></div>
+            <p class="small muted" id="new-unfinished" hidden>This game is unfinished in Play: its table shows the game's view as text, with its moves as buttons<span class="classic"> and a link to its classic page, which has the full board</span>.</p>
+            <div class="opts">
+              <label>Rules <select id="new-rules"></select></label>
+              <label>Players <select id="new-players"></select></label>
+              <label>Time per turn <select id="new-turn"><option value="5m">5 minutes</option><option value="15m">15 minutes</option><option value="1h">1 hour</option><option value="1d" selected>1 day</option><option value="3d">3 days</option><option value="5d">5 days</option></select></label>
+              <label class="check"><input type="checkbox" id="new-private"> Private (by invitation)</label>
+              <label class="check"><input type="checkbox" id="new-bot" checked> Play the bot</label>
+            </div>
+            <button type="submit" class="primary" id="b-new">Start the table</button>
+            <p class="msg" id="new-msg" role="alert"></p>
+          </form>
+        </section>
+      </div>
+      <div class="col side-col">
+        <section class="card" aria-labelledby="h-inv" id="inv-card" hidden>
+          <h2 id="h-inv">Invitations for you</h2>
+          <ul id="invites" class="list"></ul>
+        </section>
+        <section class="card" aria-labelledby="h-online">
+          <h2 id="h-online">Online now</h2>
+          <ul id="online" class="list people"></ul>
+        </section>
+        <section class="card" aria-labelledby="h-feed-mini" id="feed-card" hidden>
+          <div class="card-head"><h2 id="h-feed-mini">Recent turns</h2><a class="small" href="#/activity">All activity</a></div>
+          <ol id="feed-mini" class="feed compact"></ol>
+        </section>
+        <section class="card" aria-labelledby="h-top-mini" id="top-card" hidden>
+          <div class="card-head"><h2 id="h-top-mini">Leaderboard</h2><a class="small" href="#/scores">Full leaderboard</a></div>
+          <ol id="top-mini" class="list counts"></ol>
+          <p class="small muted">Any score is easy to get on a public server. The leaderboard is meant for conferences, festivals and LAN parties.</p>
+        </section>
+        <section class="card small-card">
+          <h2>Elsewhere</h2>
+          <p class="small classic">Telnet, the classic web pages and period game programs reach the same tables. <a href="/welcome.htm">Welcome page</a> and <a href="/protocols.htm">protocols</a>.</p>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <section id="v-activity" class="view" hidden>
+    <div class="page">
+      <section class="card" aria-labelledby="h-activity">
+        <div class="card-head"><h1 id="h-activity">Activity</h1><span class="muted small" id="activity-note"></span></div>
+        <p class="small muted">The latest turns at public tables, newest first. The program and the machine are what each player's program said it was.</p>
+        <ol id="feed" class="feed"></ol>
+        <p class="row"><button type="button" id="b-feed">Refresh</button><a href="#/lobby">Back to the lobby</a></p>
+      </section>
+    </div>
+  </section>
+
+  <section id="v-scores" class="view" hidden>
+    <div class="page">
+      <section class="card" aria-labelledby="h-scores">
+        <div class="card-head"><h1 id="h-scores">Leaderboard</h1><span class="muted small" id="scores-note"></span></div>
+        <p class="small muted">Every finished game scores points, games against the bot too. By default a win is 4, a draw 2, a loss 1, and resigning or running out of time 0.</p>
+        <p class="row"><label for="s-scores-game">Game</label><select id="s-scores-game"><option value="">All games</option></select></p>
+        <table class="scores" id="scores-table">
+          <thead><tr><th scope="col">Rank</th><th scope="col">Player</th><th scope="col">Points</th><th scope="col">Wins</th><th scope="col">Draws</th><th scope="col">Losses</th><th scope="col">Resigned</th></tr></thead>
+          <tbody id="scores"></tbody>
+        </table>
+        <p class="note" id="scores-caveat">Any score is easy to get on a public server. The leaderboard is meant for conferences, festivals and LAN parties.</p>
+        <p class="row"><button type="button" id="b-scores">Refresh</button><a href="#/lobby">Back to the lobby</a></p>
+      </section>
+    </div>
+  </section>
+
+  <section id="v-table" class="view" hidden>
+    <div class="table-layout" id="table-layout">
+      <div class="stage" id="stage">
+        <canvas id="board" tabindex="0" role="application" aria-roledescription="game board" aria-label="Game board"></canvas>
+        <div class="stage-status" id="stage-status" aria-hidden="true"></div>
+        <div class="toast" id="toast" role="status" hidden></div>
+      </div>
+      <aside class="side" id="side" aria-label="The table">
+        <section class="card players" aria-label="Players"><div id="players"></div><p class="turnline" id="turnline" aria-live="polite"></p></section>
+        <section class="card" id="game-panel" aria-label="Your moves"></section>
+        <section class="card invite" id="invite-card" hidden aria-labelledby="h-invite">
+          <h2 id="h-invite">Waiting for players</h2>
+          <p class="small" id="invited"></p>
+          <form id="f-invite" class="row"><label class="sr" for="i-invite">Name to invite</label><input id="i-invite" maxlength="12" placeholder="Name" spellcheck="false" autocapitalize="off"><button type="submit">Invite</button></form>
+          <p><button type="button" id="b-bot" class="primary">Invite the bot</button></p>
+        </section>
+        <section class="card" id="notes-card" aria-labelledby="h-notes">
+          <h2 id="h-notes">Notes</h2>
+          <div id="racks-ask" class="small" hidden><p id="racks-text"></p><p><button type="button" id="b-racks-yes" class="primary">Agree</button> <button type="button" id="b-racks-no">Say no</button></p></div>
+          <ul id="notes" class="log small"></ul>
+          <form id="f-note" class="row" hidden><label class="sr" for="i-note">Add a note</label><input id="i-note" maxlength="48" placeholder="Add a note" autocomplete="off"><button type="submit">Note</button></form>
+        </section>
+        <section class="card chat" aria-labelledby="h-log">
+          <h2 id="h-log">Table talk</h2>
+          <ol id="log" class="log" aria-live="off"></ol>
+          <form id="f-chat" class="row"><label class="sr" for="i-chat">Say something</label><input id="i-chat" maxlength="56" placeholder="Say something" autocomplete="off"><button type="submit">Say</button></form>
+        </section>
+        <section class="table-actions"><button type="button" id="b-leave">Lobby</button><button type="button" id="b-stand">Stand up</button><button type="button" id="b-resign" class="danger">Resign</button><a id="a-classic" class="small classic" href="#">Classic page</a></section>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<dialog id="d-settings" aria-labelledby="h-settings">
+  <form method="dialog" class="settings">
+    <h2 id="h-settings">Settings</h2>
+    <fieldset><legend>This browser</legend>
+      <label class="check"><input type="checkbox" id="s-sound"> Sounds</label>
+      <label class="check"><input type="checkbox" id="s-motion"> Less motion</label>
+      <label>Drawing <select id="s-render"><option value="auto">3D (WebGL) when available</option><option value="canvas">Flat (2D canvas)</option></select></label>
+    </fieldset>
+    <fieldset id="s-notify" hidden><legend>Notifications</legend>
+      <p class="small" id="s-notify-state"></p>
+      <p><button type="button" id="s-notify-on" class="primary">Turn on for this device</button><button type="button" id="s-notify-off">Turn off for this device</button></p>
+      <div id="s-notify-kinds" role="group" aria-label="Notify me when">
+        <label class="check"><input type="checkbox" id="s-nk-turn"> It's my turn</label>
+        <label class="check"><input type="checkbox" id="s-nk-end"> A game I'm in ends</label>
+        <label class="check"><input type="checkbox" id="s-nk-join"> Someone sits down at my waiting table</label>
+      </div>
+      <p class="small"><a href="notifications.html" target="_blank">How notifications work, and how to turn them on in each browser</a></p>
+      <p class="msg" id="s-notify-msg" role="status"></p>
+    </fieldset>
+    <fieldset id="s-bg"><legend>Backgammon</legend>
+      <p class="small">Which side your home board is on. Kept with your account, here and on the classic pages.</p>
+      <div class="presets" role="radiogroup" aria-label="Home board">
+        <label class="check"><input type="radio" name="s-bghome" id="s-bghome-right" value="right"> On the right</label>
+        <label class="check"><input type="radio" name="s-bghome" id="s-bghome-left" value="left"> On the left</label>
+      </div>
+    </fieldset>
+    <fieldset id="s-colours"><legend>Grid Words colors</legend>
+      <p class="small">Kept with your account, here and on the classic pages. The squares keep their names (3W, 2W, 3L, 2L), whatever the colors.</p>
+      <div class="presets" id="s-presets" role="radiogroup" aria-label="Preset"></div>
+      <div class="custom" id="s-custom"></div>
+      <canvas id="s-preview" width="420" height="80" aria-label="Preview of the colors"></canvas>
+      <p class="msg" id="s-msg" role="status"></p>
+    </fieldset>
+    <fieldset id="s-rt"><legend>Rummy Tile colors</legend>
+      <p class="small">Kept with your account. Each number is drawn in its tile's color. If the colors are hard to tell apart, try Color-blind safe or High contrast.</p>
+      <div class="presets" id="s-rt-presets" role="radiogroup" aria-label="Rummy Tile preset"></div>
+      <div class="custom" id="s-rt-custom"></div>
+      <canvas id="s-rt-preview" width="324" height="80" aria-label="Preview of the Rummy Tile colors"></canvas>
+    </fieldset>
+    <div class="row end"><button value="cancel" type="button" id="s-close">Close</button><button value="save" class="primary" id="s-save">Save</button></div>
+  </form>
+</dialog>
+
+<dialog id="d-profile" aria-labelledby="h-profile">
+  <div class="profile">
+    <p class="small muted kicker">Player</p>
+    <h2 id="h-profile"></h2>
+    <p id="pf-pref" class="pref"></p>
+    <p id="pf-score" class="pref" hidden></p>
+    <form id="f-pref" hidden autocomplete="off">
+      <label for="i-pref">Your preferred machine</label>
+      <div class="row"><input id="i-pref" maxlength="40" spellcheck="false" placeholder="Macintosh SE/30" aria-describedby="pf-pref-hint"><button type="submit" class="primary" id="b-pref">Save</button></div>
+      <p class="hint" id="pf-pref-hint">Up to 40 letters, digits and signs. Every player can see it. Save it empty to clear it.</p>
+    </form>
+    <p class="msg" id="pf-msg" role="status"></p>
+    <div id="pf-body" hidden>
+      <div class="pf-grid">
+        <section aria-labelledby="h-pf-games"><h3 id="h-pf-games">Games played</h3><ul id="pf-games" class="list counts"></ul></section>
+        <section aria-labelledby="h-pf-progs"><h3 id="h-pf-progs">Programs</h3><ul id="pf-progs" class="list counts"></ul></section>
+        <section aria-labelledby="h-pf-machs"><h3 id="h-pf-machs">Machines</h3><ul id="pf-machs" class="list counts"></ul></section>
+      </div>
+      <p class="small muted">Games played to the end and turns played at public tables. Programs and machines are what the player's program said it was.</p>
+      <section id="pf-recent-box" aria-labelledby="h-pf-recent" hidden><h3 id="h-pf-recent">Recent turns</h3><ol id="pf-recent" class="feed compact"></ol></section>
+    </div>
+    <div class="row end"><button type="button" id="pf-close">Close</button></div>
+  </div>
+</dialog>
+
+<dialog id="d-motd" aria-labelledby="h-motd">
+  <form method="dialog" class="motd"><h2 id="h-motd">Message of the day</h2>
+    <pre id="motd-text"></pre>
+    <div class="row end"><button value="ok" class="primary" id="motd-ok">OK</button></div></form>
+</dialog>
+
+<dialog id="d-confirm" aria-labelledby="h-confirm">
+  <form method="dialog"><h2 id="h-confirm"></h2><p id="p-confirm"></p>
+    <div class="row end"><button value="no" id="c-no">No</button><button value="yes" class="danger" id="c-yes">Yes</button></div></form>
+</dialog>
+
+<dialog id="d-letter" aria-labelledby="h-letter">
+  <form method="dialog"><h2 id="h-letter">Which letter is the blank?</h2>
+    <div class="letters" id="letters"></div>
+    <div class="row end"><button value="cancel">Cancel</button></div></form>
+</dialog>
+
+<div id="live" class="sr" aria-live="polite"></div>
+<noscript><p class="center">ParlorNet Play needs JavaScript. The <a href="/welcome.htm">classic pages</a> work without it.</p></noscript>
+<script src="net.js"></script>
+<script src="gfx.js"></script>
+<script src="app.js"></script>
+<script src="game-backgammon.js"></script>
+<script src="game-reversi.js"></script>
+<script src="game-gridwords.js"></script>
+<script src="game-cannonfire.js"></script>
+<script src="game-rummytile.js"></script>
+</body>
+</html>

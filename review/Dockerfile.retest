@@ -1,0 +1,46 @@
+# ParlorNet in one container: the table host (parlord), the frontends the
+# admin panel turns on, and the admin menus on port 6510.
+#
+#   docker build -t parlornet .
+#   docker run -d --name parlornet --restart unless-stopped \
+#       -p 6500-6505:6500-6505 -p 127.0.0.1:6510:6510 -v parlornet:/data parlornet
+#
+# Users: by default everything runs as parlord (uid 10042), unprivileged, and
+# works with --cap-drop ALL and no capability added. Opt-in, with extra
+# capabilities: --user 0 --cap-add SETUID --cap-add SETGID --cap-add KILL runs
+# each server extension as its own pn-<name> user, which can read its own key
+# and nothing else of /data (docs/security-design.md, Containment;
+# deploy/install-split.sh runs one container per extension instead).
+#   docker logs parlornet        # first launch: how to set it up, with a one-time password
+#   telnet 127.0.0.1 6510
+#
+# README.md ("Run your own parlor") has more.
+# Python 3.13 or later: the frontend channel uses TLS 1.3 pre-shared keys (ssl PSK callbacks)
+FROM python:3.13-slim
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+# the system's CA certificates: the SMTP relay's certificate is verified (parlord/auth.py)
+RUN test -s /etc/ssl/certs/ca-certificates.crt
+RUN groupadd --system --gid 10042 parlord \
+    && useradd --system --uid 10042 --gid 10042 --no-create-home --shell /usr/sbin/nologin parlord \
+    && for x in web:10043 telnet:10044 ios:10045 ggs:10046 fibs:10047 outland:10048 admin:10049; do \
+         n=${x%%:*}; i=${x##*:}; \
+         groupadd --system --gid "$i" "pn-$n" \
+         && useradd --system --uid "$i" --gid "$i" --no-create-home --shell /usr/sbin/nologin "pn-$n" \
+         && usermod -aG "pn-$n" parlord; \
+       done \
+    && install -d -m 700 -o parlord -g parlord /data
+WORKDIR /app
+COPY parlord ./parlord
+COPY adapters ./adapters
+COPY plugins ./plugins
+COPY docs ./docs
+COPY static ./static
+COPY deploy/start.py deploy/motd.txt ./deploy/
+USER parlord
+VOLUME /data
+# 6500 web, 6501 native protocol, 6502 telnet, 6503 IOS, 6504 GGS, 6505 FIBS, 4000 Outland. The admin
+# menus (6510) are not exposed: publish them on the host's loopback only (-p 127.0.0.1:6510:6510).
+EXPOSE 6500 6501 6502 6503 6504 6505 4000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 6501), 3); assert s.recv(9) == b'PARLOR/1 '"]
+CMD ["python", "/app/deploy/start.py"]

@@ -1,0 +1,421 @@
+# ParlorNet client protocol (draft 1)
+
+Any machine that can open a byte stream and parse a line can play. The protocol carries typed game state and moves; it has no generic board and no lowest-common-denominator display. Clients are written against game types (below). Terminals reach games through the telnet server extension, which knows each type and renders it for a character screen; it is a server extension (adapters.md), not part of the protocol.
+
+[pnp.md](pnp.md) is a guide for people writing their own frontend, with sample sessions recorded from a real server for the protocol and for every game.
+
+The server is the only authority: it rolls every die, deals every tile, keeps every hidden thing and accepts or refuses every move, and a client may check a move locally for convenience but never decides. What clients and server extensions must and must not do is in [design/trust.md](design/trust.md).
+
+## Framing
+
+- Messages are 7-bit ASCII, one per line. On the public port every line, both ways, ends with the line ending the client chose when it connected: CR LF, CR, LF CR or LF (Connecting, below). On the extension channel lines end with CR LF.
+- A line is at most 80 bytes including its ending, and servers never send a longer one. A longer line from a client is `ERR TOOLONG`, and the connection is closed.
+- Fields are separated by single spaces. Verbs are 3 or 4 upper-case letters. Names and ids are `[A-Za-z0-9_-]`, max 12 chars; session ids are 22 of `[A-Za-z0-9_-]`. The value of `AUT` is the rest of the line as typed (a password may hold spaces), without leading and trailing spaces, and at most 64 characters of it are used.
+- Input is case-insensitive; verbs are sent in upper case.
+- There is no TLS, compression or binary data; TLS and tunnels are a transport matter.
+
+## Connecting (public port)
+
+On the public port (6501) the client speaks first. Its first line is the protocol's name and version, `PARLORNET/1`, and the byte or two after the `1` set the connection's line ending:
+
+| After `PARLORNET/1` the client sends | Line ending |
+|---|---|
+| CR, then LF within 250 ms | CR LF |
+| CR, and no LF within 250 ms | CR |
+| LF, then CR within 250 ms | LF CR |
+| LF, and no CR within 250 ms | LF |
+
+- The opening is matched in any case (`parlornet/1` works too).
+- Up to 10 bytes of anything may come before `PARLORNET/1` and are ignored: a stray Return, line noise, or what a modem or a shell leaves behind.
+- The server sends nothing until the opening comes. Then it sends the greeting, and from then on it ends every line it sends with the connection's ending.
+- The client has 20 seconds from connecting to send the opening.
+- If the opening does not come, the server sends one error line, ending CR LF since no ending is set, and closes the connection. A different version (`PARLORNET/2`) is `ERR VERSION wrong version`. Anything else is `ERR PROTOCOL wrong protocol`: more than 10 bytes before `PARLORNET/1`, bytes that cannot become it (an HTTP request or telnet negotiation, say), a byte after the `1` that is not CR or LF, or no opening within the 20 seconds. Each line goes on with `; see ` and the address of this page on the operator's docs site (`site.docs_url`) when it is set and the line still fits 80 bytes, for example `ERR PROTOCOL wrong protocol; see http://docs.parlornet.org/docs/protocol.html`.
+- A client should send a two-byte ending in one write, so the second byte is not late.
+- After that, each line the client sends must end with exactly that ending. A CR or LF that is not part of the connection's ending ends a line that is refused with `ERR NEWLINE lines end with E here` (`E` is `CR LF`, `CR`, `LF CR` or `LF`) and not carried out; the connection stays open. An empty line with the right ending is ignored.
+- No other bytes are treated specially: telnet negotiation (IAC) is not understood on this port (the telnet extension has its own, 6502).
+- A server that is full sends `ERR BUSY server is full` (ending CR LF) at once on connecting and closes the connection.
+- The extension channel does not use these rules: there the server sends the greeting as soon as the TLS handshake is done, and lines end with CR LF.
+
+## Greeting
+
+After the client's opening (public port), or straight after the TLS handshake (extension channel), the server sends one line: `PARLORNET/1 name AUTH=signin SIGNUP=signup [LABEL=label]`, where `name` is the server's short name, `signin` the sign-in method (`none` or `password`; parlornet.org sends `AUTH=password SIGNUP=email`), `signup` the sign-up method (`none`, `password` or `email`) and `label`, if the operator set one, the printable name of the credential, with `_` for spaces (shortened, or left out, so the line fits 80 bytes). A client checks the first word and the version before anything else, and signs in as the server asks (docs/accounts.md): `USER name` to sign in, `REG name` to sign up (or `HELO name` for either), then answers each `ASK` with `AUT`.
+
+## Two listeners
+
+- **The public port** (6501): plain text, for any client. The client sends `PARLORNET/1` first, whose line ending sets the connection's (Connecting, above). Sign-in is with the method's credential only; the sign-in lasts as long as the connection. `SES` is refused (`ERR NOTFRONTEND`).
+- **The extension channel** (6590, loopback in the container): the same protocol inside TLS 1.3 with a pre-shared key per server extension (docs/security-design.md). Only enrolled server extensions (web, telnet, IOS, ...) connect. After sign-in the reply carries a session id, which `SES` resumes on another connection of the same server extension.
+
+## WebSocket (the modern client)
+
+A browser cannot open a TCP connection, so the Play extension (adapters/playserver.py) carries PARLORNET/1 over a WebSocket (RFC 6455) at `/play/ws` on its own port (6513), for ParlorNet Play (docs/modern-client.md) and any other program that can only speak WebSocket. It is usually reached through a reverse proxy that terminates TLS, as `wss://` the parlor's name `/play/ws`. Behind each WebSocket is one connection of the Play extension to the core's extension channel; the extension relays lines and keeps no rules of its own (adapters/wsbridge.py).
+
+- **Handshake.** `GET /play/ws HTTP/1.1` with `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Version: 13` and a 16-byte `Sec-WebSocket-Key`. The `Origin` header must be this site, or the answer is 403: with the setting `play.public_url`, that URL's origin (such as `https://parlornet.org`); without it, `http://` or `https://` and the same host and port as `Host`. So a page of another site cannot open it, even with the visitor's cookie. Another version is 426, a malformed handshake 400. A client may offer the subprotocol `parlornet1`, and gets it back.
+- **Framing.** Each text message from the client is one request line, without a line ending: printable ASCII, at most 78 characters (80 bytes with the CR LF the extension channel adds). Each line the server sends is one text message. A longer line is answered `ERR TOOLONG lines are 80 bytes at most` and the WebSocket is closed (1009). The client's frames must be masked (else 1002); binary frames close it (1003), text that is not printable ASCII too (1007), a frame of more than 125 bytes too (1009). Fragmented text messages are taken, up to 125 bytes in all; pings are answered.
+- **Greeting.** The server speaks first, with the core's greeting line; there is no opening to send first (that is the public port's rule).
+- **What differs from the extension channel.** The Play extension sends `SRC` with the browser's address before anything else, for the per-address limits: the peer's, or, from a proxy listed in the setting `play.proxies`, the last address in `X-Forwarded-For` that is not a listed proxy. The extension channel's own requests are refused: `SRC`, `PRO`, `PRD`, the table data requests `TDL`, `TDS` and `TDD`, the notices `NFY`, and `SES` with a session id answer `ERR NOTFRONTEND`. A sign-in's reply is `OK -`, as on the public port, never the session id; before it comes a data line `HND handle`, a one-time handle (60 seconds) that the page trades for the Play extension's own session cookie, `pnplay` (`Path=/play/`, `HttpOnly`, `SameSite=Strict`, and `Secure` when the public URL is https), by `POST /play/session` with `h=handle`; a POST whose `Origin` is another site is refused. `SES` alone resumes the session in that cookie, if the handshake carried one: `OK name`, or `ERR NOSESSION`. `POST /play/session` with `out=1` clears the cookie. The web extension's cookie (`pn`) is neither read nor set. `PRF` uses the namespace Play shares with the 1997 pages (`web`; Data kept per extension and player, below).
+- **Limits and timeouts.** At most 20 WebSockets still signing in (4 from one address, IPv6 by its /48; a fifth closes that address's least active), and 50 signed in; past those, `ERR BUSY server is full` and a close. A WebSocket that has not signed in after 10 minutes is closed (`ERR IDLE sign in first`). The server pings every 30 seconds and closes a client silent for 75. The client may send at most 20 frames a second (a burst of 60); the core's own rate limit and idle time (15 minutes without a request) apply as on any connection.
+- **Over HTTPS.** A page loaded over HTTPS must use `wss://`. The web extension speaks plain HTTP; a TLS terminator in front of it must pass the upgrade through, and send the `Origin` and `Host` it received.
+
+```
+C> (handshake)
+S< PARLORNET/1 parlornet AUTH=password SIGNUP=password
+C> USER ann
+S< ASK password Password secret cred
+C> AUT password correct horse
+S< HND Wq1aT0x7f3VbQ0x5hY2LmA
+S< OK -
+C> LST
+S< TAB 4 reversi/1 standard 1/2 open ann,- turn=86400
+S< OK
+```
+
+## Client requests
+
+A reply is any number of data lines (`GAM`, `TAB`, `V`, `EVT` ...) ending with exactly one line starting `OK`, `ERR code text` or, during sign-in, `ASK field label [secret]`. A client reads until it sees one of them. An `ERR` text may start with `wait=N`, the seconds to wait before trying again (for example after a wrong password).
+
+| Request | Meaning |
+|---|---|
+| `HELO name` | Sign in, or (a name not yet taken) sign up. The reply is `INF` lines and an `ASK` (answer with `AUT`), `ERR`, or `OK` (below). A second word is refused under sign-in `password` (`ERR SYNTAX`: the password is asked for) and ignored under `none`. Wrong answers lock the name (`ERR LOCKED wait=N ...`). With as many players signed in as the server allows (`players.online_max`, 200; bots not counted), a name not signed in already is refused at once: `ERR BUSY wait=60 the server is full (200 players), try again later` (also for `USER` and `REG`). |
+| `USER name` | Sign in only: as `HELO` for a name that has an account (the same steps and lockouts); a name with no account is `ERR NOPLAYER` and nothing is made. Unknown names count against the client address as sign-ups do (20 in 10 minutes, then `ERR BUSY wait=N`). |
+| `REG name` | Sign up only: the sign-up method's steps for a new name (under sign-up `email` it goes straight to the address, without `HELO`'s yes/no question). A name that has an account is `ERR NAMEINUSE`; a reserved word (`new`, `guest`: some frontends take them at their login prompt) is `ERR RESERVED`, also on `HELO`. Under sign-up `email` the address step makes a pending account and mails it a temporary password, and the dialog goes on with a question for it (docs/accounts.md). While as many pending accounts as the server allows are waiting, a new sign-up (by `REG`, or `HELO` for a free name) is refused at once with `ERR BUSY wait=N Too many sign-ups in progress; try again in ...`; a pending account holds its name, so a sign-up for it is `ERR NAMEINUSE` (docs/accounts.md, Sign-up limits). The bot's names (`bot`, `bot1` to `bot3`, docs/bot.md) are `ERR RESERVED` on `USER`, `HELO` and `REG` for every connection but the bot's own. `HELO` keeps doing both, for clients written before these two. |
+
+| `AUT field value` | The answer to an `ASK` during sign-in, sign-up, recovery or a password change (docs/accounts.md). Before an `ASK` the reply may carry `INF text` lines to show the player (info). `ASK field label [secret] [yn] [cred] [new]`: `secret` means do not echo; `yn` means a yes/no question, answered `y` or `n`; `cred` means it asks for the account's credential (or a password being chosen at sign-up), the only question a password the client already supplied may answer; `new` means a new password is being chosen. After a right temporary password the server asks for a new password (`new`, not `cred`) before signing in; a client that declared with `CAN` that it cannot show that step gets `ERR NEWPASS Sign in on the web or by telnet first to choose your password.` |
+| `CAN kind[,kind...]` | Before `HELO`: the sign-in step kinds this client can show, of `text`, `secret`, `yn`, `info` (all four if never sent). A step needing another kind is refused with `ERR CANNOT`. `OK kinds`. |
+| `OK` after sign-in | Public port: `OK -`. Extension channel: `OK sid`, the session id: a handle for the server extension, never a credential, never shown to the player. |
+| `SRC address` | Extension channel only, before `HELO`: the IPv4 or IPv6 address of the client this connection serves, for the per-address limits on sign-up and mail (docs/accounts.md). `OK`, `ERR NOTFRONTEND` (public port, where the connection's own address is used), `ERR SYNTAX`. |
+| `SES sid` | Extension channel only: resume a session this server extension was issued. `OK name`, or `ERR NOSESSION` (unknown, expired, ended, another server extension's, or issued under a key the server extension no longer holds), `ERR NOTFRONTEND` (public port), `ERR RATE` (three failures on this connection). |
+| `OUT [all]` | End this session (the connection is signed out and may sign in again), or with `all` every session of the player, live connections included. `OK n`, the number ended. A connection whose session was ended elsewhere gets `ERR SIGNEDOUT` once. |
+| `PWD` | Sign-in `password` only (`ERR NOAUTH` otherwise): change the password. The server asks for the current one, a new one and the new one again (`ASK`/`AUT`), then `OK`; the player's other sessions end. |
+| `MOTD` | The operator's message of the day: `MOTD text` lines (at most 73 characters of text each, so the line fits 80 bytes with its CR LF; a line that fits is sent as written, spaces and all, so an ASCII layout survives; a longer one is wrapped at spaces, and a longer word is cut; `MOTD` alone for a blank line), at most 20 of them, then `OK`. The marker `{contribute}` in the operator's text is replaced by the setting `site.contribute_url` (by default the project's home, https://github.com/eric-cgn/parlornet); where the operator cleared it, every line holding the marker is left out. Allowed before signing in. |
+| `GAM` | List what this server hosts: `GAM type/ver rules name minplayers maxplayers [flags]`, ending `OK`. Flags: `staged` (turns made of steps, needs `UND`/`END`), `nomoves` (no legal-move list; use `CHK`), `drop` (in a game of three or more, one player can leave and the others play on; see Turn timer). Allowed before signing in. |
+| `PRL` | The protocols this server speaks now: `DOC url` (the documentation site, the setting `site.docs_url`; left out when the operator cleared it), then for each protocol `PRO key port name` and, when it has one, `PRD key text`, by port; then `OK`. The core's own `PARLORNET/1` on the public port is always there; every other protocol is there while the server extension that declared it is connected (Protocols, below). Allowed before signing in, on both listeners. |
+| `TIM` | How long the player has been connected, and the server's time, for clients with no clock of their own: one line `TIM secs now`, then `OK`, such as `TIM 754 2026-11-24T21:05:33Z`. `secs` is whole seconds. On the public port it counts from when the connection opened, before and after signing in. On the extension channel, once signed in, it counts from the start of the session: the sign-in on that server extension, which is when the player's connection to it began as far as the core knows, so every connection that resumes the session with `SES` (the web opens one for each page) gives the same count; before signing in, it is the connection's own age. `secs` may pass 65535 (about 18 hours). `now` is the server's time in UTC, as `YYYY-MM-DDTHH:MM:SSZ`. The line stays under 40 bytes. `TIM` reads no database and is not activity: it leaves `WHO`'s `idle=` alone. A client without a clock can poll it, for example with its regular lobby poll, and count the seconds between polls itself. Allowed before signing in, on both listeners. RSCARDS front ends and GameMaster have clocks of their own, and nothing changes for them. |
+| `PRO key port name` | Extension channel only: this connection serves the protocol `key` on the public port `port`, under `name` (below). `OK`, `ERR SYNTAX`, `ERR LIMIT` (more than 4 keys on one connection), `ERR NOTFRONTEND` (public port). Allowed before signing in. |
+| `PRD key text` | Extension channel only: the one-line description of a protocol this connection declared. `OK`, `ERR NOPROTO` (not declared on this connection), `ERR SYNTAX`, `ERR NOTFRONTEND`. Allowed before signing in. |
+| `LST [words]` | List the tables that are open or playing (finished ones are not listed): `TAB id type/ver rules filled/seats status names turn=secs [vis=private] [bot=seat,...] [integrity=false]`, where `names` lists every seat in order, `-` for an empty one, `turn` is the table's time per turn, `vis=private` marks a private table, `bot=` lists the seats held by bots (docs/bot.md), and `integrity=false` marks a table that keeps no integrity (`INT`); ending `OK`. Public tables are listed for everyone, private ones only for their creator and players seated or invited there. The asker's own tables (seated, or the creator) and invitations come first, all of them, by number; then the others, open ones newest first, then games being played newest first, at most `lists.max` of them (20), and a line `MORE n` when n more were left out. The words narrow the list: `open` or `playing`; `mine` (own tables and invitations); `game=reversi` or `game=reversi/1`; `player=name`, the tables where that player sits (a private one only if the asker sits there too); `table=id`, that one table. The word `clients` adds, after each `TAB` line, a `CLIENT seat text` line for each seated player who said what they play with (Clients and machines, below), where the asker may see it. Each at most once, in any order; anything else is `ERR SYNTAX`. On the extension channel, `all` lists every table, with no `MORE` (`ERR NOTFRONTEND` on the public port): for an extension's own bookkeeping, not for a list it shows. |
+| `NEW type rules [key=val...]` | Create a table (one game instance, hosted and arbitrated by this server). `OK tableid`. The creator is not seated by it: they sit down with `JON` like anyone else. `type` may leave out its version (`reversi` is `reversi/1`). At most six options; a key is letters and digits, a key or a value at most 12 characters. The option `turn=` (like `5m`, `1h`, `1d`; 1 minute to `games.turn_max_days`, 5 days; default 1 day) sets the time each player has per turn, and `vis=public` or `vis=private` (default public) who may sit down; both are handled by the server, not the game. The option `players=n` sets the number of seats, from the game's minimum to its maximum (default: the minimum). `ERR FULL` when the server holds `games.tables_max` tables (400); `ERR LIMIT` when the creator could not sit down at it (the limits under `JON`). |
+| `JON table [seat]` | Sit at a table, in the first free seat or the one asked for (`ERR TAKEN` if it is not free or held for an invited player). An invited player gets the seat held for them, if any, and the invitation is used up. A private table without an invitation is `ERR PRIVATE`. `ERR LIMIT` with the reason when the player is playing `games.active_max` games (20; finished, resigned and left games do not count), or when the game would not start with them and they already wait at `games.waiting_per_type` open tables of this game type (2); bots are exempt, and a game that starts is never refused, so a player can play more than the limit by the tables they were waiting at (docs/pnp.md, Tables). `OK seat` |
+| `INV table name [seat]` | Invite a player to an open table where you are seated, and optionally hold a free seat for them. Inviting the same player again replaces the invitation and starts its hour again. The reply is `OK`. If the player is not online now, the reply is `OK offline`, and the invitation is still kept for them. Errors are `ERR NOTSEATED`, `CLOSED`, `NOPLAYER`, `STATE` (already seated), `TAKEN`, `LIMIT`. |
+| `UNV table name` | Withdraw an invitation (any player seated at the table), or decline your own. `OK`, or `ERR NOINVITE`. |
+| `IVL` | Your invitations: `IVT table type/ver rules from status [seat=n]`, where `from` is who invited you and `seat` the seat held for you. Then, for each running game where another player asks to open the racks and waits for your answer, `IVR table type/ver rules from racks` (Opening the racks, below). The reply ends with `OK`. A client that does not know `IVR` ignores it. |
+| `WHO` | List the players who are online now. Each is a line `PLR name idle=secs [bot]`, sorted by name, at most `players.online_max` (200) and the bots, and the reply ends with `OK`. A player is online when they are signed in and have been active in the last `presence.idle` seconds (default 1800). Signed in means a live connection on any frontend, or a web session that has not ended. `idle` is the number of seconds since the player's last activity. `bot` marks the bot, which is online while it is connected and always shows `idle=0`. Activity means requests that do something, such as `NEW`, `JON`, `MOV`, `CHT` and `ACT`. Requests that only look, such as `LST`, `SIN`, `WAT`, `VUE` and `WHO`, never count. docs/accounts.md gives the full list under "Who is online". |
+| `ACT` | Tell the server that the player did something on this frontend that needs no other request, such as a command the frontend handles itself. It counts as activity. The reply is `OK`. |
+| `LVE table` | Stand up from an open table, or stop watching. A running game is not affected: the player stays seated and can come back at any time. |
+| `RES table` | Resign a running game: `END resign seat`. In a game flagged `drop` with more than two seats still playing, only this seat leaves (`GONE seat resign`) and the others play on; the seat can no longer move or resign there (`ERR STATE`). |
+| `SEE table` | Watch a table (spectator view). A private table can be watched only by its creator and players seated or invited there (`ERR PRIVATE`). At most 20 watchers a table (`ERR FULL`). |
+| `VUE table [flags]` | This player's view (see Views). Flag `M` adds the legal-move list, `T` the status text, `G` the table's static geometry, `C` what each seated player plays with (`CLIENT seat text` lines; Clients and machines, below). |
+| `MOV table token...` | Play a move, or one step of a staged turn. `OK`, `OK more` (turn continues), `OK done` (turn complete, send `END`), or `ERR ILLEGAL reason`. |
+| `CHK table token...` | Validate a move without playing it. `OK [info]` (for example a score) or `ERR ILLEGAL reason`. Every type answers it; for `nomoves` types it takes the place of the move list. |
+| `UND table` | Undo the last step of a staged turn (`ERR NOSTAGE` for a type without staged turns). |
+| `END table` | Commit a staged turn (`ERR NOSTAGE` likewise). |
+| `SIN table [n]` | Events since sequence number n (polling); without n, the events this connection has not seen. |
+| `WAT table [n] [secs]` | As SIN, but wait up to secs (default 20, at most 30) for something (optional; polling clients may ignore). |
+| `CHT table text` | Table chat, by a seated player or a watcher: printable ASCII, at most 56 characters kept. `OK`; the line comes back as the event `CHT`. |
+| `NOTE table` | The table's notes, oldest first: `NOTE date name text` lines, then `OK n`, the number of notes (Notes, below). Anyone who may see or watch the table may read them; a private table's are refused to others (`ERR PRIVATE`). |
+| `NOTE table text` | A seated player adds a note: 1 to 48 printable ASCII characters. `OK n`, or `ERR NOTSEATED`, `ERR BADNOTE`, `ERR LIMIT` (the table has 20 notes). |
+| `OPR table [text]` | Ask to open the racks of a running game where you are seated, or agree to another player's request (Opening the racks, below). `text`, at most 20 characters kept, says what for and goes into the notes. `OK open` when the racks are open (at once if every other seat is a bot, or with this answer the last one needed), `OK asked` while other players have still to agree. `ERR NOTSEATED`, `ERR NOGAME` (not running), `ERR NORACKS` (the game has no racks option), `ERR STATE` (you left the game). |
+| `OPR table no` | Say no to a request to open the racks; the player who asked withdraws it the same way. `OK`, `ERR NOASK` (none is waiting), `ERR STATE` (the racks are open already). |
+| `TDL table` | Extension channel only: the data kept with the table, `TDL key value` lines by key, then `OK` (Data kept with a table, below). `ERR NOTFRONTEND` on the public port and over the WebSocket. |
+| `TDS table key value` | Extension channel only: keep a value with the table. `OK`, `ERR BADKEY`, `ERR BADVALUE`, `ERR RESERVED` (a key the core keeps itself), `ERR LIMIT`, `ERR NOTFRONTEND`. |
+| `TDD table key` | Extension channel only: forget a key. `OK` (also when it was not set), `ERR BADKEY`, `ERR RESERVED`, `ERR NOTFRONTEND`. |
+| `INT table false text` | Extension channel only: mark an open table as one that keeps no integrity, and say why in `text` (1 to 40 printable ASCII characters). Only its creator or a player seated there may, before the game starts, and only once. `OK`, `ERR SYNTAX`, `ERR BADVALUE`, `ERR NOTSEATED`, `ERR STATE` (the game has started, or the table is marked already), `ERR NOTFRONTEND` (the public port and the WebSocket) (Tables that keep no integrity, below). |
+| `NFY`, `NFY n [secs]` | Extension channel only, allowed before signing in: the notices for players away from their tables (Notices, below). `NFY` alone answers `OK seq`, the latest notice's number; `NFY n` lists the notices after `n` as `NFY seq kind table name token who type/ver` lines (a `join` notice may be followed by `NFX CLIENT text`), then `OK seq`, waiting up to `secs` (at most 30) while there are none. `ERR NOTFRONTEND` on the public port and over the WebSocket. |
+| `PRF GET key`, `PRF SET key value`, `PRF DEL key`, `PRF LST` | A little data kept for the signed-in player, such as a display setting (below). `GET`: `PRF key value` if the key is set, then `OK`. `SET` keeps a value, `DEL` removes a key (`OK` either way), `LST` lists every key as `PRF key value` lines, then `OK`. A key is 1 to 12 of `[A-Za-z0-9_-]`, in any case (kept in lower case); a value is the rest of the line, 1 to 56 printable ASCII characters (spaces allowed inside). At most 16 keys and 1024 bytes of keys and values per namespace and player: over that, `ERR LIMIT`. `ERR BADKEY`, `ERR BADVALUE`, `ERR SYNTAX`; before signing in, `ERR NOHELO`. |
+| `CLI`, `CLI PROG [text]`, `CLI MACH [text]` | What this client is: `PROG` the program and its version, `MACH` the machine it runs on (Clients and machines, below). Each is up to 40 printable ASCII characters, cleaned by the server; nothing after the word forgets it. `OK`. `CLI` alone lists what this connection said, as `CLI PROG text` and `CLI MACH text` lines, then `OK`. Optional, allowed before signing in, and never believed about anything else. |
+| `TRN table [n]` | The turns played at a table after its event number `n` (0, or none, for all), oldest first, at most the latest 50: who played each one, when, the turn in a few words, and the program and machine the player said they used (Turns and activity, below). `OK count`. A private table's turns are refused to anyone who may not see it (`ERR PRIVATE`), and their programs and machines go only to the players at that table. |
+| `FEED [n [name]]` | The latest `n` turns at public tables (10 if left out, at most 30), newest first, as `TRN` gives them, with a name only that player's; `OK count`. A private table's turns are never in it. |
+| `PFL [name]`, `PFL SET PREF [text]` | A player's profile (your own without a name): their preferred machine, their score, the games they played to the end at public tables, and the programs and machines they played with there (Profiles, below); then `OK`, or `ERR NOPLAYER`. `PFL SET PREF text` sets your own preferred machine, up to 40 printable ASCII characters (nothing after `PREF` clears it); `OK`. |
+| `TOP [n] [game=type]` | The leaderboard: `TOP rank name points wins draws losses resigns` for the first `n` players (10 if left out, at most 50), by every game or by one game type (`game=reversi` or `game=reversi/1`), the most points first; then `OK count`, the number of players with a score. Bots are never listed. `ERR NOGAME` for a type this server does not host, `ERR NOSCORES` when the operator turned the leaderboard off (Scores, below). Allowed before signing in. |
+| `BYE` | Close. |
+
+## Data kept per extension and player (`PRF`)
+
+Each server extension may keep a little data with a player, such as the telnet extension's movement keys, so a setting follows the player to their next sign-in. The data is kept in namespaces:
+
+- On the extension channel, the namespace is the server extension's key name: the name its TLS 1.3 handshake proved (parlord/frontends.py), never a word of the request. Telnet's data is telnet's; the web cannot read or change it, nor can any other extension. The one exception is the two web frontends: Play (`play`) keeps its data in the 1997 pages' namespace (`web`), so a player's choices follow them between the two.
+- On the public port, the namespace is `native` (stored as `:native`, which no key name can be), one set for the player shared by every client program on that port. Such programs should give their keys a short prefix of their own.
+- A request always acts on the player signed in on that connection, in the connection's namespace. There is no way to name another player or another namespace. A server extension reaches a player's data only on a connection signed in as that player: one it signed in, or one that resumed (`SES`) a session it was issued.
+- The limits (16 keys of up to 12 characters, values of up to 56 printable ASCII characters, 1024 bytes per namespace and player) are `Limits.pref_*` in parlord/core.py. They fit `PRF SET key value` in the 80-byte line.
+- Never for secrets: no password, code, session id or anything else private goes in it. It is kept in the clear, the operator can see how much each extension keeps (counts and bytes, not values), and under sign-in `none` anyone can sign in as anyone.
+- Deleting an account deletes its data in every namespace. A server extension that is removed leaves its data until the account is deleted; enrolled again under the same name, it sees it again.
+
+## Notices (`NFY`)
+
+A server extension that tells players about their games while they are away, such as ParlorNet Play with its push notifications ([play-notifications.md](play-notifications.md)), learns of them from the core with `NFY`. It is the notification layer's way in (architecture.md): the core only says what happened and to whom; the extension decides how to tell them.
+
+- **Kinds.** `turn`: it is now the player's turn at a table (from a `TURN` event); `who` is the player who had the turn before, or `-`. `end`: a game the player is seated at ended (from `END`); `who` is the player the result names (the winner, or the one who resigned or ran out of time) when that is not the player, else another player at the table. `join`: someone sat down at an open table where the player is seated (from `JOIN`); `who` is the one who sat down. Bots get no notices, and a bot sitting down gives none.
+- **Who gets them.** A player gets a kind from an extension only if they listed it under the `PRF` key `notify` in that extension's namespace (the extension sets it for them when they turn notices on): the value is the kinds, comma-separated (`turn,end,join`), then a space and a token of 1 to 8 of `[A-Za-z0-9_-]` that the extension chose. Each notice line carries the token as it is when the notice is read, or `-` if there is none, so the extension can tell a later account of the same name from the one that asked. Deleting an account deletes the key, and its notices stop.
+- **Reading them.** `NFY` gives the current number; then `NFY n secs` waits for notices after `n` and returns them with the number to ask from next (`OK seq`). The numbers count from 1 since the core started; an `n` past the latest (the core restarted) is read from 0. The core keeps the latest 1000 notices in memory only, so notices made while no extension was asking, or before a restart, are not kept for later.
+- **Lines.** `NFY seq kind table name token who type/ver`, such as `NFY 41 turn 12 ann Xq3_k9Lm bob reversi/1`. A `join` notice is followed by `NFX CLIENT text` when the player who sat down said what they play with, in the words of the `CLIENT` event (Clients and machines, below); the notice goes to a player seated at the table, who may see it. An extension that does not know `NFX` ignores it. Every line fits the 80-byte line; one that would not is left out.
+
+## Notes (`NOTE`)
+
+Each table keeps a short list of notes, a record of things worth knowing about the game that the events do not say in words, such as "eric opened the racks for my own program". The core writes some itself, and the players seated at the table may add their own.
+
+- `NOTE table` lists them, oldest first, as `NOTE date name text`: `date` is the day it was written (UTC, `2026-11-22`), and `name` is the player who wrote it, or `-` for the core's own. Every line fits the 80-byte line: a player's text is at most 48 characters, the core's at most 60.
+- A table keeps at most 20 notes. A player's note past that is refused with `ERR LIMIT`; a note the core writes then takes the place of the oldest one.
+- Notes cannot be changed or deleted. They go when the table goes.
+- The web table page, the telnet table screens (the typed commands `notes` and `note TEXT`; the latest three show in the log when the screen opens), ParlorNet Play's table panel and the chat consoles (`/note`) show them.
+
+## Clients and machines (`CLI`)
+
+Part of the fun of playing on old machines is letting others know what you are using. A client says which program it is and which machine it runs on, and the server records both with every turn the player makes on that connection, so a table's history, the activity feed and the player's profile can say "eric played FRAULEIN for 65 with BobGrid 2.3 on a Sun SPARCstation".
+
+- `CLI PROG text` gives the client program and its version, such as `CLI PROG ParlorNet for the Apple IIe 1.1` or `CLI PROG GameMaster 1.0.0 + ParlorNet 0.4`. `CLI MACH text` gives the machine, such as `CLI MACH Apple IIe (enhanced)` or `CLI MACH Macintosh SE/30`. The answer is `OK`.
+- The server cleans each text before keeping it: anything that is not printable ASCII becomes a space, runs of spaces become one, the ends are trimmed, and only the first 40 characters are kept. `CLI PROG` or `CLI MACH` with nothing after it forgets that one. `CLI` alone lists what the connection has said, as `CLI PROG text` and `CLI MACH text` lines (only those that are set), then `OK`.
+- It is optional. A client that never sends `CLI` plays as before, and its turns are recorded without a program or a machine.
+- It may be sent before or after signing in, and as often as the client likes; each turn records what was said last. It lasts as long as the connection and does not follow the player to another one.
+- On the extension channel, the server extension sends it for the player it serves, because it knows the real client: the NetSprocket extension says `NetBoxes 1.1` on a `Macintosh`, the telnet extension the terminal type the player's program named, the web pages the browser, and so on (docs/adapters.md). Over the WebSocket, ParlorNet Play's page says which browser and system it runs on.
+- It is the client's own claim and nothing more. The server shows it, but never believes it about anything else: it does not decide who the player is, what they may do or how a game is played (docs/design/trust.md). Anyone can say they are anything.
+- The table hears it when the player sits down, and again when they play on with another program (below).
+
+```
+CLI PROG ParlorNet for the Apple IIe 1.1
+OK
+CLI MACH Apple IIe (enhanced)
+OK
+CLI
+CLI PROG ParlorNet for the Apple IIe 1.1
+CLI MACH Apple IIe (enhanced)
+OK
+```
+
+### Who plays with what at a table (`CLIENT`)
+
+When a player sits down, the table is told what they play with: right after `JOIN seat name` comes the event `CLIENT seat text`, where `text` is the program and the machine their connection named, in words without the player's name, as `TRX MOVE` gives a turn. A frontend shows it after the name: "ann sat down with GameMaster 1.0.0 + ParlorNet 0.5 on a Macintosh Plus".
+
+- The words are `with PROG on a MACH`, `with PROG` or `on a MACH`, with `an` before a vowel, no article before a system's name (`on macOS`) and `the` before a few programs' names (`with the Outland Gateway`). Each event is at most 60 characters of text and fits the 80-byte `EVT` line: the program is kept whole, and the machine is cut at a word, or left out when not even its first word fits.
+- A connection that named neither sends no `CLIENT`: where nothing is known, nothing is said. The bot says nothing either.
+- When a seated player moves or chats from a connection that names another program or machine than the seat's, such as after coming back to a running game from another client, the table hears `CLIENT seat text` again, just before that move or line. A connection that named nothing changes nothing.
+- `VUE table C` lists `CLIENT seat text` for each seated player whose program or machine is known, so a player who opens the table later sees what each opponent uses; `LST clients` gives the same lines after each table's `TAB` line, for lobby lists.
+- A frontend reads `CLIENT` as belonging to the seat it names, and one that does not know the event ignores it, as any event kind it does not know.
+
+Who sees it follows the rule for the turns' programs and machines: at a public table, everyone. At a private table, only its creator and the players seated there. Anyone else who may watch the table, such as an invited player, gets each `CLIENT` event as `CLIENT seat`, with no text, and no `CLIENT` lines from `VUE C` or `LST clients`. A frontend shows nothing for a `CLIENT` with no text.
+
+```
+EVT 12 5 JOIN 1 ann
+EVT 12 6 CLIENT 1 with GameMaster 1.0.0 + ParlorNet 0.5 on a Macintosh Plus
+EVT 12 7 START
+VUE 12 C
+V reversi/1 9
+...
+CLIENT 0 with Netscape Navigator 3.0 on a Macintosh
+CLIENT 1 with GameMaster 1.0.0 + ParlorNet 0.5 on a Macintosh Plus
+OK
+```
+
+## Turns and activity (`TRN`, `FEED`)
+
+The server keeps a record of each turn: the table, the player, when it was played, the turn in a few words and the program and machine the player's connection named with `CLI`. A turn is recorded when it is over: a move of a game without staged turns, or the `END` of a staged one (the steps in between belong to it). A move that makes no event, such as placing a ship before a Naval Combat game begins, is not recorded, since there is nothing public to say about it.
+
+`TRN table [n]` lists a table's turns after its event number `n`, oldest first (at most the latest 50), and `FEED [n]` the latest `n` turns at every public table, newest first (10 if `n` is left out, at most 30); `FEED n name` lists only that player's, for a profile. Both answer with the same lines for each turn, and end with `OK count`, the number of turns listed:
+
+- `TRN table seq time seat name type/ver`: the table, the event number of the turn's last event, the time in UTC (`2026-11-23T14:05:09Z`), the seat, the player and the game type.
+- `TRX MOVE text`: the turn in a few words, without the player's name, such as `played FRAULEIN for 65`, `rolled 6-3, moved 13/7 8/5*` or `fired at b4: a hit`. The game's plugin says it, from the turn's public events only (docs/plugins.md), so it never gives away what is hidden; a game that says nothing has no `MOVE` line. At most 60 characters.
+- `TRX PROG text`: the client program the player's connection named, when it named one.
+- `TRX MACH text`: the machine, when it named one.
+
+A client reads `TRX` lines as belonging to the `TRN` line before them, and ignores a `TRX` word it does not know. Every line fits the 80-byte line.
+
+Who sees what:
+
+- At a public table, everyone who is signed in sees every turn, with its program and machine.
+- At a private table, only those who may see the table (its creator and the players seated or invited there) get its turns from `TRN`; anyone else gets `ERR PRIVATE`. The `PROG` and `MACH` lines go only to the players seated at the table: an invited player or a watcher sees who played and what, but not with what.
+- A private table's turns are never in `FEED`, and never counted on a profile.
+- Turns are kept after their table is gone, so a finished table's history can still be read with `TRN`, by everyone for a public table and by the players who played there for a private one. The server keeps the latest 5000 turns. Deleting an account deletes its turns.
+
+```
+FEED 2
+TRN 12 41 2026-11-23T14:05:09Z 0 eric gridwords/1
+TRX MOVE played FRAULEIN for 65
+TRX PROG BobGrid 2.3
+TRX MACH Sun SPARCstation
+TRN 9 17 2026-11-23T14:02:40Z 1 ann reversi/1
+TRX MOVE played d3, turning 1
+TRX PROG ParlorNet for the Apple IIe 1.1
+TRX MACH Apple IIe (enhanced)
+OK 2
+```
+
+## Profiles (`PFL`)
+
+Each player has a profile: what they chose to say about themselves, which for now is the machine they like best, their score, and what the server has counted from their play at public tables. It holds nothing else: no address, no email and nothing from a private table but the points its games gave to the score.
+
+- `PFL name` reads a player's profile, and `PFL` alone your own. The lines are `PFL NAME name` (the name as the account has it), `PFL PREF text` (the preferred machine, when the player gave one), `PFL SCORE points wins draws losses resigns rank` (Scores, below; `rank` is `-` before the player's first scored game; there is no `SCORE` line for a bot or when the operator turned the leaderboard off), then `PFL GAME type/ver n` for each game they played to its end at a public table, `PFL PROG n text` for each client program they played turns with there, and `PFL MACH n text` for each machine, each the most first and at most 8 of a kind, then `OK`. A name with no account is `ERR NOPLAYER`.
+- `PFL SET PREF text` sets your own preferred machine, up to 40 printable ASCII characters, cleaned as `CLI` cleans its text; `PFL SET PREF` with nothing after it clears it. `OK`.
+- Every signed-in player may read every profile. Deleting the account deletes the profile and its counts.
+
+```
+PFL SET PREF Macintosh SE/30
+OK
+PFL eric
+PFL NAME eric
+PFL PREF Macintosh SE/30
+PFL SCORE 43 9 2 3 1 4
+PFL GAME gridwords/1 12
+PFL GAME reversi/1 3
+PFL PROG 140 BobGrid 2.3
+PFL PROG 22 Netscape Navigator 3.0
+PFL MACH 162 Macintosh
+OK
+```
+
+## Scores and the leaderboard (`TOP`, `PFL SCORE`)
+
+Every player account has a score. When a game ends, each player seated at it gets points for how it went, at public and private tables alike, and games against the bot count like any other. The bot's own accounts are not scored and never appear on the leaderboard.
+
+The points, by default:
+
+| Result | Points | Counted as |
+|---|---|---|
+| A win | 4 | wins |
+| A draw, for each player sharing it | 2 | draws |
+| A loss: the game was played to its end and someone else won | 1 | losses |
+| Resigning (`RES`), running out of time, or leaving a game of three or more (`GONE`) | 0 | resigns |
+
+How each ending scores:
+
+- `END win seat ...`: that seat wins, and every other player still playing loses.
+- `END draw ...`: the players who share the draw get a draw, and every other player still playing loses. In a game of two that is both players. In a game of three or more it is a tie for first: the players still playing with the top score in the result (`draw 4-4-1` shares it between the first two), or the seats the game's plugin names (in Cannon Fire, the last tanks, which destroyed each other).
+- `END resign seat` and `END timeout seat`: that seat gets a resignation, and every other player still playing scores a win, as when the opponent of a two-player game resigns.
+- A seat that left a game flagged `drop` earlier (`GONE seat resign`, `GONE seat timeout`) counts as resigned when the game ends.
+- `END abandoned` (the operator ended the table) scores nothing.
+
+A game is scored once, when it ends, and the points it gave stay as they were when the operator changes the point values. There is no protection against cheating: anyone can play against themselves under a second name or against the bot, so any score is easy to get on a public server. The leaderboard is meant for conferences, festivals and LAN parties.
+
+- `TOP [n] [game=type]` lists the leaderboard: `TOP rank name points wins draws losses resigns` for the first `n` players (10 if left out, at most 50), then `OK count`, the number of players with a score. The most points come first; players with as many points share a rank and are listed by the most wins, then the fewest games. `resigns` counts resignations, timeouts and seats left. With `game=type`, the board counts the points earned in that game type alone. Bots are never listed, and a player appears once they have a scored game. Every line fits the 80-byte line. `TOP` is allowed before signing in, so a page or a screen can show the board without an account.
+- `PFL name` carries the player's score as `PFL SCORE points wins draws losses resigns rank`, with `-` for the rank of a player with no scored game.
+- The operator can reset every score at once, at the start of a festival for example (docs/accounts.md, Admin panel). The totals start again from nothing, and so does each game type's board; the games themselves stay recorded (their tables, events and turns, and the points each gave).
+- The operator can change the points (`scores.win`, `scores.draw`, `scores.loss`, `scores.resign`) and turn the leaderboard off (`scores.show`). With it off, games are still scored, `TOP` answers `ERR NOSCORES`, and profiles have no `SCORE` line, so frontends show no leaderboard and no scores.
+- Deleting an account deletes its score.
+
+```
+TOP 3
+TOP 1 ann 22 5 1 0 0
+TOP 2 bob 13 3 0 1 1
+TOP 2 eric 13 2 2 1 0
+OK 7
+TOP 2 game=reversi
+TOP 1 eric 9 2 0 1 0
+TOP 2 ann 8 2 0 0 0
+OK 4
+```
+
+## Data kept with a table (`TDL`, `TDS`, `TDD`)
+
+A table may carry a little data that server extensions need, such as which client family a table was made for: an extension may keep `client NAME` with every table it makes, so it knows them again after a restart.
+
+- Only the core and server extensions set it. `TDS` and `TDD` are for the extension channel only, and so is reading it with `TDL`, which is also refused over the WebSocket, so a player's own program never sets or reads it.
+- A key is 1 to 8 of `[a-z0-9_-]`, in any case (kept in lower case); a value is the rest of the line, 1 to 56 printable ASCII characters, so `TDS table key value` fits the line. At most 16 keys a table, besides the core's own.
+- The core keeps some keys itself, which `TDS` and `TDD` refuse with `ERR RESERVED`. The one in use is `racks`, which holds a request to open the racks while it waits for the players' answers (`ask seats text`). The table's options and its game state stay the authority on how a game is played; this data only helps extensions along.
+- A request acts on a table the signed-in player may see. Never for secrets: it is kept in the clear.
+
+## Opening the racks of a running game (`OPR`)
+
+Some period programs need both racks and the whole bag on each player's machine, because their link sends them. A Grid Words table made with `racks=open` gives them from the start ([types/gridwords-1.md](types/gridwords-1.md)). `OPR` opens the racks of a game already running, so that a game begun on the web or by telnet can go on in such a program. It works for any game whose plugin lists the option `racks` (the plugin's `option` call, [plugins.md](plugins.md)).
+
+- A player seated at the running game asks with `OPR table text`, where `text` says what for (`OPR 25 my own program`).
+- When every other player still in the game is a bot, the racks open at once: `OK open`.
+- Otherwise every other player must agree. The table shows `RACKS ask seat text`, and each of them finds the request in `IVL` as `IVR table type/ver rules from racks`. A player agrees with `OPR table`, which shows `RACKS yes seat`; the last answer needed opens the racks. `OPR table no` from any of them shows `RACKS no seat` and ends the request; the player who asked may withdraw it the same way. Until everyone has agreed, the racks stay hidden.
+- When the racks open the table shows `RACKS open seat`, with the seat that asked, and from then on every seated player's view carries every rack and the bag in draw order exactly as at a table made with `racks=open`: the bag, the racks, the scores and the seed are not touched. The table's options say `racks=open`.
+- It is one way: open racks are never hidden again. The request, each answer and the opening are recorded in the table's notes and its events.
+- Watchers never see the other racks or the bag, here as at any table.
+
+## Tables that keep no integrity (`INT`)
+
+The server is the authority at every table: it deals, keeps every secret and decides every move. A few period programs cannot play that way. Networdz, for one, has no server: one player's copy hosts the game, shuffles the bag, checks the words with its own dictionary and sends every rack to every copy, and a parlor can only take part as the other copies. A table played with such a program is marked so that everyone can see that the server is not the authority there.
+
+- A server extension marks the table with `INT table false text` before its game starts, such as `INT 12 false the host's Networdz deals the tiles`. Only the table's creator or a player seated there may, and only once; the mark is never taken off.
+- The mark is informational: nobody is refused because of it, and the point is to play and trust the players' programs. `LST` shows `integrity=false` on the table's line, `VUE` adds `INT false text`, and the core writes the note `integrity=false: text` (Notes, above), which the web table page, the telnet screens and ParlorNet Play show.
+- At the start the core tells the game's plugin, with the seat of the table's creator, whose program runs the game ([plugins.md](plugins.md)). The plugin then takes what that program says, as the game's type spec describes ([types/gridwords-1.md](types/gridwords-1.md), Tables that keep no integrity, for Grid Words). A turn that only hands the turn on is not recorded as a turn (`TRN`).
+- `false` is the only value. A later `required`, refusing such programs at a table, is a possible option and is not built.
+
+## Protocols (`PRO`, `PRD`, `PRL`)
+
+Each server extension tells the core which protocol it serves, so the core can say what the server speaks now and a server's web pages list it without a table of their own (docs/design/protocol-declarations.md).
+
+- A protocol has a key: an upper-case letter, then up to 11 more of upper-case letters, digits, `/` and `-`. The keys in use: `HTTP` (the web extension), `HTTPS` (ParlorNet Play), `PARLORNET/1` (the core itself), `TELNET`, `IOS`, `FIBS`, `OUTLAND`, `DOOM`, `NETSPROCKET` (NetBoxes), `NETLUFF` (NetLuff), `GAMEMASTER`, `BATNAV` (the batnav clients), `ICDS` (xcheckers), `WORTHY` (Worthy Opponent) and `RSCARDS` (GEnie's RSCARDS front ends). The docs site's protocols reference has an entry for each, at `protocols.html#KEY`, where any character of the key but letters, digits and `-` is written `-` (`PARLORNET/1`: `#PARLORNET-1`).
+- `PRO key port name` declares one: `port` is the port players connect to (1 to 65535; where a container's port is published under another number, the published one), `name` the rest of the line, 1 to 48 printable ASCII characters. `PRD key text` gives it a one-line description, 1 to 56 printable ASCII characters. Declaring a key again replaces its port and name and keeps its description. One connection may declare up to 4 keys.
+- A declaration lasts as long as the connection that made it: when the connection closes, the protocol leaves the list. A server extension keeps one connection open for it, and sends its `PRO` and `PRD` again every 5 minutes, which also keeps the connection from going idle (adapters/declare.py); if the core goes away it connects again and declares again.
+- `PRL` lists the core's own `PARLORNET/1` and the declared ones, by port; the same key and port declared on two connections is listed once.
+- A server extension that does not declare is not listed, and nothing else changes for it. A core older than these requests answers `PRO` with `ERR UNKNOWN`, and the extension then stops declaring.
+
+```
+PRO IOS 6503 Internet Othello Server (IOS)
+OK
+PRD IOS Reversi for clients of the Internet Othello Server
+OK
+PRL
+DOC http://docs.parlornet.org/
+PRO HTTP 6500 HTTP and HTML 3.2
+PRD HTTP HTML 3.2 pages for any browser with tables and forms
+PRO PARLORNET/1 6501 ParlorNet protocol (PARLORNET/1)
+PRD PARLORNET/1 ParlorNet's own protocol, for programs written for it
+PRO IOS 6503 Internet Othello Server (IOS)
+PRD IOS Reversi for clients of the Internet Othello Server
+OK
+```
+
+## Events
+
+Events are numbered per table: `EVT table seq kind ...`.
+
+- Common kinds: `JOIN seat name`, `CLIENT seat [text]` (what the seat's player plays with, right after `JOIN` and when it changes; Clients and machines, above), `LEAVE seat` (a player stood up from an open table), `START`, `TURN seat`, `END result`, `CHT seat text` (`seat` is `-` for a watcher), `INVITE seat name`, `UNINVITE seat name why`. In the invitation events, `seat` is the seat held for the player, or `-` when no seat is held. `why` says how the invitation ended. It is `declined` when the player declined it, and `withdrawn` when a seated player withdrew it or the operator deleted the account. It is `expired` when the hour ran out, `started` when the game began without the player, and `left` when the player who made the invitation stood up. Servers older than this send no reason, so a client should treat the word as optional. `END abandoned` means the operator ended the table. `GONE seat resign|timeout` means one seat left a game flagged `drop` and the others play on. `RACKS ask seat [text]`, `RACKS yes seat`, `RACKS no seat` and `RACKS open seat` follow a request to open the racks (Opening the racks, above).
+- Type-defined kinds say exactly what changed (a checker moved, tiles placed, terrain changed, a die rolled). They are the deltas: a client can keep its model by applying them without knowing the rules, or refetch with `VUE` at any time.
+- A `MOV` reply carries, before its `OK`, every event the client has not yet seen for that table (its own move, and the opponent's reply if it has already come).
+- `SIN` and `WAT` end with `OK seq`, the sequence number to ask from next time.
+
+## Views
+
+`VUE` returns `V type/ver seq`, then type-defined lines, then `OK`; before the game starts, `V type/ver seq` and `S Waiting for players`. Hidden information is removed per player by the server.
+
+- **Common lines** (every type may use these): `S text` status; `T seat points` scores; `M token...` one legal move per line when the type provides a list (flag `M`, only on your turn); `CLK seat secs_left turn_secs` while a game runs: whose turn it is and how long they have left; `BOT seat...` the seats held by bots (docs/bot.md), only when there are any; `CLIENT seat text` what a seated player plays with (flag `C`, before and during the game, where the player may see it; Clients and machines, above). `INT false text` at a table that keeps no integrity, with why (`INT`, below), before and during the game.
+- **Type-defined lines** carry the state itself, with a short tag per line (`P` points, `R` rack, and so on). Each type/ver spec defines them. Large or sparse structures are lists (coordinates and values), not character grids; a dense one-dimensional series, such as terrain, is a string with one character per entry.
+- **Static geometry** (flag `G`) is sent once and cached by the client: things fixed for a type/rules/options, such as a board's size and the positions of special squares.
+- There are no keepalives, and nothing is pushed to a client that did not ask (`WAT`).
+
+## Turn timer
+
+Every table has a time per turn, set by its creator (`turn=` on `NEW`). When it is a player's turn the clock starts; if it runs out, the game ends with `END timeout seat` and that player loses. In a game flagged `drop` (Rummy Tile Classic, Dots and Boxes, Cannon Fire) with more than two seats still playing, a resignation or a timeout takes only that seat out of the game (`GONE seat resign`, `GONE seat timeout`) and the others play on; once two seats are left, the next one ends the game as above. Disconnecting does nothing: a player who goes away keeps their seat and their clock keeps running. Only resigning (`RES`) or running out of time loses a game without finishing it.
+
+## Invitations and private tables
+
+A table is public or private, chosen by its creator (`vis=` on `NEW`). Anyone may sit at a public table; a private table's seats are only for its creator, players already seated and players invited there, and only they see it in `LST` or may watch it.
+
+Any player seated at an open table, public or private, can invite another player by name (`INV`), optionally holding a seat for them; nobody else can sit in a held seat. The invitation shows in the invited player's `IVL` and as an `INVITE` event at the table.
+
+An invitation stays pending until something ends it. If the player sits down with `JON`, they get the held seat and the table shows a `JOIN` event. Every other ending shows an `UNINVITE` event with a reason:
+
+- The player declines with `UNV table theirname`. The reason is `declined`.
+- A player seated at the table withdraws it with `UNV`. The reason is `withdrawn`.
+- An hour passes without the player accepting it. The reason is `expired`. Sending `INV` again starts the hour over.
+- The player who made the invitation stands up from the open table. The reason is `left`.
+- The game starts without the player. The reason is `started`.
+
+If the whole table goes away, its invitations disappear from `IVL` without an event. That happens when the last player stands up, when the operator ends the table, or when it stays open for six hours.
+
+The inviter is seated at the table, so they see these events through `SIN`, `WAT` or a `MOV` reply. The invited player sees invitations come and go in `IVL`. An invitation to a player who is not online is kept the same way, and `INV` answers `OK offline` to say so. Each frontend shows invitations in its own protocol's form and maps its own accept and decline commands to `JON` and `UNV`, as docs/design/invites.md describes. The server keeps invitations, visibility and held seats in its database. Telling a player who is not connected that they have been invited is left to the notification layer (docs/architecture.md).
+
+## Storage
+
+The server keeps players, tables, game state, events, invitations, each table's notes and data, the data kept with `PRF`, the turns played, the players' profiles and their scores (each player's totals, and the points each game gave each player) in SQLite (`--db`), written as they change, so a restart loses nothing. Each event a player's move made is stored with the player and the program and machine their connection named (`CLI`). A database from an earlier version gains the tables and columns it lacks when the server starts, and keeps everything it had.
+
+## Staged turns (compound moves)
+
+For types flagged `staged`, a turn is a series of steps. `MOV` applies one step tentatively (`OK more` while the turn is incomplete, `OK done` when it is complete), `UND` takes back the last step, `END` commits the turn. Validation happens as steps are made and again at `END`. A one-step game commits on its first `MOV`.
+
+## Game identity: type and rules
+
+- **type/ver** is the mechanics contract: the typed view lines, the event kinds and the move-token grammar. A frontend, or a server extension that draws games (such as telnet), is written against a type/ver. Example: `backgammon/1`.
+- **rules** is a ruleset within that type, for example `checkers/1` with `american` or `brazilian`. Rules change what is legal, not the shape of a view or a move, so a frontend or server extension for a type works on any server's ruleset for it. The server enforces rules; the client does not need to know them.
+- **options** (`NEW ... key=val`) are table tweaks the ruleset allows (a clock, a variant flag).
+- A change to the view lines, event kinds or move grammar is a new type/ver, not a new ruleset.
+- Servers host whatever games they like and list them in `GAM`.
+
+## Type specs
+
+Every type/ver has a spec (docs/types/) that defines: its view lines, event kinds, move tokens, staged-turn pattern, worst-case view and typical event size, and a set of recorded games as conformance vectors. It must also have a reference 80x25 ASCII rendering in the telnet extension, so every game works on a character screen.
+
+## Rate limits
+
+The server limits requests, sign-ups and sign-in attempts itself, per connection and per client address, and locks a name after repeated wrong passwords; security-design.md (Lockouts and rate limits) gives the numbers.

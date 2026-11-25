@@ -1,0 +1,19 @@
++-------------------------------------+
+| ParlorNet: Turn-based game server   |
+| for any computer, old or new.       |
+|                                     |
+| Reversi The Eclipse, Outland's      |
+| Backgammon, GameMaster and other    |
+| game programs from 25 to 50 years   |
+| ago play online again. Telnet, the  |
+| web and your own client work too.   |
+| Ten games. Alone? Invite the bot.   |
+|                                     |
+| For a new account, log in as "new"  |
+| by telnet, or use New account on    |
+| the web. We email you a password.   |
++-------------------------------------+
+Run your own server or contribute:
+{contribute}
+Server setting: deploy/motd.txt,
+last changed 2026-11-22.

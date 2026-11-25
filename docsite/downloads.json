@@ -1,0 +1,21 @@
+{
+  "about": "The docs site's downloads, pinned: each file of a GitHub Release of the repository that builds it, at that tag, with its SHA-256. tools/fetch_downloads.py fetches them and checks the SHA-256; docsite/downloads.py serves them at download/<file>.",
+  "files": [
+    {"repo": "eric-cgn/parlornet-eclipse-fix", "tag": "v1.0", "file": "eclipse-68k-fix.hqx",
+     "sha256": "d49fcba92f29f2d645c943501794edb14409c821c982ae63fee902a89fdb0635"},
+    {"repo": "eric-cgn/parlornet-eclipse-fix", "tag": "v1.0", "file": "eclipse-68k-fix.bin",
+     "sha256": "a7a9415448060879f154f1049d3598e67d26281cf998c1fc6619e91c74a53d2a"},
+    {"repo": "eric-cgn/parlornet-eclipse-fix", "tag": "v1.0", "file": "eclipse-68k-fix.dsk",
+     "sha256": "b448d494471ea92924b9c62d01563d20bbbdca5496df63c5e1f4fc21d3f6d407"},
+    {"repo": "eric-cgn/parlornet-eclipse-fix", "tag": "v1.0", "file": "eclipse-68k-fix-readme.txt",
+     "sha256": "46ecdcf8e6e5a8ae325c2a3fb57f9b2ebaca70c62712605244aea9eb492a689d"},
+    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.4", "file": "parlornet-rulebooks-installer.hqx",
+     "sha256": "120fc236d94fbde85230b556a6d285047deda00f90470ea739bcd1b848741ba2"},
+    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.4", "file": "parlornet-rulebooks-installer.bin",
+     "sha256": "790e9f9d1196322b8cb5ae5dbc4ba0b35bc5076a5b15d364979af7474db0ec25"},
+    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.4", "file": "parlornet-rulebook-readme.txt",
+     "sha256": "f45f29e339bd08d43ad951033c2a7072660ccfc796583c738f2feb6757f125fa"},
+    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.4", "file": "gamemaster-rulebooks-readme.txt",
+     "sha256": "b3ac1cfb95215ec230f52d8c05dae283c9af6e7649cda23514a67ac83d1bdd6d"}
+  ]
+}

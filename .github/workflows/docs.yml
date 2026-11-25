@@ -1,0 +1,49 @@
+# The docs site (http://docs.parlornet.org/): built from the repository by tools/build_docs.py, with the
+# downloads fetched from the releases docsite/downloads.json pins, and published to GitHub Pages on every push to
+# main. The site's CNAME file names docs.parlornet.org.
+name: docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # The downloads (Eclipse 68k Fix, Install ParlorNet Rulebooks and their READMEs) are built and released in
+      # their own repositories: fetch the release files docsite/downloads.json pins and check each one's SHA-256.
+      # A release that is not published yet stops the build here, named with its repository and tag.
+      - name: Fetch the downloads
+        run: python3 tools/fetch_downloads.py
+      - name: Check the docs site
+        run: python3 -m unittest discover -s tests -p "test_docs_site.py"
+      - name: Build the docs site
+        run: python3 tools/build_docs.py --out _site --require-downloads
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,72 @@
+#!/bin/sh
+# pndial: plays a Hayes modem on a serial line logged in to a Unix shell, for period programs that dial.
+#
+#   pndial [-z] [host [port]]      (the defaults are parlornet.org and 6501)
+#
+# Run it in the shell the serial line is logged into, then start the period program and let it
+# dial. Or let the program start it: with a link named ATZ (or atz) to pndial on the PATH, or
+# with alias ATZ='pndial -z', a program's ATZ runs pndial, which answers it with OK, as a modem
+# answers a reset, instead of its first line, so a shell login works as a modem. pndial answers
+# AT commands with OK. On ATD it says CONNECT and joins the line to the parlor with nc, every
+# byte passed as it is, until either side hangs up; then it says NO CARRIER and waits for the
+# next dial. Ctrl-C or Ctrl-D while it waits puts the terminal back and ends it.
+#
+# The dial string picks the parlor. ATDT host:port dials that host and port, and ATDT host, with
+# a dot in the name, dials that host on the port above. Any other number (ATDT5551212, ATDT
+# parlornet) dials the host and port above. The port depends on the program: 6501 for the native
+# protocol (the Apple II client), 6502 telnet, 6519 Worthy Opponent, 6520 RSCARDS; the rest are in
+# docs/protocols.md. docs/serial.md explains it all. It needs sh, stty, tr and nc (any of them).
+# OpenBSD's nc and Nmap's ncat notice the parlor's hang-up only at the program's next key or two;
+# NC='busybox nc' pndial, or the traditional nc, says NO CARRIER at once.
+#
+# Part of ParlorNet (https://github.com/eric-cgn/parlornet), MIT license.
+
+z=
+case ${0##*/} in ATZ | atz) z=1 ;; esac         # run as ATZ: the reset that started it
+[ "${1:-}" = -z ] && { z=1; shift; }
+host=${1:-parlornet.org} port=${2:-6501}
+cr=$(printf '\r')
+saved=$(stty -g) || exit 1                      # the terminal as it was, for the way out
+speed=$(stty speed 2>/dev/null)                 # the line's speed, for CONNECT 9600
+case $speed in *[!0-9]* | 0) speed= ;; esac
+echo=1                                          # echo commands, as a modem does until ATE0
+
+bye() { stty "$saved"; exit "$1"; }
+trap 'bye 130' INT
+trap 'bye 129' HUP
+trap 'bye 143' TERM
+
+# Command mode: whole lines, CR ends a line, Ctrl-C works; the line echoes them unless ATE0.
+commands() { stty sane; [ $echo = 1 ] || stty -echo; }
+
+commands
+if [ -n "$z" ]; then
+    printf '\nOK\n'                            # the answer to the ATZ that ran it
+else
+    printf 'pndial: dial ATDT for %s port %s, or ATDT host:port. Ctrl-C ends.\n' "$host" "$port"
+fi
+while line=$(read -r l && printf %s "$l"); do  # read in a subshell, so Ctrl-C ends it at once
+    line=${line%"$cr"}                          # CR ends a line (icrnl); a CR before LF is dropped
+    up=$(printf %s "$line" | tr a-z A-Z)
+    case $up in
+    ATD* | AT*[!\&]D*)                          # a dial (not &D, which sets up DTR)
+        num=${line#*[!\&][Dd]}
+        case $num in [TtPp]*) num=${num#?} ;; esac      # tone or pulse
+        num=$(printf %s "$num" | tr -d ' "\r')          # ATD"host:port" works too
+        case $num in
+        *:*) to=${num%:*} p=${num##*:} ;;
+        *.*) to=$num p=$port ;;
+        *)   to=$host p=$port ;;
+        esac
+        stty raw -echo                          # every byte through as it is, nothing echoed
+        printf '\r\nCONNECT%s\r\n' "${speed:+ $speed}"
+        ${NC:-nc} "${to:-$host}" "${p:-$port}" 2>/dev/null
+        commands
+        printf '\nNO CARRIER\n' ;;
+    AT*)                                        # anything else a modem would take
+        case $up in *E0*) echo=0 ;; *E1*) echo=1 ;; esac
+        commands
+        printf '\nOK\n' ;;
+    esac
+done
+bye 0
