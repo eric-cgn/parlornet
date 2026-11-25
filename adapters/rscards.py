@@ -662,7 +662,7 @@ class Session:
         io = T.TelnetIO(self.link.r, self.w if self.link.telnet else PlainWriter(self.w))
         io.write("\nParlorNet's text games.\n")
         try:
-            await T.main_session(io, self.svc.args, self.ticket)
+            await T.main_session(io, self.svc.args, self.ticket, title_first=False)   # a 40-column line: no title
         except (EOFError, ConnectionError, asyncio.TimeoutError, CoreError, OSError):
             pass
 

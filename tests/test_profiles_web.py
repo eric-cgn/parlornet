@@ -195,6 +195,7 @@ class TelnetProfiles(Stack):
                 s.sendall(b"\xff\xfb\x18")   # IAC WILL TTYPE
             if b"\xff\xfa\x18\x01\xff\xf0" in buf:      # SB TTYPE SEND
                 s.sendall(b"\xff\xfa\x18\x00" + ttype.encode() + b"\xff\xf0")
+                s.sendall(b"\r\n")                     # Enter at the title page, typed ahead
                 buf = b""
                 break
         return s
