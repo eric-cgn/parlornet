@@ -12,14 +12,16 @@ The archive below is from Walnut Creek's Giga Games 5 CD of June 1997. It holds 
 
 ## Setting it up
 
-The stock program cannot connect to a parlor yet. A copy in Answer mode waits for its host to connect to it, and a parlor never connects out to players. A small patch that makes the answering copy connect out to the parlor, to `{host}` on port `6516`, is a later step, and this section will then say how to get it. Until then Networdz has no rating here. The parlor's side has been tested against the stock program in Answer mode under Wine, with a test-only helper in the patch's place: whole games against the bot and with other players, with plays, a refused word, exchanges, passes and chat.
+In Answer mode Networdz waits for its host to connect, and a parlor never connects to players' machines. ParlorNet Link, a small program of ParlorNet's own (above), connects to both and passes everything between them.
 
-You will need Windows 3.1 or later with Winsock, the patch, and an account, which you make on the web site or by telnet. Then:
+You will need Windows 3.1 or later with Winsock, ParlorNet Link, and an account, which you make on the web site or by telnet. Then:
 
 1. Save the text under `PARLOR.CFG` below in the Networdz folder: the standard board, the 100 standard tiles and their points, and racks of 7.
 2. Start Networdz, choose Options, Configuration and open `PARLOR.CFG`.
-3. Choose Options, Chat, where the parlor's lines come. Type `/signin NAME PASSWORD`, or `/signin PASSWORD` for the name you gave Networdz. If the server emailed you your password, sign in once on the web or by telnet first, where you choose a password of your own.
-4. Type `/invite NAME` to play someone, `/invite bot` to play the bot, `/open` to let anyone sit down, or `/join` a table from `/list`. The game starts in Networdz once everyone is seated.
+3. Choose Options, Communicate, Answer Mode, type your name, choose Connect, then OK.
+4. Start ParlorNet Link, type `{host}` and port `6516`, and choose Connect (it reads Networdz's port from `NETWORDZ.INI`). The parlor's welcome shows in Networdz.
+5. Choose Options, Chat, where the parlor's lines come. Type `/signin NAME PASSWORD`, or `/signin PASSWORD` for the name you gave Networdz. If the server emailed you your password, sign in once on the web or by telnet first, where you choose a password of your own.
+6. Type `/invite NAME` to play someone, `/invite bot` to play the bot, `/open` to let anyone sit down, or `/join` a table from `/list`. The game starts in Networdz once everyone is seated.
 
 `PARLOR.CFG`:
 
@@ -117,7 +119,10 @@ Anything else you type is chat with the other players.
 - The parlor plays the standard board and tiles only: load `PARLOR.CFG` before you connect.
 - Trade Blanks, Exchange 4 of a kind, Timed and Tournament Rules are not played here; the parlor sends them off.
 - A game you leave goes on at the parlor: finish it on the web or by telnet, or `/resign` it. Networdz cannot load a game back.
+- Networdz answers once each time you choose Connect in its Communicate box. To play again after a connection ends, choose Disconnect and then Connect there, and ParlorNet Link connects again by itself.
+- On a Winsock without `127.0.0.1` (Trumpet, reportedly), ParlorNet Link tries your PC's own address; its README says what else to try.
 
 ## Screenshots
 
 ![Networdz 2.0 at the end of a game against the bot, with the parlor as the host, under Wine](../../static/img/networdz-game.gif)
+![ParlorNet Link, which connects Networdz to the parlor, under Wine](../../static/img/networdz-link.gif)

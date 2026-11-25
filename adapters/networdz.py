@@ -10,8 +10,13 @@ own word list and ends the game, as for every other client; this extension speak
 protocol to the guest's copy. The protocol was read from games captured between copies of the program, and the
 host's side checked against the stock program in Answer mode.
 
-A stock copy only answers: it waits for its host to connect. It reaches the parlor once a patch makes the
-answering copy connect out to it, which is a later step. The extension only listens; it never connects out.
+A stock copy only answers: it waits for its host to connect. It reaches the parlor through ParlorNet Link
+(github.com/eric-cgn/parlornet-networdz-link), a small Windows program of ParlorNet's own that runs beside it on
+the player's PC: it connects to the copy in Answer mode and to this extension and passes the bytes along both
+ways, so the extension sees a copy that dialed out. The extension only listens; it never connects out. Before it
+calls the parlor, the Link tells the copy it is seat 3 (X) and waits for its D, to know the copy is answering;
+the extension's X for LOBBY_SEAT then gets D again, as at a game's start. So LOBBY_SEAT must not be 3: the copy
+drops what comes with an X for the seat it has already, here the lobby's F.
 
 The wire. Binary messages, each a type letter and a fixed length; the second byte is a seat (Networdz's player
 number from 0) or 4 for every player. From the host (the parlor):
@@ -117,7 +122,7 @@ LOBBY_SECS = 1800.0         # connected, no game and nothing typed: the connecti
 DRAW_SECS = 60.0            # the guest's Q after P
 CHAT_GAP = 0.3              # between lines in the chat (the instructions box shows the last)
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,12}\Z")
-LOBBY_SEAT = 1              # the guest's seat on connecting, before a game (X)
+LOBBY_SEAT = 1              # the guest's seat on connecting, before a game (X); not 3, ParlorNet Link's
 COMMANDS = ["list", "resign", "invite", "open", "join", "close", "accept", "decline", "who", "tables", "top",
             "score", "note", "motd", "time", "signin", "quit", "help"]
 BEFORE_SIGNIN = ("signin", "help", "motd", "quit")
