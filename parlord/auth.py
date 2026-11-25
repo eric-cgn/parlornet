@@ -107,16 +107,34 @@ TRUST_SECS = 30 * 86400         # a successful sign-in from an address trusts it
 CHECKS_PER_SOURCE = (30, 60)    # password checks (scrypt) one client address may ask for in that many seconds
 RECOVERY_PER_REQUESTER = 2      # recovery mails for one name asked from one client address in a day
 # Words some frontends take at their login prompt instead of a name: telnet's "new" starts a sign-up, and
-# so does FIBS's "guest". Nobody can sign up as one of them, through any frontend or the protocol.
-RESERVED_NAMES = frozenset(("new", "guest"))
+# so does FIBS's "guest". And names that would pass for the server or its staff in a chat: ParlorNet (the
+# name Networdz shows the parlor's lines under), the server's own name, and the usual titles. Nobody can
+# sign up as one of them, through any frontend or the protocol.
+RESERVED_NAMES = frozenset(("new", "guest", "parlornet", "admin", "administrator", "sysop", "system", "server",
+                            "operator", "moderator", "staff", "root"))
+# A new account's name (docs/accounts.md): it starts with a letter, and a - or _ comes only between two
+# letters or digits. Names from before the rule keep working; sign-in takes any name of NAME_RE.
+NEW_NAME_RE = re.compile(r"^[A-Za-z](?:[-_]?[A-Za-z0-9]){0,11}\Z")
+NEW_NAME_RULE = ("Names start with a letter and are up to 12 letters, digits, - and _, "
+                 "with - and _ only between letters or digits.")
 
 
-def reserved(name):
-    return (name or "").lower() in RESERVED_NAMES
+def reserved(name, server_name=None):
+    n = (name or "").lower()
+    return n in RESERVED_NAMES or bool(server_name and n == server_name.lower())
 
 
 def reserved_refusal(name):
     return ("err", "RESERVED", "%s is a reserved word here; choose another name" % name.lower())
+
+
+def new_name_refusal(name, server_name=None):
+    """None when name may be a new account's, else the refusal: a reserved word, or outside the rule."""
+    if reserved(name, server_name):
+        return reserved_refusal(name)
+    if not NEW_NAME_RE.match(name or ""):
+        return ("err", "NAMERULE", "names start with a letter; - and _ go between letters or digits")
+    return None
 
 
 def transport(settings):
@@ -800,11 +818,12 @@ class PasswordSignUp(Part):
 
 
 def create(acc, name, cred="", email=None, temp="", pending=0.0):
-    """The new account, unless the name was taken while its sign-up ran, or the name is a reserved word.
+    """The new account, unless the name was taken while its sign-up ran, is a reserved word or breaks the rule.
     pending: a sign-up email's account, kept until then unless someone signs in with its temporary password
     (temp)."""
-    if reserved(name):
-        return reserved_refusal(name)
+    refusal = new_name_refusal(name, getattr(acc, "server_name", None))
+    if refusal:
+        return refusal
     if acc.player(name):
         return ("err", "NAMEINUSE", "that name was just taken")
     p = acc.player(name, create=True)
@@ -1042,9 +1061,10 @@ class Auth:
         return self.start_signup(conn, name, None, given, False)
 
     def start_signup(self, conn, name, p, given, explicit):
-        """The sign-up method for a free name that is not a reserved word."""
-        if reserved(name):
-            return reserved_refusal(name)
+        """The sign-up method for a free name that is not a reserved word and fits the rule for new names."""
+        refusal = new_name_refusal(name, getattr(self.acc, "server_name", None))
+        if refusal:
+            return refusal
         if p is not None:
             return ("err", "NAMEINUSE", "the name %s is taken; choose another" % name)
         if not self.signup_allowed(getattr(conn, "source", None)):

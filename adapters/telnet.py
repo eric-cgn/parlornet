@@ -45,6 +45,8 @@ import textwrap
 import time
 import traceback
 
+from parlord.auth import NEW_NAME_RULE
+
 from . import declare
 from .common import (framed_motd, LOGIN_SECS, LOGIN_TOTAL_SECS, CLAIM_LEN, CoreClient, CoreError, Gate, claim_text,
                      keepalive, NeedAuth,
@@ -2560,7 +2562,7 @@ async def sign_in(io, args, ticket=None):
                 return None
             new = name.lower() == NEW_WORD
             if new:
-                io.write("A new account. Names are letters, digits, - and _, up to 12.\n")
+                io.write("A new account. %s\n" % NEW_NAME_RULE)
                 name = await line("Name you want (or press Enter to stop): ")
                 if name is None:
                     return None
