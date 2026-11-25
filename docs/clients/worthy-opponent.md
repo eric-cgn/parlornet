@@ -10,7 +10,7 @@ Take version 2.0: it is one program, `WORTHY.EXE`, with its manual, `WORTHY.DOC`
 
 ## Setting it up
 
-You need a PC with a color screen (or DOSBox) and a modem that can dial a host and a port over TCP: a WiFi modem, DOSBox's emulated modem (`serial1=modem` in DOSBox, DOSBox-X or DOSBox Staging), or a serial line to a Unix login running pndial (`pndial {host} 6519`); [Serial connections](../serial.md) has the choices. Make your account on the web site or by telnet first.
+You need a PC with a color screen (or DOSBox) and a modem that can dial a host and a port over TCP: a WiFi modem, DOSBox's emulated modem (`serial1=modem` in DOSBox, DOSBox-X or DOSBox Staging), or a serial line to a Unix login running ATZ (`ATZ {host} 6519`); [Serial connections](../serial.md) has the choices. Make your account on the web site or by telnet first.
 
 1. Start `WORTHY`. In F1, Modem, choose the COM port of your modem; in F1, Name, type your ParlorNet name.
 2. Press F3 for the phone book. On an empty line, move to the Name column, press Enter and type a name such as ParlorNet; then in the Number column type `ATDT {host}:6519`. A number that starts with `AT` is sent to the modem as it stands.

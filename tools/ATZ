@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""ATZ [host [port]]: a Hayes modem for a serial line logged in to a Unix shell. A period program that resets
+its modem with ATZ at the shell prompt starts it, and it answers OK. ATD host:port dials that host and port,
+ATD host.name the port given (6501 if none), any other number the host and port given (parlornet.org 6501).
+Online, a second's quiet, +++ and a second's quiet give OK with the line still up: ATH hangs up, ATO goes
+back. Control-C or Control-D at the commands ends it and gives the shell back. See ParlorNet's docs/serial.md."""
+import os, select, socket, sys, termios, time, tty
+
+host, port = (sys.argv[1:] + ["parlornet.org", "6501"][len(sys.argv) - 1:])[:2]
+fd, sock, echo, line, code = 0, None, True, b"", 0
+saved = termios.tcgetattr(fd)
+speed = next((" %d" % b for b in (300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
+              if getattr(termios, "B%d" % b, None) == saved[5]), "")
+out = lambda b: os.write(fd, b if isinstance(b, bytes) else b.encode())
+say = lambda text: out("\r\n%s\r\n" % text)
+
+
+def dial(num):
+    num = num.strip()[num.strip()[:1] in ("T", "t", "P", "p"):].replace(" ", "").replace('"', "")  # tone, pulse
+    h, p = num.rsplit(":", 1) if ":" in num else (num, port) if "." in num else (host, port)
+    try:
+        return socket.create_connection((h, int(p)), 30)
+    except (OSError, ValueError):
+        return None
+
+
+def online(s):
+    """Every byte both ways as it is. The socket at the escape; None when either side hangs up."""
+    s.settimeout(None)
+    last, plus = time.monotonic(), 0
+    while True:
+        r, now = select.select([fd, s], [], [], 0.1)[0], time.monotonic()
+        if plus == 3 and now - last >= 1:
+            return s
+        try:
+            data = s.recv(4096) if s in r else None
+            if data == b"" or (fd in r and not (got := os.read(fd, 4096))):
+                break
+            data and out(data)
+            if fd in r:
+                n = plus + len(got)
+                plus, last = (n if not got.strip(b"+") and n <= 3 and (plus or now - last >= 1) else 0), now
+                s.sendall(got)
+        except OSError:
+            break
+    s.close()
+
+
+tty.setraw(fd)
+try:
+    say("OK")                                       # the answer to the ATZ that started it
+    while True:
+        if sock in select.select([fd] + [sock] * bool(sock), [], [])[0]:
+            if not sock.recv(4096):                 # what comes while at the commands is dropped
+                sock = sock.close()
+                say("NO CARRIER")
+            continue
+        c = os.read(fd, 1)
+        if c in (b"", b"\x03", b"\x04"):
+            code = 130 if c == b"\x03" else 0
+            break
+        if c in (b"\x08", b"\x7f"):
+            line = line[:-1]
+            echo and out(b"\x08 \x08")
+        elif c not in (b"\r", b"\n"):
+            line = (line + c)[:80]
+            echo and out(c)
+        elif line:
+            cmd, line = line.decode("latin-1").strip(), b""
+            up = cmd.upper()
+            echo and out(b"\r\n")
+            if not up.startswith("AT"):
+                continue
+            d = next((i for i in range(2, len(up)) if up[i] == "D" and up[i - 1] != "&"), 0)
+            if d:
+                sock = sock and sock.close() or dial(cmd[d + 1:])
+            elif not (up[2:3] == "O" and sock):
+                echo = False if "E0" in up else True if "E1" in up else echo
+                if sock and ("H" in up or "Z" in up):
+                    sock = sock.close()
+                say("OK")
+                continue
+            say("CONNECT" + speed if sock else "NO CARRIER")
+            if sock:
+                sock = online(sock)
+                say("OK" if sock else "NO CARRIER")
+finally:
+    termios.tcsetattr(fd, termios.TCSAFLUSH, saved)
+sys.exit(code)

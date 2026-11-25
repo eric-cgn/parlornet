@@ -1,7 +1,6 @@
-"""tools/pndial (docs/serial.md): the small Hayes modem for a serial line logged in to a Unix shell. It runs
-under /bin/sh on a pseudo-terminal, as a period program would find it, and dials a parlor on this machine
-with the nc it finds; and as ATZ, run by a shell when a program resets its modem. Skipped where there is no
-pty, sh or nc."""
+"""tools/ATZ (docs/serial.md): the small Hayes modem for a serial line logged in to a Unix shell. It runs
+on a pseudo-terminal, as a period program would find it, and dials a parlor on this machine; and as ATZ,
+run by a shell when a program resets its modem. Skipped where there is no pty or sh."""
 import os
 import select
 import shutil
@@ -16,13 +15,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_core import free_port  # noqa: E402
 from speed import slow  # noqa: E402
 
-PNDIAL = os.path.join(ROOT, "tools", "pndial")
+ATZ = os.path.join(ROOT, "tools", "ATZ")
 
 
-@unittest.skipUnless(os.name == "posix" and hasattr(os, "forkpty") and shutil.which("nc")
-                     and os.path.exists("/bin/sh"), "needs a pty, /bin/sh and nc")
+@unittest.skipUnless(os.name == "posix" and hasattr(os, "forkpty") and shutil.which("python3")
+                     and os.path.exists("/bin/sh"), "needs a pty, /bin/sh and python3")
 @slow
-class Pndial(unittest.TestCase):
+class Atz(unittest.TestCase):
     def setUp(self):
         self.port, closed = free_port(), free_port()
         self.parlor = subprocess.Popen([sys.executable, "-m", "parlord", "--host", "127.0.0.1", "--port",
@@ -42,14 +41,14 @@ class Pndial(unittest.TestCase):
             a = termios.tcgetattr(0)
             a[4] = a[5] = termios.B9600
             termios.tcsetattr(0, termios.TCSANOW, a)
-            os.execve("/bin/sh", ["sh"] + argv, env or os.environ)
+            os.execve(argv[0], argv, env or os.environ)
         self.pid, self.fd, self.status = pid, fd, None
 
     def shell(self):
         """An interactive shell on the line, as a serial login gives, with the tmp directory on its PATH."""
         env = {"PATH": self.tmp.name + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"), "PS1": "$ ",
                "HOME": self.tmp.name, "TERM": "dumb"}
-        self.start(["-i"], env)
+        self.start(["/bin/sh", "-i"], env)
         self.say(b"", b"$ ")
 
     def tearDown(self):
@@ -58,7 +57,7 @@ class Pndial(unittest.TestCase):
             if self.status is None:
                 os.kill(self.pid, 9)
                 os.waitpid(self.pid, 0)
-            os.close(self.fd)               # a pndial the shell ran gets SIGHUP
+            os.close(self.fd)               # an ATZ the shell ran gets SIGHUP
         self.parlor.kill()
         self.parlor.wait()
         self.parlor.stdout.close()
@@ -80,35 +79,36 @@ class Pndial(unittest.TestCase):
         return out
 
     def test_commands_dials_and_hangups(self):
-        self.start([PNDIAL, "127.0.0.1", str(self.closed)])
-        self.assertIn(b"Ctrl-C ends.", self.say(b"", b"Ctrl-C ends."))
+        self.start([ATZ, "127.0.0.1", str(self.closed)],
+                   dict(os.environ, PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")))
+        self.assertEqual(self.say(b"", b"OK\r\n"), b"\r\nOK\r\n")                # the answer to ATZ
         self.assertEqual(self.say(b"AT\r", b"OK\r\n"), b"AT\r\n\r\nOK\r\n")         # echoed, as a modem
         self.assertEqual(self.say(b"ATE0\r", b"OK\r\n"), b"ATE0\r\n\r\nOK\r\n")
         self.assertEqual(self.say(b"AT&F&C1&D2\r\n", b"OK\r\n"), b"\r\nOK\r\n")    # &D is no dial
         self.assertEqual(self.say(b"HELLO\r"), b"")
-        # a number dials the host and port given to pndial: nothing listens there
-        self.assertEqual(self.say(b"ATDT5551212\r", b"NO CARRIER\r\n"),
-                         b"\r\nCONNECT 9600\r\n\r\nNO CARRIER\r\n")
+        # a number dials the host and port given to ATZ: nothing listens there
+        self.assertEqual(self.say(b"ATDT5551212\r", b"NO CARRIER\r\n"), b"\r\nNO CARRIER\r\n")
         # host:port dials the parlor; every byte passes as it is
         self.assertEqual(self.say(b"ATDT 127.0.0.1:%d\r" % self.port, b"CONNECT"), b"\r\nCONNECT 9600\r\n")
         self.assertEqual(self.say(b"PARLORNET/1\r\n", b"\r\n"), b"PARLORNET/1 test AUTH=none SIGNUP=none\r\n")
-        self.assertTrue(self.say(b"\x11\x13\r\n", b"\r\n").startswith(b"ERR "))   # XON, XOFF pass as data
+        self.assertTrue(self.say(b"\x03\x11\x13\r\n", b"\r\n").startswith(b"ERR "))
         self.assertIn(b"GAM reversi/1", self.say(b"GAM\r\n", b"OK\r\n"))
+        # the escape: a second's quiet, +++ and a second's quiet; the line stays up for ATO
+        time.sleep(1.1)
+        self.assertEqual(self.say(b"+++", b"OK\r\n", 4.0), b"\r\nOK\r\n")
+        self.assertEqual(self.say(b"ATO\r", b"CONNECT"), b"\r\nCONNECT 9600\r\n")
+        self.assertTrue(self.say(b"+++\r\n", b"\r\n").startswith(b"ERR "))   # +++ with no quiet is data
+        self.assertIn(b"GAM reversi/1", self.say(b"GAM\r\n", b"OK\r\n"))    # the same session
         got = self.say(b"BYE\r\n", b"NO CARRIER\r\n", 2.0)
-        for _ in range(3):                      # OpenBSD's nc and ncat notice the hang-up at the next key
-            if b"NO CARRIER" in got:
-                break
-            got += self.say(b"\r", b"NO CARRIER\r\n", 2.0)
         self.assertTrue(got.endswith(b"OK\r\n\r\nNO CARRIER\r\n"), got)
-        self.assertEqual(self.say(b"ATZ\r", b"OK\r\n"), b"\r\nOK\r\n")             # commands again
-        self.assertEqual(self.say(b"ATDT127.0.0.1:%d\r" % self.port, b"CONNECT"), b"\r\nCONNECT 9600\r\n")
+        # ATH hangs up after the escape
+        self.say(b"ATDT 127.0.0.1:%d\r" % self.port, b"CONNECT")
         self.say(b"PARLORNET/1\r\n", b"\r\n")
-        got = self.say(b"\x03", b"NO CARRIER\r\n", 3.0)    # the parlor hangs up on Control-C
-        for _ in range(3):                      # OpenBSD's nc and ncat notice the hang-up at the next key
-            if b"NO CARRIER" in got:
-                break
-            got += self.say(b"\r", b"NO CARRIER\r\n", 2.0)
-        self.assertIn(b"NO CARRIER", got)
+        time.sleep(1.1)
+        self.assertEqual(self.say(b"+++", b"OK\r\n", 4.0), b"\r\nOK\r\n")
+        self.assertEqual(self.say(b"ATH\r", b"OK\r\n"), b"\r\nOK\r\n")
+        self.assertEqual(self.say(b"ATO\r", b"OK\r\n"), b"\r\nOK\r\n")               # nothing to go back to
+        self.assertEqual(self.say(b"ATZ\r", b"OK\r\n"), b"\r\nOK\r\n")             # commands again
         os.write(self.fd, b"\x03")              # Ctrl-C while it waits ends it
         end = time.monotonic() + 5
         while time.monotonic() < end and self.status is None:
@@ -125,22 +125,13 @@ class Pndial(unittest.TestCase):
                          b"ATDT127.0.0.1:%d\r\n\r\nCONNECT 9600\r\n" % self.port)
         self.assertEqual(self.say(b"PARLORNET/1\r\n", b"\r\n"), b"PARLORNET/1 test AUTH=none SIGNUP=none\r\n")
 
-    def test_atz_link(self):
-        # pndial on the PATH as ATZ: the shell echoes ATZ and runs it, and it answers OK, with no banner
-        os.symlink(PNDIAL, os.path.join(self.tmp.name, "ATZ"))
+    def test_from_the_shell(self):
+        # installed on the PATH as ATZ: the shell echoes the program's ATZ and runs it, and it answers OK
+        shutil.copy(ATZ, os.path.join(self.tmp.name, "ATZ"))
         self.shell()
         got = self.say(b"ATZ\r", b"OK\r\n")
-        self.assertTrue(got.endswith(b"\r\nOK\r\n"), got)
-        self.assertNotIn(b"pndial", got)
+        self.assertTrue(got.endswith(b"ATZ\r\n\r\nOK\r\n"), got)
         self.assertEqual(self.say(b"AT&F\r", b"OK\r\n"), b"AT&F\r\n\r\nOK\r\n")    # an init string
-        self.dial_parlor()
-
-    def test_atz_alias(self):
-        self.shell()
-        self.say(b"alias ATZ='%s -z'\r" % PNDIAL.encode(), b"$ ")
-        got = self.say(b"ATZ\r", b"OK\r\n")
-        self.assertTrue(got.endswith(b"\r\nOK\r\n"), got)
-        self.assertNotIn(b"pndial", got)
         self.dial_parlor()
 
 

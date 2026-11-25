@@ -10,7 +10,7 @@ Each copy carries a copyright notice to J. Weaver Jr. and says it needs a GEnie 
 
 ## Setting it up
 
-The front ends speak only over a serial port (1200 or 2400 baud, 8N1). The parlor listens on port `6520`: use a WiFi modem (`ATDT {host}:6520`, raw or telnet mode), a serial bridge, a login on a Unix machine running pndial (`pndial {host} 6520`, which lets the front end's stored GEnie number dial the parlor), or an emulator's modem (DOSBox: `serial1=modem`) or serial bridge (Basilisk II's modem port on a pseudo-terminal that socat connects to the parlor). [Serial connections](../serial.md) has each of these and the cable.
+The front ends speak only over a serial port (1200 or 2400 baud, 8N1). The parlor listens on port `6520`: use a WiFi modem (`ATDT {host}:6520`, raw or telnet mode), a serial bridge, a login on a Unix machine running ATZ (`ATZ {host} 6520`, which lets the front end's stored GEnie number dial the parlor), or an emulator's modem (DOSBox: `serial1=modem`) or serial bridge (Basilisk II's modem port on a pseudo-terminal that socat connects to the parlor). [Serial connections](../serial.md) has each of these and the cable.
 
 1. Mac: in Settings (Command-P) pick the modem port and 2400 baud, put the dial command in the dial string and press Command-D. The parlor switches RSCARDS to graphics by itself. Give the color version about 3000K in Get Info.
 2. IBM PC: dial with a terminal program (in DOSBox, `echo ATDT {host}:6520 > COM1`), then run `RSCARDS 1` (the COM port).

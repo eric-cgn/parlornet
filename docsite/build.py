@@ -77,7 +77,7 @@ DOC_GROUPS = [
          "in each browser, and what they say"),
         ("/docs/apple2.html", "ParlorNet for the Apple IIe", "the player's guide to the Apple IIe and IIgs program"),
         ("/docs/serial.html", "Serial connections", "reaching a parlor over a serial line: WiFi modems, a Unix "
-         "login, pndial, tcpser and bridges, with the cable"),
+         "login, ATZ, tcpser and bridges, with the cable"),
         ("/docs/chat-commands.html", "Chat commands", "the commands typed in the chat-style consoles"),
         ("/docs/clients.html", "Frontend downloads", "where each period program comes from, with licenses"),
         ("/eclipse-68k-fix.html", "Eclipse 68k Fix", "lets Reversi The Eclipse 1.2 connect from a 68k Mac"),
