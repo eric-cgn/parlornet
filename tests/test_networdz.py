@@ -254,9 +254,9 @@ class NwHost:
     def send_bag(self):
         self.send(b"A\x04" + bytes(self.bag + [0] * (A.BAG - len(self.bag))))
 
-    def pick_start(self):
-        """G to each seat; the lowest tile starts (blanks lowest), the first such seat on a tie. Then the bag again,
-        R and every seat's draw, and I."""
+    def pick_start(self, first=None, take=None):
+        """G to each seat; the lowest tile starts (blanks lowest), the first such seat on a tie, or first. Then the
+        bag again, R and every seat's draw, and I. take: letters the host's own first draw takes."""
         picks = {}
         for s in self.seats:
             self.send(b"G" + bytes([s]))
@@ -269,14 +269,15 @@ class NwHost:
                 place = slots[2 * s]            # Networdz reads seat n's pick in slot 2n
                 assert place != A.EMPTY and slots.count(A.EMPTY) == A.RACK - 1, "a pick in the wrong slot: %r" % m
             picks[s] = A.TILESET[self.bag[place]]
-        first = min(self.seats, key=lambda s: (A.TILESET.index(picks[s]), s))
+        if first is None:
+            first = min(self.seats, key=lambda s: (A.TILESET.index(picks[s]), s))
         i = self.seats.index(first)
         self.order = self.seats[i:] + self.seats[:i]
         random.shuffle(self.bag)
         self.send_bag()
         self.send(b"R\x04" + b"".join(bytes([s, 0]) for s in (self.order + [0] * 4)[:4]))
         for s in self.order:
-            self.draw(s)
+            self.draw(s, take if s == 0 else None)
         self.turn = first
         self.send(b"I" + bytes([first, 1, 0]))
         return first
@@ -284,13 +285,17 @@ class NwHost:
     def letters(self, s):
         return A.letters_of(self.racks[s])
 
-    def draw(self, s):
+    def draw(self, s, take=None):
         self.send(b"P" + bytes([s]))
         if s == 0:
             rack, draws = self.racks[0], [A.EMPTY] * A.RACK
             before = list(rack)
+            take = list(take or "")
             for i in range(A.RACK):
                 left = [p for p, t in enumerate(self.bag) if t != A.EMPTY]
+                if take:                        # these letters first, from wherever they are in the bag
+                    want = take.pop(0)
+                    left = [p for p in left if A.TILESET[self.bag[p]] == want] or left
                 if rack[i] == A.EMPTY and left:
                     p = random.choice(left)
                     rack[i], draws[i], self.bag[p] = self.bag[p], p, A.EMPTY
@@ -596,6 +601,35 @@ class Service(Stack):
         self.assertTrue(any("TRX PROG Networdz 2.0" in l for l in turns), turns)
         self.assertFalse(any(re.match(r"TRN \S+ \d+ \S+ 0 bea", l) and i + 1 < len(turns)
                              and not turns[i + 1].startswith("TRX MOVE") for i, l in enumerate(turns)), turns)
+
+    def test_the_hosts_deal_is_every_seats(self):
+        """The host's Networdz deals every rack. Here it starts and its first draw takes the tiles the table
+        shows on the bot's rack (or the rarest ones while it shows none): the table takes the host's rack, the
+        bot's rack comes from what the host's bag has left, and the two agree."""
+        h, pw = self.signed_in("kit")
+        n = h.say("/invite bot")
+        h.wait_chat("You invited the bot", n)
+        h.wait(lambda: h.names.get(1) == "bot", "the bot's name on seat 1")
+        nat = self.native("kit", pw)
+        tid = next(l.split()[1] for l in nat.req("LST") if " kit," in l)
+        h.new_game()
+        shown = A.parse_racks(nat.req("VUE %s" % tid)).get(1, "")
+        h.pick_start(first=0, take=shown or "JKQXZ__")
+        self.assertEqual(shown, "")                         # the table deals nothing itself
+        self.assertEqual(sorted(h.letters(0)), sorted("JKQXZ__"))
+        for turn in range(8):
+            if h.over or (turn >= 5 and h.turn == 0):
+                break
+            if h.turn == 0:
+                h.wait(lambda: self.agree(nat, tid, h), "the table to agree with Networdz")
+                self.assertEqual(G.parse_view(nat.req("VUE %s" % tid))["bag"], h.bag_left())
+                h.host_play(CORE_WORDS - REFUSED)
+            else:
+                h.remote_turn()
+        if not h.over:
+            h.wait(lambda: self.agree(nat, tid, h), "the table to agree with Networdz")
+            self.assertEqual(G.parse_view(nat.req("VUE %s" % tid))["bag"], h.bag_left())
+        self.assertFalse(any("the table refused" in l or "Networdz's bag has no" in l for l in LOG), LOG[-10:])
 
     def test_two_remote_seats_a_player_and_the_bot(self):
         """Three players: the host, a native player and the bot. The native player's exchange and pass reach
