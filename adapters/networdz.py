@@ -843,6 +843,8 @@ class Guest:
             if len(p) < 4 or p[0] != "EVT" or not p[2].isdigit() or int(p[2]) <= self.cursor:
                 continue
             evs.append((int(p[2]), p[3], (p[4] if len(p) > 4 else "").split()))
+        if evs and evs[-1][1] == "PLAY":    # its tiles come in the X event after it: wait for that
+            evs.pop()
         says = chatcmd.join_says(["%s %s" % (kind, " ".join(a)) for _, kind, a in evs])
         for i, (seq, kind, a) in enumerate(evs):
             self.cursor = seq
