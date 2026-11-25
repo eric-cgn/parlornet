@@ -270,31 +270,16 @@ class Web(Stack):
         finally:
             W.S.DOCS[0] = old
 
-    def test_welcome_games_list(self):
+    def test_welcome_has_no_games_list(self):
+        """The games are on the Games page, in the bar; the welcome page has the forms and the guide by machine."""
         st, _, _, body = self.get("/welcome.htm")
         self.assertEqual(st, 200)
         low = body.lower()
         for bad in ("<script", "<style", "style=", "javascript:", "&#x"):
             self.assertNotIn(bad, low)
         b = plain(body)
-        self.assertLess(b.index('<a name="play">'), b.index('<a name="games">'))
-        self.assertEqual(b.count(">Games</a></h2>"), 1)
-        section = b[b.index('<a name="games">'):]
-        rows = re.findall(r'<a href="/games/([a-z0-9]+)\.htm"><b>([^<]+)</b></a><br>([^<]*)</td>', section)
-        self.assertEqual([r[1] for r in rows],
-                         ["Reversi", "Backgammon", "Grid Words", "Cannon Fire", "Dots and Boxes", "Five in a Row",
-                          "Mancala", "Checkers", "Naval Combat", "Rummy Tile Classic"])
-        by = {r[1]: r for r in rows}
-        # Reversi and Backgammon are playable because the core lists them in GAM, with its player counts
-        self.assertEqual(by["Reversi"], ("reversi", "Reversi", "2 players"))
-        self.assertEqual(by["Backgammon"], ("backgammon", "Backgammon", "2 players"))
-        from adapters import games
-        for name in list(by)[2:]:
-            if by[name][0] in games.by_type():  # built: a frontend module and its plugin, so the core hosts it
-                self.assertNotIn(",", by[name][2])
-            else:
-                self.assertTrue(by[name][2].endswith(", planned"), by[name])
-        self.assertIn('<a href="/games.htm">Games</a>', section)
+        self.assertNotIn('<a href="/games/', b)
+        self.assertIn('<a href="/games.htm">Games</a>', b[:b.index("</table>")])
 
     def test_games_table_follows_gam(self):
         from adapters import games, web as W
@@ -302,9 +287,8 @@ class Web(Stack):
         built = games.by_type()         # games with a frontend module count as built until the core says not
 
         def statuses(gam):
-            html = plain(W.games_table_html(parse_games(gam) if gam is not None else None))
-            return {name: (note.split(", ", 1) + ["playable"])[1]
-                    for name, note in re.findall(r"<b>([^<]+)</b>(?:</a>)?<br>([^<]*)</td>", html)}
+            html = plain(W.games_page(parse_games(gam) if gam is not None else None).decode("ascii"))
+            return dict(re.findall(r"<b>([^<]+)</b>(?:</a>)?</td><td[^>]*>[^<]*</td><td>([^<]*)</td>", html))
         self.assertEqual(statuses(None)["Reversi"], "playable")      # core not reached yet: static list
         for name, gtype, _, _ in W.GAMES[2:]:
             self.assertEqual(statuses(None)[name], "playable" if gtype in built else "planned")
@@ -332,9 +316,8 @@ class Web(Stack):
                           r'<td align="center">([^<]*)</td><td>([^<]*)</td>', plain(page))
         self.assertEqual([r[1] for r in rows], order)
         self.assertEqual(len(set(r[0] for r in rows)), 10)
-        welcome = plain(self.get("/welcome.htm")[3])
-        links = re.findall(r'<a href="/games/([a-z0-9]+)\.htm"><b>([^<]+)</b></a>', welcome)
-        self.assertEqual(links, [(r[0], r[1]) for r in rows])     # the welcome list links each game's page
+        links = re.findall(r'<a href="/games/([a-z0-9]+)\.htm"><b>([^<]+)</b></a>', plain(page))
+        self.assertEqual(links, [(r[0], r[1]) for r in rows])     # each game's row links its page
         pages = {}
         for anchor, name, players, status in rows:
             st, _, _, part = self.get("/games/%s.htm" % anchor)
@@ -344,7 +327,7 @@ class Web(Stack):
             self.assertIn("<b>Status here:</b> %s<br>" % status, part)
             self.assertIn("<b>Players:</b> %s<br>" % players, part)
             self.assertIn('<a href="%sindex.html#%s">Clients page</a>' % (DOCS_URL, anchor), part)
-            self.assertIn('<a href="/protocols.htm">Protocols</a>', part)
+            self.assertNotIn("protocols.htm", part)
             self.assertIn('<a href="/games.htm#%s">' % anchor, part)
         self.assertEqual(self.get("/games/nosuch.htm")[0], 200)        # not a game: the welcome page
         self.assertNotIn("<b>Players:</b>", self.get("/games/nosuch.htm")[3])
@@ -520,11 +503,12 @@ class Web(Stack):
         self.assertIn("Your session has ended", b.get(lobby)[3])
 
     def test_welcome_sections_and_protocols_page(self):
-        """The welcome page's sections come in order, each anchored, with the old section names kept as
-        anchors; the protocols page is one table of what this server speaks now (test_protocols_list.py); no
-        page has CSS, scripts, hex character references or the admin port."""
+        """The welcome page's sections come in order, each anchored, Sign in, New account, then Play from your
+        computer, which keeps the old section names as anchors; the old Protocols page has moved to the docs
+        site's protocols reference; no page has CSS, scripts, hex character references or a port."""
         from adapters import catalog
         from adapters import web as W
+        from parlord import DOCS_URL
         st, _, _, body = self.get("/welcome.htm")
         self.assertEqual(st, 200)
         names = re.findall(r'<a name="([^"]+)">', body)
@@ -532,22 +516,15 @@ class Web(Stack):
         for anchor in re.findall(r'<a href="#([^"]+)">', body):   # every in-page link on the page
             self.assertIn(anchor, names)
         b = plain(body)
-        self.assertEqual([n for n, _, _ in W.SECTIONS], ["play", "ways-in", "games"])
-        order = [b.index('<a name="%s">' % n) for n, _, _ in W.SECTIONS]
-        self.assertEqual(order, sorted(order))
-        self.assertLess(b.index("<h1>Welcome</h1>"), order[0])
-        if '<a name="motd">' in b:                                     # the message of the day before Play now
-            self.assertLess(b.index('<a name="motd">'), order[0])
-        for anchor, title, _ in W.SECTIONS:
-            self.assertRegex(b, r'<h2>(?:<a name="[a-z-]+"></a>)*<a name="%s">%s</a></h2>' % (anchor, title))
-        # old section names land on Other ways in
-        self.assertIn('<h2><a name="frontends"></a><a name="clients"></a><a name="protocols"></a>'
-                      '<a name="ways-in">Other ways in</a></h2>', b)
-        st, _, _, page = self.get("/protocols.htm")
-        self.assertEqual(st, 200)
-        pp = plain(page)
-        self.assertEqual(pp.count("<table"), 3)                         # masthead, the list, footer
-        self.assertIn('<th align="left">Key</th><th align="right">Port</th>', pp)
+        self.assertEqual(re.findall(r'<a name="([a-z]+)">[^<]+</a></h2>', b), ["signin", "new", "machines"])
+        self.assertLess(b.index("<h1>Welcome</h1>"), b.index('<a name="signin">'))
+        if '<a name="motd">' in b:                                     # the message of the day before Sign in
+            self.assertLess(b.index('<a name="motd">'), b.index('<a name="signin">'))
+        # old section names land on Play from your computer
+        self.assertIn("<h2>%s<a name=\"machines\">Play from your computer</a></h2>"
+                      % "".join('<a name="%s"></a>' % n for n in W.OLD_ANCHORS), b)
+        st, loc, _, page = self.get("/protocols.htm")
+        self.assertEqual((st, loc), (301, DOCS_URL + "protocols.html"))
         admin = dict((n, p) for n, _, p, _ in catalog.ADAPTERS)["admin"]
         for page_ in (body, page):
             self.assertNotIn(str(admin), page_)    # operators' console: never its port
@@ -555,6 +532,7 @@ class Web(Stack):
             for bad in ("<script", "<style", "style=", "javascript:", "&#x", "<div", "<span"):
                 self.assertNotIn(bad, low)
             self.assertEqual(re.findall(r"&(?!(?:amp|lt|gt|quot|nbsp|#\d+);)", page_), [])
+        self.assertNotIn(str(self.web_port), body)
 
     def test_table_refresh(self):
         b = self.browser()

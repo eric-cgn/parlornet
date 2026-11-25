@@ -1,6 +1,6 @@
 """The protocols reference (protocols.html): an entry for every protocol key a ParlorNet server can speak, in
-the usual port order. A server lists the protocols it speaks now on its own Protocols page (adapters/web.py,
-from the core's PRL); each key there links to its entry here (protocols.html#KEY; webstyle.protocol_anchor).
+the usual port order, each anchored by its key (protocols.html#KEY; webstyle.protocol_anchor). The game
+server's own site has no list of protocols or ports: technical readers come here.
 Each server extension declares its own key, name and description (adapters/declare.py, PROTOCOL in its
 module); this table adds what the docs need: the usual port, origin, years, status and the games. The table
 at the top of docs/protocols.md has the same keys, ports, protocols, origins and years (a test checks)."""
@@ -88,11 +88,12 @@ def games_of(key, names):
 
 def programs_html(key):
     """The clients that speak a protocol, each linking to its page; a planned one says so."""
-    if key == "PARLORNET/1":
-        return a(C.FRONTENDS_PAGE + "#native", "your own program")
     if key == "HTTPS":
         return "any current web browser"
     clients = [c for c in C.EVERY if c.key() == key]
+    if key == "PARLORNET/1":
+        return ", ".join([a(c.href(), esc(c.name)) for c in clients] + [a(C.FRONTENDS_PAGE + "#native",
+                                                                        "your own program")])
     if not clients:
         return "none listed yet"
     return ", ".join(a(c.href(), esc(c.name)) + (" (planned)" if c.planned() else "") for c in clients)
@@ -106,8 +107,7 @@ def protocols_body(games):
     rows = [[a("#" + protocol_anchor(k), "<b>%s</b>" % esc(k)), "%d" % port, esc(name), esc(status)]
             for k, name, port, _, _, _, status, _, _ in PROTOCOLS]
     out = [h1("Protocols"),
-           p("These are the protocols a ParlorNet server can speak. Each server&#39;s own Protocols page lists "
-             "the ones it speaks now and links each to its entry here. The ports are the usual ones, and %s "
+           p("These are the protocols a ParlorNet server can speak. The ports are the usual ones, and %s "
              "explains how to connect, sign up and sign in with each. %s"
              % (a(C.PROTOCOLS_DOC, "Supported protocols"), C.originals_html())),
            data_table(["Key", "Usual port", "Protocol", "Status"], rows, "100%", (None, "right"))]

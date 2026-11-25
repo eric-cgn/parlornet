@@ -397,7 +397,7 @@ class Play(PlayStack):
         self.assertIn("<canvas", body)
         self.assertIn('<meta name="pn-classic" content="">', body)    # no web extension: no classic pages
         for src in re.findall(r'(?:src|href)="([^"]+)"', body):
-            if src in ("/welcome.htm", "/protocols.htm"):              # hidden by the script without them
+            if src == "/welcome.htm":                                   # hidden by the script without it
                 continue
             self.assertFalse(src.startswith(("http:", "https:", "//")), src)    # nothing from elsewhere
             r, _ = self.http("GET", "/play/" + src if not src.startswith("/") else src)
@@ -970,7 +970,7 @@ class WebAndPlay(unittest.TestCase):
             time.sleep(1)
         self.assertIn('<meta name="pn-classic" content="%s">' % base, body)
         self.assertIn('href="%swelcome.htm"' % base, body)
-        self.assertIn('href="%sprotocols.htm"' % base, body)
+        self.assertNotIn("protocols.htm", body)                         # no list of protocols on either site
 
     def test_redirect_to_the_public_url(self):
         for path in ("/play", "/play/", "/play/ws"):

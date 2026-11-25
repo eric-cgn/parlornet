@@ -823,8 +823,10 @@ class ClientsData(unittest.TestCase):
         from adapters import catalog, clients as C
         from docsite import clientpages, protocols
         usual = {k: port for k, _, port, *_ in protocols.PROTOCOLS}
+        native = {"parlornet": 6501}        # the core's own protocol (parlord --port), served by no extension
         for c in C.PERIOD:
-            port = catalog.PUBLISHED.get(c.protocol) or dict((n, p) for n, _, p, _ in catalog.ADAPTERS)[c.protocol]
+            port = (native.get(c.protocol) or catalog.PUBLISHED.get(c.protocol) or
+                    dict((n, p) for n, _, p, _ in catalog.ADAPTERS)[c.protocol])
             self.assertEqual(c.port, port, c.id)
             self.assertEqual(c.port, usual[c.key()], c.id)
             page = clientpages.client_body(c)

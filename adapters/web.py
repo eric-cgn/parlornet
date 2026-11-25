@@ -12,11 +12,12 @@ Credentials never appear in a URL or a page (docs/security-design.md).
 Pages end in .htm. Every page is built in one frame with one palette
 (adapters/webstyle.py); the site map and the rules its pages keep are in
 docs/site.md. The site is the game server's own: the welcome page with the message
-of the day, sign-up and sign-in, the lobby and tables, the games this server hosts
-and the protocols it speaks now. The documentation (the clients for every machine,
-their setup, the protocols reference and the docs) is a separate static site, built
-by tools/build_docs.py, at site.docs_url (http://docs.parlornet.org/ by default);
-the old addresses of its pages here redirect there.
+of the day, sign-in and sign-up and the ways to play from each kind of computer, the
+lobby and tables, and the games this server hosts. Its bar is Welcome, Lobby, Games
+and Docs, with Sign out while a player is signed in. The documentation (the clients
+for every machine, their setup, the protocols reference and the docs) is a separate
+static site, built by tools/build_docs.py, at site.docs_url (http://docs.parlornet.org/
+by default); the old addresses of its pages here redirect there.
 
     python3 -m adapters.web --core 127.0.0.1:6590 --key /data/frontends/web.key --port 6500 --host 0.0.0.0
 """
@@ -46,12 +47,13 @@ from .board import BoardCache, hit, view_digest
 from .telnet import clock_text, describe_event
 from . import games
 from . import botflag
-from . import clients
+from . import clients as C
 from . import declare
+from .medals import ICONS as MEDAL_ICONS
 from . import palette as PAL
 from . import webstyle as S
 from .games import rules_name
-from .webstyle import DEEP, FELT, IVORY, SAGE, a, callout, data_table, esc, font, h1, h2, h3, p, small, ul
+from .webstyle import DEEP, FELT, IVORY, SAGE, a, callout, data_table, esc, font, h1, h2, p, small, ul
 
 RATES = (0, 3, 5, 10, 30, 60)
 DEFAULT_RATE = 5
@@ -203,35 +205,6 @@ def game_rows(hosted=None):
     return out
 
 
-PROTOCOLS_PAGE = "/protocols.htm"
-
-
-def _status_note(r):
-    """A game's players and, when it is not playable here, its status: '2-4 players, planned'."""
-    players = "%s players" % r["players"] if r["players"] != "-" else ""
-    extra = r["status"] if r["status"] != "playable" else ""
-    return ", ".join(x for x in (players, extra) if x)
-
-
-def games_table_html(hosted=None):
-    """The welcome page's Games list: every game in build order, two to a row, each name linking to its
-    own page, with its players (and its status, when it is not playable here)."""
-    cells = []
-    for r in game_rows(hosted):
-        name = "<b>%s</b>" % esc(r["name"])
-        if game_about(r["type"]):
-            name = a(game_page_path(r["type"]), name)
-        cells.append("%s<br>%s" % (name, small(esc(_status_note(r)))))
-    rows = []
-    for i in range(0, len(cells), 2):
-        pair = cells[i:i + 2] + ["&nbsp;"] * (2 - len(cells[i:i + 2]))
-        rows.append('<tr%s valign="top">%s</tr>\n' % (' bgcolor="%s"' % S.IVORY if (i // 2) % 2 else "",
-                                                     "".join("<td>%s</td>" % font(c) for c in pair)))
-    return (h2("games", "Games") +
-            '<table width="100%%" border="0" cellpadding="5" cellspacing="0">\n%s</table>\n' % "".join(rows) +
-            p("The %s page has them all in one table." % a(GAMES_PAGE, "Games"), 2))
-
-
 def _fibs_note_html():
     """The Backgammon section's note on FIBS: ParlorNet speaks its protocol, and is not FIBS."""
     return callout(p("<b>FIBS.</b> The First Internet Backgammon Server (FIBS) has run since 1992 and is still at "
@@ -253,10 +226,11 @@ def first_sentence(text):
     return m.group(1) if m else text
 
 
-def games_page(hosted=None):
+def games_page(hosted=None, scores=False, nav=None):
     """/games.htm: every game in build order, one row each (anchor: the game type, so old links to a
     game's section still land on it): its name linking to its own page, players, status here, and the
-    first sentence of what it is."""
+    first sentence of what it is. scores: the server shows its leaderboard (a link to it). nav: the
+    navigation bar for a signed-in player (site_nav)."""
     rows = []
     for r in game_rows(hosted):
         about = game_about(r["type"])
@@ -269,8 +243,10 @@ def games_page(hosted=None):
             p("The games ParlorNet plays, in the order they were built. Each is an original implementation of "
               "public rules under a generic name. This server hosts the playable ones now. Each game&#39;s page "
               "has its rules and the programs that play it.") +
-            data_table(["Game", "Players", "Status", "What it is"], rows, "100%", (None, "center")))
-    return respond(200, page("ParlorNet: games", body, current=GAMES_PAGE))
+            data_table(["Game", "Players", "Status", "What it is"], rows, "100%", (None, "center")) +
+            (p("Every finished game scores points: see who leads on the %s." % a(LEADERBOARD_PAGE, "leaderboard"), 2)
+             if scores else ""))
+    return respond(200, page("ParlorNet: games", body, current=GAMES_PAGE, nav=nav))
 
 
 def docs_link(path=""):
@@ -285,7 +261,7 @@ def heading_anchor(text):
     return re.sub(r"[^\w\- ]", "", text.lower(), flags=re.ASCII).strip().replace(" ", "-")
 
 
-def game_page(gtype, hosted=None):
+def game_page(gtype, hosted=None, nav=None):
     """/games/<type>.htm: one game: players, its status here, its type spec and protocol chapter on the docs
     site, what the game is, the rules and options played here, and where the docs list the programs that
     play it. None for an unknown game."""
@@ -312,9 +288,8 @@ def game_page(gtype, hosted=None):
             ul(esc(x) for x in rules) +
             (_fibs_note_html() if gtype == "backgammon" else "") +
             h2("frontends", "Programs that play it") + programs +
-            p("The %s page lists the ports this server uses." % a(PROTOCOLS_PAGE, "Protocols"), 2) +
             p("%s | %s" % (a("%s#%s" % (GAMES_PAGE, gtype), "All games"), a("/lobby.htm", "Play")), 2))
-    return respond(200, page("ParlorNet: %s" % r["name"], body, current=GAMES_PAGE))
+    return respond(200, page("ParlorNet: %s" % r["name"], body, current=GAMES_PAGE, nav=nav))
 
 
 # ---- the protocols this server speaks now (the core's PRL) ---------------------------------------
@@ -333,54 +308,102 @@ def parse_protocols(lines):
     return url, [(k, port, name, desc.get(k, "")) for k, port, name in rows]
 
 
-def protocol_key_html(key):
-    """A protocol's key, linking to its entry in the docs site's protocols reference (protocols.html#IOS)."""
-    href = docs_link("protocols.html#" + S.protocol_anchor(key))
-    return a(href, "<b>%s</b>" % esc(key)) if href else "<b>%s</b>" % esc(key)
+# ---- play from your computer: the welcome page's guide, by machine -----------------------------------------
+# Built from adapters/clients.py (PLAY_MACHINES, machine_clients, machine_generic): the same clients, games and
+# ratings as the docs site's Clients page, each client linking to its own page there.
+
+MACHINES_ANCHOR = "machines"
+OLD_ANCHORS = ("play", "ways-in", "frontends", "clients", "protocols", "games")    # earlier sections' anchors
+ANY_OLD = ("any-old", "Any old computer", "and any vintage machine not listed above")
+ANY_NEW = ("any-new", "Any new computer", "a phone, a tablet or a desktop")
+MEDAL_MEANS = {C.GOLD: "works fully", C.SILVER: "works once the program is patched",
+               C.BRONZE: "works, with a problem in play"}
+RATED_LINES = 4         # a machine's rated clients with a line each; the rest are named in one line after them
 
 
-def protocols_html(protocols):
-    """/protocols.htm's body, from the core's live list: one row per protocol a connected server extension
-    declared (and the core's own PARLORNET/1), each key linking to its entry on the docs site."""
-    rows = [[protocol_key_html(k), "%d" % port, esc(name), esc(desc)] for k, port, name, desc in protocols or ()]
-    ref = docs_link("protocols.html")
-    return (h1("Supported protocols") +
-            p("This server speaks these protocols now, each on its own port. All of them reach the same "
-              "players and tables.") +
-            (data_table(["Key", "Port", "Protocol", "What it is"], rows, "100%", (None, "right"))
-             if rows else p("<b>The game server did not send its list of protocols.</b>")) +
-            (p("Each key links to its entry in the %s, which says how to connect and sign in and which "
-               "programs use it." % a(ref, "protocols reference"), 2)
-             if ref else ""))
+def docs_a(path, text):
+    """A link to a page of the docs site, or just the text when the operator cleared site.docs_url."""
+    href = docs_link(path)
+    return a(href, text) if href else text
 
 
-def ways_in_html(host, protocols):
-    """The welcome page's other ways in: each protocol this server speaks now, with its port (telnet's with
-    the command to type), the clients guide on the docs site, and the project's home."""
-    items = []
-    for key, port, name, desc in protocols or ():
-        how = (" Type <tt>telnet %s %d</tt> to connect." % (esc(host), port)) if key == "TELNET" else ""
-        what = desc or name
-        items.append("%s on port %d. %s.%s" % (protocol_key_html(key), port, esc(what[:1].upper() + what[1:]), how))
-    guide = docs_link("index.html")
-    return (h2("ways-in", "Other ways in", SECTIONS[1][2]) +
-            (ul(items) if items else "") +
-            (p("The %s on the docs site lists the programs for your computer, the original game programs "
-               "first, and how to set them up. Web browsers and telnet programs play every game."
-               % a(guide, "Clients page"), 2) if guide else "") +
-            p("Every way in reaches the same players and tables. ParlorNet is free software; you can run "
-              "your own server or contribute at %s." % a(PROJECT_URL, esc(PROJECT_URL)), 2))
+def medal_html(medal):
+    """A rating's icon (served here, SITE_IMAGES), with its word as the ALT text; "" for not yet rated."""
+    return C.medal_img(medal) if medal else ""
 
 
-# The welcome page's sections, in page order: (anchor, title, old anchors that land on it).
-SECTIONS = [("play", "Play now", ()), ("ways-in", "Other ways in", ("frontends", "clients", "protocols")),
-            ("games", "Games", ())]
+def client_a(c):
+    return docs_a(c.href().lstrip("/"), esc(c.name))
+
+
+def machine_ways(targets):
+    """One machine's ways to play, best first, a line each: each rated client with its medal and its games
+    (and the games not yet rated with it there), then the clients not yet rated there in one line, then a web
+    browser and a telnet program for every game."""
+    lines, more, unrated = [], [], []
+    for c, groups in C.machine_clients(targets):
+        medal, games_ = groups[0]
+        if not medal:
+            unrated.append("%s for %s" % (client_a(c), esc(C.games_text(games_))))
+        elif len(lines) == RATED_LINES:
+            more.append("%s %s for %s" % (medal_html(medal), client_a(c), esc(C.games_text(games_))))
+        else:
+            rest = "".join("; %s %s" % (esc(C.games_text(g)), C.MEDALS[m][0].lower() if m else "not yet rated")
+                           for m, g in groups[1:])
+            lines.append("%s %s: %s%s" % (medal_html(medal), client_a(c), esc(C.games_text(games_)), rest))
+    if more:
+        lines.append("Also %s." % ", ".join(more))
+    if unrated:
+        lines.append("Not yet rated here: %s." % ", ".join(unrated))
+    browsers, telnets = C.machine_generic(targets)
+    ways = (["a web browser, such as %s" % client_a(browsers[0])] if browsers else []) + (
+        ["a telnet program, such as %s" % client_a(telnets[0])] if telnets else [])
+    if ways:
+        lines.append("Every game in %s." % ", or ".join(ways))
+    return "<br>\n".join(lines)
+
+
+def any_old_html():
+    return "<br>\n".join([
+        "Every game with a %s, or a terminal program on a %s." % (
+            docs_a(C.TELNET_PAGE.lstrip("/"), "telnet program"), docs_a("docs/serial.html", "modem or serial line")),
+        "Every game on these pages, in a %s from 1995 on." % docs_a(C.BROWSERS_PAGE.lstrip("/"), "web browser")])
+
+
+def any_new_html(play):
+    if play:
+        first = "%s in any current browser, with animated boards (%s)." % (
+            a(play, "<b>ParlorNet Play</b>"), docs_a("docs/modern-client.html", "about Play"))
+    else:
+        first = "These pages, in any current browser."
+    return first + "<br>\n" + "%s from a terminal works too." % docs_a(C.TELNET_PAGE.lstrip("/"), "Telnet")
+
+
+def machines_html(play=None):
+    """Play from your computer: the machines' names, each a jump to its row, then a row per machine (anchored)
+    with its ways to play, best first, then Any old computer and Any new computer, and what the medals mean.
+    play: ParlorNet Play's address (play_link), None while it does not run."""
+    machines = [(anchor, name, note) for anchor, name, note, _ in C.PLAY_MACHINES] + [ANY_OLD, ANY_NEW]
+    cells = {anchor: machine_ways(targets) for anchor, _, _, targets in C.PLAY_MACHINES}
+    cells[ANY_OLD[0]], cells[ANY_NEW[0]] = any_old_html(), any_new_html(play)
+    rows = ['<tr%s valign="top"><td>%s</td></tr>\n' % (
+        ' bgcolor="%s"' % IVORY if n % 2 else "",
+        '<a name="%s"></a>%s %s' % (anchor, font(esc(name), 3, S.HEAD_FACE, DEEP),
+                                    font("%s<br>\n%s" % ("(%s)" % esc(note) if note else "", cells[anchor]), 2)))
+            for n, (anchor, name, note) in enumerate(machines)]
+    legend = " ".join("%s %s: %s." % (medal_html(m), C.MEDALS[m][0], MEDAL_MEANS[m]) for m in MEDAL_MEANS)
+    return (h2(MACHINES_ANCHOR, "Play from your computer", OLD_ANCHORS) +
+            p(" | ".join(a("#" + anchor, esc(name)) for anchor, name, _ in machines), 2) +
+            p("Find your computer: its row starts with the best way to play there, and each program&#39;s page "
+              "says how to get it and set it up.", 2) +
+            '<table width="100%%" border="0" cellpadding="4" cellspacing="0">\n%s</table>\n' % "".join(rows) +
+            p("%s Not yet rated: nobody has played a whole game with it there yet." % legend, 1))
 
 
 # ---- old addresses of the documentation, now on the docs site -------------------------------------
 # Each answers with a 301 to its page on the docs site (site.docs_url), so bookmarks keep working.
 
-MOVED = {"/frontends.htm": "index.html", "/browsers.htm": "browsers.html", "/telnet.htm": "telnet.html",
+MOVED = {"/frontends.htm": "index.html", "/protocols.htm": "protocols.html", "/browsers.htm": "browsers.html", "/telnet.htm": "telnet.html",
          "/eclipse-68k-fix.htm": "eclipse-68k-fix.html", "/docs/index.htm": "docs.html",
          "/docs/": "docs.html", "/docs": "docs.html", "/img/eclipse-68k-fix.gif": "img/eclipse-68k-fix.gif",
          "/download/eclipse-68k-fix-readme.txt": "download/eclipse-68k-fix-readme.txt"}
@@ -464,6 +487,7 @@ def make_gif(w, h, palette, pixels):
 IMAGES = games.Images()
 # The site's own image, on every page's masthead (webstyle.EMBLEM): served and cached like the games' images.
 SITE_IMAGES = {S.EMBLEM: S.emblem_gif(make_gif)}
+SITE_IMAGES.update({C.MEDALS[m][1]: MEDAL_ICONS[C.MEDALS[m][1].rsplit("/", 1)[1]]() for m in (C.GOLD, C.SILVER, C.BRONZE)})
 
 # ---- one image per board (adapters/board.py) ------------------------------------
 #
@@ -726,28 +750,23 @@ def motd_html(motd):
             % (FELT, SAGE, font("<b>%s</b>" % MOTD_HEAD, color=DEEP), IVORY, "\n".join(line(l) for l in motd)))
 
 
-def welcome(req, message="", auth=("password", "Password", "password"), motd=(), games=None, protocols=None,
-            scores=False):
+def welcome(req, message="", auth=("password", "Password", "password"), motd=(), protocols=None, nav=None,
+            lobby=None):
     """The welcome page: the message of the day (all of the welcome text is there, so the operator writes
-    it), then the two ways to start, Sign in and New account, each its own form, then the ways in (the
-    protocols this server speaks now, from the core) and the games, which are navigation. scores: the
-    server shows its leaderboard (a link to it)."""
-    host = host_of(req)
-    link = play_link(host, protocols)
-    body = (h1("Welcome") + (motd_html(motd) if motd else "") +
-            h2("play", "Play now") + note_html(message) +
-            p("To play alone, sign in, start a table and check Play the bot. The bot plays every game here.", 2) +
-            (p("Every game scores points: see who leads on the %s." % a(LEADERBOARD_PAGE, "leaderboard"), 2)
-             if scores else "") +
-            (p("On a modern browser or a phone, %s has the same tables with animated boards." % a(
-                link, "<b>ParlorNet Play</b>"), 2) if link else "") +
-            h3("signin", "Sign in") + callout(signin_form(auth)) +
-            h3("new", "New account") +
-            p("%s %s" % (esc(signup_steps(auth)), esc(NAMES_RULE)), 2) +
-            callout(signup_form()) +
-            ways_in_html(host, protocols) +
-            games_table_html(games))
-    return respond(200, page("ParlorNet", body, current="/welcome.htm"))
+    it), then the two ways to start, Sign in and New account, each its own form, then Play from your computer,
+    the ways to play from each machine (machines_html). protocols: the core's PRL, for ParlorNet Play's address.
+    nav and lobby: for a signed-in player, the navigation bar (site_nav) and the lobby's link, which stands in
+    for the two forms."""
+    if lobby:
+        start = callout(p("You are signed in. The %s has your tables and invitations." % a(lobby, "<b>Lobby</b>")))
+    else:
+        start = (h2("signin", "Sign in") + callout(signin_form(auth)) +
+                 h2("new", "New account") +
+                 p("%s %s" % (esc(signup_steps(auth)), esc(NAMES_RULE)), 2) +
+                 callout(signup_form()))
+    body = (h1("Welcome") + (motd_html(motd) if motd else "") + note_html(message) + start +
+            machines_html(play_link(host_of(req), protocols)))
+    return respond(200, page("ParlorNet", body, current="/welcome.htm", nav=nav))
 
 
 FLOW_HEADINGS = {"signin": "Sign in", "signup": "New account", "change": "Change your password"}
@@ -776,15 +795,24 @@ def ask_page(lid, ask, message="", kind="signin"):
     return respond(200, page(heading, body))
 
 
-def signed_in_nav(link, current=None):
-    """The navigation bar of the signed-in pages: the lobby, the activity and the account through link() (the
-    session for browsers without cookies, and the action check), the public pages as they are. current: the
-    page being shown (ACTIVITY_PAGE), in bold."""
+def site_nav(link=None, current=None):
+    """The navigation bar of every page: Welcome, Lobby, Games and Docs (the docs site, left out when the
+    operator cleared site.docs_url), and Sign out last while a player is signed in. link: the signed-in link
+    maker (Server.linker: the session for browsers without cookies, and the action check), None when nobody
+    is; current: the path of the page shown, whose entry is in bold."""
+    if link is None:
+        return S.nav_html(S.public_nav(), current)
+    plain = getattr(link, "plain", link)
+    items = [(plain("/welcome.htm"), "Welcome"), (link("/lobby.htm"), "Lobby"), (plain(GAMES_PAGE), "Games")]
+    here = dict(zip(("/welcome.htm", "/lobby.htm", GAMES_PAGE), (h for h, _ in items))).get(current)
     docs = [(S.DOCS[0], "Docs")] if S.DOCS[0] else []
-    here = link(current) if current else None
-    return S.nav_html([(link("/lobby.htm"), "Lobby"), (link(ACTIVITY_PAGE), "Activity"), (GAMES_PAGE, "Games"),
-                       (PROTOCOLS_PAGE, "Protocols")] + docs +
-                      [(link("/lobby.htm") + "#account", "Account"), (link("/out.htm"), "Sign out")], here)
+    return S.nav_html(items + docs + [(link("/out.htm"), "Sign out")], here)
+
+
+def signed_in_nav(link):
+    """The bar of the signed-in pages: site_nav with Sign out. Lobby stays a link on the lobby too, where it
+    is the way to look again."""
+    return site_nav(link)
 
 
 def lobby_page(me, link, games, tables, note="", auth="password", invites=(), bots=None, online=None, more=0,
@@ -858,12 +886,14 @@ def lobby_page(me, link, games, tables, note="", auth="password", invites=(), bo
         account.insert(0, a(link("/password.htm"), "Change your password") +
                        " (this signs you out everywhere else)")
     body = (h1("Lobby") +
-            p("You are <b>%s</b>. %s" % (esc(me), esc(note))) +
+            p("You are <b>%s</b> (%s). %s" % (esc(me), a("#account", "your account"), esc(note))) +
             (p("Online now: %s" % ", ".join(player_link(link, n) + (" (bot)" if bot else "")
                                             for n, bot in ((n, n.lower() in {b.lower() for b, x in online if x})
                                                            for n in botflag.listed(online))), 2)
              if online else "") +
-            (p("Who has the most points: the %s." % a(LEADERBOARD_PAGE, "leaderboard"), 2) if scores else "") +
+            p("The latest turns at public tables: %s.%s" % (
+                a(link(ACTIVITY_PAGE), "Activity"),
+                " Who has the most points: the %s." % a(LEADERBOARD_PAGE, "leaderboard") if scores else ""), 2) +
             inv_html +
             h2(None, "Tables") + tbl +
             h2(None, "Start a table") +
@@ -1014,7 +1044,7 @@ def browser_claim(ua):
     for pat, who in UA_BROWSERS:
         m = re.search(pat, ua)
         if m:
-            name = UA_NAMES.get(who) or (clients.BY_ID[who].name.split(" (")[0] if who in clients.BY_ID else who)
+            name = UA_NAMES.get(who) or (C.BY_ID[who].name.split(" (")[0] if who in C.BY_ID else who)
             prog = "%s %s" % (name, m.group(1).rstrip("."))
             break
     if not prog:
@@ -1080,7 +1110,7 @@ def activity_page(link, turns, gam):
               "they played with, as their program says. Turns at private tables are never shown here.", 2) +
             ("<ul>\n%s</ul>\n" % items if items else p("No turns yet.")) +
             p(a(link(ACTIVITY_PAGE), "Refresh") + " | " + a(link(PLAYER_PAGE), "Your profile")))
-    return respond(200, page("ParlorNet activity", body, nav=signed_in_nav(link, ACTIVITY_PAGE), compact=True))
+    return respond(200, page("ParlorNet activity", body, nav=signed_in_nav(link), compact=True))
 
 
 def player_page(me, link, prof, turns, gam):
@@ -1133,7 +1163,7 @@ LEADERBOARD_ROWS = 50                   # how many players it lists (TOP n; the 
 LEADERBOARD_REFRESH = 60                # seconds: the page reloads itself, for a screen at a festival
 
 
-def leaderboard_page(rows, total, gam, gtype=None):
+def leaderboard_page(rows, total, gam, gtype=None, nav=None):
     """/leaderboard.htm[?g=type/ver]: the players with the most points (TOP), by every game or by one, each
     name linking to the player's profile, then the note that scores are easy to get (SCORES_NOTE). gam: GAM's
     games, for the links to each game's own board."""
@@ -1157,7 +1187,7 @@ def leaderboard_page(rows, total, gam, gtype=None):
             p(a(url(LEADERBOARD_PAGE, g=gtype) if gtype else LEADERBOARD_PAGE, "Refresh") + " | " +
               a("/lobby.htm", "Lobby")))
     here = url(LEADERBOARD_PAGE, g=gtype) if gtype else LEADERBOARD_PAGE
-    return respond(200, page("ParlorNet leaderboard", body, refresh=(LEADERBOARD_REFRESH, here)))
+    return respond(200, page("ParlorNet leaderboard", body, refresh=(LEADERBOARD_REFRESH, here), nav=nav))
 
 
 JS_POLL = """<script language="JavaScript"><!--
@@ -1414,9 +1444,28 @@ class Web:
         return r
 
     async def welcome(self, req, message="", extra=""):
-        r = welcome(req, message, await self.auth_info(), await self.motd(), self.games_seen,
-                    await self.protocols(), self.scores_seen)
+        link = self.visitor(req)
+        r = welcome(req, message, await self.auth_info(), await self.motd(), await self.protocols(),
+                    site_nav(link, "/welcome.htm") if link else None, link("/lobby.htm") if link else None)
         return self.with_header(r, extra)
+
+    def visitor(self, req):
+        """A public page's view of its visitor: the signed-in link maker (linker) when the request carries a
+        session (the cookie, or s= for a browser without cookies) that resumed here within GOOD_SECS and was
+        not signed out, so the page's bar has the lobby's link and Sign out; else None. The core is not asked;
+        a session that ended elsewhere is found out on the next signed-in page."""
+        sid, cookieless = cookie_sid(req), False
+        if not sid:
+            s_ = (req["query"].get("s") or [""])[0]
+            sid, cookieless = (s_, True) if SID_RE.match(s_) else (None, False)
+        seen = self.good.get(hashlib.sha256(sid.encode("ascii", "replace")).hexdigest()) if sid else None
+        if seen is None or time.time() - seen >= GOOD_SECS:
+            return None
+        return self.linker(sid, cookieless, DEFAULT_RATE, False)
+
+    def visitor_nav(self, req, current):
+        link = self.visitor(req)
+        return site_nav(link, current) if link else None
 
     async def protocols(self):
         """The protocols this server speaks now (the core's PRL), asked again after PROTOCOLS_SECS; None when
@@ -1433,7 +1482,7 @@ class Web:
                 pass
         return self.protocols_seen
 
-    async def leaderboard(self, gtype):
+    async def leaderboard(self, req, gtype):
         """/leaderboard.htm: TOP on a connection of its own (TOP needs no sign-in), by every game or one
         (gtype, from g=). Not found when the server shows no scores (scores.show off)."""
         await self.refresh_info()
@@ -1453,7 +1502,7 @@ class Web:
         self.scores_seen = True
         f = final.split()
         return leaderboard_page(parse_top(data), int(f[1]) if len(f) > 1 and f[1].isdigit() else 0,
-                                self.games_seen, gtype or None)
+                                self.games_seen, gtype or None, self.visitor_nav(req, None))
 
     async def read_protocols(self, core):
         """PRL on a connection: the protocols and the docs site's address (site.docs_url), kept here and in
@@ -1585,17 +1634,15 @@ class Web:
                            extra="Cache-Control: max-age=86400\r\nLast-Modified: %s\r\n" % STARTED)
         if path == GAMES_PAGE:
             await self.refresh_info()
-            return games_page(self.games_seen)
+            return games_page(self.games_seen, self.scores_seen, self.visitor_nav(req, GAMES_PAGE))
         if path.startswith("/games/"):
             await self.refresh_info()
-            got = game_page(path[len("/games/"):-len(".htm")], self.games_seen) if path.endswith(".htm") else None
+            got = (game_page(path[len("/games/"):-len(".htm")], self.games_seen, self.visitor_nav(req, GAMES_PAGE))
+                   if path.endswith(".htm") else None)
             if got:
                 return got
         if path == LEADERBOARD_PAGE:
-            return await self.leaderboard((q.get("g") or [""])[0])
-        if path == PROTOCOLS_PAGE:
-            protocols = await self.protocols()
-            return respond(200, page("ParlorNet: protocols", protocols_html(protocols), current=PROTOCOLS_PAGE))
+            return await self.leaderboard(req, (q.get("g") or [""])[0])
         if moved_to(path) is not None:          # the documentation's old addresses: the docs site
             await self.refresh_info()
             return moved_page(req, path, q)
@@ -1772,6 +1819,7 @@ class Web:
         if path == "/out.htm":
             everywhere = arg("all") == "1"
             await core.out(everywhere)
+            self.good.pop(hashlib.sha256(sid.encode("ascii", "replace")).hexdigest(), None)    # the bar: signed out
             return await self.welcome(req, "Signed out%s." % (" everywhere" if everywhere else ""), CLEAR_COOKIE)
         if path == "/password.htm":
             # the server's change flow, as pages; this connection stays open between them
