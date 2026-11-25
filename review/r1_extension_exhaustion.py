@@ -29,6 +29,7 @@ async def main():
         print("web sign-in after:", after.split("\r\n")[0], "|", "isn't answering" in after and
               "The game server isn't answering." or after[-200:])
         r, w = await asyncio.open_connection("127.0.0.1", s.ports["telnet"])
+        w.write(b"\r\n")                          # Enter at the title page, typed ahead
         data = b""
         try:
             while b"answering" not in data and b"name" not in data:

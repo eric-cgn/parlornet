@@ -70,6 +70,8 @@ The telnet extension (`adapters/telnet.py`) serves it, and the frontend is any t
 
 **Connect:** telnet to the parlor's name, port 6502 (for example `telnet parlornet.org 6502`).
 
+**Title page:** the connection opens with ParlorNet's title, PARLOR over NET in block letters (the 8-bit clients' title letters, `adapters/title.py`), on a page of 80 columns by 24 rows that stays until you press Enter. It is drawn in the display mode the terminal type suggests: `##` blocks with no escape codes when the telnet program reports no type, and a color for each row of blocks in the ANSI modes, with `#` in `ansi`, the full block character in `pc`, and colored spaces in `utf8`. It is about 1.2 to 1.3 KB in every mode, about 5 seconds at 2400 baud. A telnet program that reports a window smaller than 80x24 gets no title page. Then come the message of the day and the `Login` prompt.
+
 **Signing up and signing in:** at the `Login` prompt, type `new` for a new account, then the name you want. The server then asks, one prompt at a time, for what its methods need: a password to choose and type again, or, on a server that signs up by email, your email address, then the password the server mails you and a password of your own. To come back, type your name at `Login` and answer the prompt for your password. A name with no account is told so, with a reminder about `new`. Passwords are not echoed. Then pick a display.
 
 **Display modes:** the terminal type your telnet program reports picks a default, and a menu shows a sample line in each mode so you can pick the one that looks right:

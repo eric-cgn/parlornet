@@ -1070,9 +1070,11 @@ class VT:
 
 class Client:
     """A raw socket to the telnet adapter (no telnet negotiation, so the
-    adapter falls back to its default after the terminal-type wait)."""
+    adapter falls back to its default after the terminal-type wait). It
+    presses Enter at the title page, as a player does (title=False leaves
+    the page up)."""
 
-    def __init__(self, port, enc="cp437", ttype=None):
+    def __init__(self, port, enc="cp437", ttype=None, title=True):
         self.s = socket.create_connection(("127.0.0.1", port), timeout=5)
         self.s.settimeout(0.2)
         self.s.sendall(bytes([255, 251, 1, 255, 253, 3]))  # IAC WILL ECHO, IAC DO SGA: must be ignored
@@ -1082,6 +1084,7 @@ class Client:
         self.mark = 0
         self.vt = VT(enc)
         self.closed = False
+        self.title = title          # Enter at the title page, once
 
     def send(self, data):
         self.s.sendall(data.encode("latin-1") if isinstance(data, str) else data)
@@ -1096,6 +1099,9 @@ class Client:
             return
         self.raw += d
         self.vt.feed(d)
+        if self.title and b"Press Enter" in self.raw:
+            self.title = False
+            self.send("\r\n")
 
     def until(self, text, timeout=8, screen=False):
         """Wait for text in what arrived since the last match, or (screen=True)

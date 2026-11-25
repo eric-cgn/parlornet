@@ -27,9 +27,12 @@ the command line: there every letter types, and `:` then a hotkey letter does
 what that key does (:d for D in WASD). The choice is kept with the player
 (the core's per-extension data, PRF) and comes back at the next sign-in.
 
-Before the login prompt it shows the server's message of the day. At the
-prompt a name signs in; "new" makes a new account (the name wanted, then the
-server's sign-up steps). A name with no account says so and points to "new".
+It opens with ParlorNet's title (adapters/title.py), PARLOR over NET in block
+letters, as a page of its own until Enter, in the display mode the terminal
+type suggests. Before the login prompt it shows the server's message of the
+day. At the prompt a name signs in; "new" makes a new account (the name
+wanted, then the server's sign-up steps). A name with no account says so and
+points to "new".
 
     python3 -m adapters.telnet --core 127.0.0.1:6501 --port 6502 --host 0.0.0.0
 """
@@ -55,6 +58,7 @@ from .chatcmd import note_lines, time_text
 from . import botflag
 from . import games
 from .webstyle import TAGLINE
+from . import title
 
 IAC, DONT, DO, WONT, WILL, SB, SE = 255, 254, 253, 252, 251, 250, 240
 ECHO, SGA, TTYPE, NAWS = 1, 3, 24, 31
@@ -2628,18 +2632,47 @@ async def ask_moves(io):
     return MOVE_ORDER[numbers.index(choice)] if choice in numbers else "arrows"
 
 
-async def main_session(io, args, ticket=None):
+async def title_page(io, mode, ticket=None):
+    """ParlorNet's title (adapters/title.py) as a page of its own, in the display mode the terminal type
+    suggests (plain when it names none), until Enter. False if the window is smaller than 80x24, which
+    has no title page; None if no Enter came."""
+    if io.size and (io.size[0] < COLS or io.size[1] < ROWS):
+        return False
+    io.charset = CHARSET[mode]
+    io.write(title.page(mode))
+    io.charset = TelnetIO.charset
+    await io.flush()
+    try:
+        await asyncio.wait_for(io.readline(), LOGIN_SECS)
+    except asyncio.TimeoutError:
+        io.write("\nNo key came; bye.\n")
+        await io.flush()
+        return None
+    if ticket is not None:
+        ticket.touch()
+    io.write(CLEAR if mode != "plain" else "\n")
+    return True
+
+
+async def main_session(io, args, ticket=None, title_first=True):
+    """A telnet session: the title page (unless title_first is False, as for the RSCARDS service's text
+    games), the message of the day, the sign-in, the display, then the menu and the tables."""
     ttype = await io.negotiate()
     guess = mode_for_ttype(ttype)
-    io.write("\n")
-    motd = await MOTD.get(args)
-    for l in framed_motd(motd) or ["ParlorNet: %s" % TAGLINE]:   # the message of the day has its own title
-        io.write("%s\n" % l)
-    io.write("\n")
-    if ttype:
-        io.write("Your terminal says it is %s.\n" % ttype)
     try:
         async with asyncio.timeout(LOGIN_TOTAL_SECS):
+            titled = await title_page(io, guess or "plain", ticket) if title_first else False
+            if titled is None:
+                return
+            if not titled:
+                io.write("\n")
+            motd = await MOTD.get(args)
+            # the message of the day has its own title; with no title page and no message, a line says what this is
+            for l in framed_motd(motd) or ([] if titled else ["ParlorNet: %s" % TAGLINE]):
+                io.write("%s\n" % l)
+            io.write("\n")
+            if ttype:
+                io.write("Your terminal says it is %s.\n" % ttype)
             signed = await sign_in(io, args, ticket)
     except TimeoutError:
         io.write("\nSigning in took too long; bye.\n")
