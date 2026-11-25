@@ -92,7 +92,7 @@ class Pndial(unittest.TestCase):
         # host:port dials the parlor; every byte passes as it is
         self.assertEqual(self.say(b"ATDT 127.0.0.1:%d\r" % self.port, b"CONNECT"), b"\r\nCONNECT 9600\r\n")
         self.assertEqual(self.say(b"PARLORNET/1\r\n", b"\r\n"), b"PARLORNET/1 test AUTH=none SIGNUP=none\r\n")
-        self.assertTrue(self.say(b"\x03\x11\x13\r\n", b"\r\n").startswith(b"ERR "))
+        self.assertTrue(self.say(b"\x11\x13\r\n", b"\r\n").startswith(b"ERR "))   # XON, XOFF pass as data
         self.assertIn(b"GAM reversi/1", self.say(b"GAM\r\n", b"OK\r\n"))
         got = self.say(b"BYE\r\n", b"NO CARRIER\r\n", 2.0)
         for _ in range(3):                      # OpenBSD's nc and ncat notice the hang-up at the next key
@@ -110,6 +110,50 @@ class Pndial(unittest.TestCase):
             self.say(b"", None, 0.05)
         self.assertIsNotNone(self.status)
         self.assertEqual(os.waitstatus_to_exitcode(self.status), 130)
+
+    def test_control_c_on_another_port_goes_through(self):
+        # off 6501 every byte goes to the far end; this one is a parlor, which hangs up on Control-C
+        self.start([PNDIAL, "-z"])
+        self.say(b"", b"OK\r\n")
+        self.dial_parlor()
+        got = self.say(b"\x03", b"NO CARRIER\r\n", 2.0)
+        for _ in range(3):                      # OpenBSD's nc and ncat notice the hang-up at the next key
+            if b"NO CARRIER" in got:
+                break
+            got += self.say(b"\r", b"NO CARRIER\r\n", 2.0)
+        self.assertIn(b"NO CARRIER", got)
+
+    def test_control_c_on_6501_hangs_up_in_pndial(self):
+        # on ParlorNet's own port pndial keeps Control-C: nc ends at once and nothing reaches the far end
+        import socket
+        lsn = socket.socket()
+        try:
+            lsn.bind(("127.0.0.1", 6501))
+        except OSError:
+            lsn.close()
+            self.skipTest("port 6501 is in use here")
+        lsn.listen(1)
+        try:
+            self.start([PNDIAL, "-z"])
+            self.say(b"", b"OK\r\n")
+            self.assertIn(b"CONNECT", self.say(b"ATDT127.0.0.1:6501\r", b"CONNECT"))
+            conn, _ = lsn.accept()
+            self.assertIn(b"NO CARRIER", self.say(b"AB\x03", b"NO CARRIER\r\n", 3.0))
+            conn.settimeout(2)
+            got = b""
+            while True:
+                try:
+                    d = conn.recv(100)
+                except ConnectionResetError:    # an nc ended by a signal may reset the connection
+                    break
+                if not d:
+                    break
+                got += d
+            self.assertNotIn(b"\x03", got)
+            conn.close()
+            self.assertEqual(self.say(b"AT\r", b"OK\r\n"), b"AT\r\n\r\nOK\r\n")   # commands again
+        finally:
+            lsn.close()
 
     def dial_parlor(self):
         """After OK: the Apple II client's dial, CONNECT, and the parlor's greeting to its opening."""

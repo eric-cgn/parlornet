@@ -9,7 +9,8 @@
 # answers a reset, instead of its first line, so a shell login works as a modem. pndial answers
 # AT commands with OK. On ATD it says CONNECT and joins the line to the parlor with nc, every
 # byte passed as it is, until either side hangs up; then it says NO CARRIER and waits for the
-# next dial. Ctrl-C or Ctrl-D while it waits puts the terminal back and ends it.
+# next dial. Ctrl-C or Ctrl-D while it waits puts the terminal back and ends it. During a connection to
+# port 6501 (ParlorNet's own protocol, printable text) Ctrl-C hangs up; on other ports every byte goes through.
 #
 # The dial string picks the parlor. ATDT host:port dials that host and port, and ATDT host, with
 # a dot in the name, dials that host on the port above. Any other number (ATDT5551212, ATDT
@@ -58,9 +59,15 @@ while line=$(read -r l && printf %s "$l"); do  # read in a subshell, so Ctrl-C e
         *.*) to=$num p=$port ;;
         *)   to=$host p=$port ;;
         esac
+        to=${to:-$host} p=${p:-$port}
         stty raw -echo                          # every byte through as it is, nothing echoed
+        # ParlorNet's own protocol (6501) is printable text, so there Ctrl-C stays a key of the line's: it
+        # ends nc, and so the connection (other services' frames can hold any byte, so not on theirs)
+        [ "$p" = 6501 ] && stty isig quit undef susp undef
         printf '\r\nCONNECT%s\r\n' "${speed:+ $speed}"
-        ${NC:-nc} "${to:-$host}" "${p:-$port}" 2>/dev/null
+        trap : INT                              # Ctrl-C ends nc, not pndial
+        ${NC:-nc} "$to" "$p" 2>/dev/null
+        trap 'bye 130' INT
         commands
         printf '\nNO CARRIER\n' ;;
     AT*)                                        # anything else a modem would take
