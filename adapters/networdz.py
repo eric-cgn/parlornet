@@ -57,17 +57,18 @@ The game. Networdz's New Game waits (its "picking a tile" step) until every seat
     host's pass     K, then O with no tile -> PASS; O with tiles -> EXCH letters, then RACK
     a turn          I -> TURN seat, when the core's turn is another
     the end         S -> OVER, unless the core's game ended first (a player went out)
-    seat's play     the core's PLAY -> J; M 0 -> the draw (P -> Q with places holding the tiles the core drew);
-                    M 7 -> VOID word (the play is taken back, the player is told why, and the table
-                    refuses that word from then on)
-    seat's exchange the core's EXCH -> K, N -> O with the tiles that left the rack, P -> Q
+    seat's draw     P -> RACK letters seat (the places it picks in the host's bag), then Q
+    seat's play     the core's PLAY -> J; M 0 -> the draw; M 7 -> VOID word (the play is taken back, the
+                    player is told why, and the table refuses that word from then on)
+    seat's exchange the core's EXCH -> K, N -> O with the tiles that left the rack, P -> the draw
     seat's pass     the core's PASS -> K, N -> O with no tile
     chat            B from the host -> table chat, or a command; a seat's chat -> B from its connection
 
-A remote seat's tiles are the core's: when Networdz asks a parlor seat to draw, the extension picks the places in
-the host's bag that hold the tiles the core drew for that seat, so both bags stay the same. A word the host's
-dictionary refuses is taken back (VOID with the word), and the table refuses it from then on, so the bot finds
-another.
+Every seat's tiles come from the host's bag, which Networdz sends (A) and the table follows: the table deals and
+draws nothing itself. When Networdz asks a parlor seat to draw, the extension picks places in the host's bag for
+the empty slots, as a remote copy does, and tells the table the rack before it answers Networdz. A word the
+host's dictionary refuses is taken back (VOID with the word), and the table refuses it from then on, so the bot
+finds another.
 
 Left out: Trade Blanks, Exchange 4 of a kind, Timed and Tournament Rules (the chat asks the player to turn them
 off), computer players and a second person at the host, a remote seat that is not the parlor, loading saved
@@ -824,31 +825,25 @@ class Host:
                 await self.draw(seat)
 
     async def draw(self, seat):
-        """Networdz asks a parlor seat to draw: the places in its bag holding the tiles the core drew."""
-        v = await self.view()
+        """Networdz asks a parlor seat to draw: as a remote copy does, a place in the host's bag for each empty
+        slot while it has tiles. The table takes the rack first (RACK letters seat: the host's program deals),
+        so a player there has it before Networdz gives the next turn."""
         cs = self.core_seat(seat)
-        want = v["racks"].get(cs)
         rack = list(self.nw["racks"].get(seat, [EMPTY] * RACK))
         rack += [EMPTY] * (RACK - len(rack))
-        if want is None:
-            await self.out_of_step("The table shows no rack for seat %d." % cs)
-            return
-        new = minus(want, letters_of(rack))
         bag = self.nw["bag"]
         draws = [EMPTY] * RACK
-        empty = [i for i in range(RACK) if rack[i] == EMPTY]
         kept = list(rack)               # Q carries the rack as it was before the draw, and the places drawn
-        for c in new:
-            places = [i for i, t in enumerate(bag[:len(TILESET)]) if t != EMPTY and letter(t) == c]
-            if not places or not empty:
-                await self.out_of_step("Networdz's bag has no %s for seat %d." % ("blank" if c == "_" else c, cs))
-                return
+        for slot in range(RACK):
+            places = [i for i, t in enumerate(bag[:len(TILESET)]) if t != EMPTY]
+            if rack[slot] != EMPTY or not places:
+                continue
             place = random.choice(places)
-            slot = empty.pop(0)
             draws[slot], rack[slot] = place, bag[place]
             bag[place] = EMPTY
         self.nw["racks"][seat] = rack
-        await self.links[seat].send(msg_q(seat, kept, draws))
+        if await self.move("RACK %s %d" % (letters_of(rack) or "-", cs), quiet=True):
+            await self.links[seat].send(msg_q(seat, kept, draws))
 
     async def table(self):
         data, final = await self.req("LST table=%s" % self.tid)

@@ -476,23 +476,64 @@ class NoIntegrity(WordList):
         self.assertEqual(G.describe_event("VOID 1 CAT", ["ann", "bob", "cy"]),
                          "bob's CAT is refused by the host's program and taken back")
 
+    def tile_set(self, st):
+        """Every tile at the table, the board's, the racks' and the bag's, as the set's letters in order."""
+        board = ["_" if c.islower() else c for c in st["cells"] if c != "."]
+        return sorted(board + list("".join(st["racks"])) + list(st["bag"]))
+
     def test_racks_the_programs_drew(self):
+        full = sorted(c for c, (_, n) in P.TILES.items() for _ in range(n))
         st = self.trust_state(2)
-        pool = st["racks"][0] + st["bag"]
-        want = "".join(sorted(pool[:3] + pool[-4:]))
-        r = apply(st, 0, "RACK", want)
+        self.assertEqual((st["racks"], len(st["bag"])), (["", ""], 100))     # the authority's program deals
+        r = apply(st, 0, "RACK", "KAEIN_T")
         self.assertEqual(r["events"], [])
-        self.assertEqual(sorted(r["state"]["racks"][0]), sorted(want))
-        self.assertEqual(sorted(r["state"]["bag"] + r["state"]["racks"][0]), sorted(pool))
-        self.assertEqual(len(r["state"]["bag"]), len(st["bag"]))
-        r2 = apply(st, 1, "RACK", st["racks"][1])               # any seat, about its own rack, off its turn
-        self.assertEqual(r2["state"]["racks"][1], st["racks"][1])
-        self.assertIn("the bag has no", apply(st, 0, "RACK", "QQQQ")["error"])
+        st = r["state"]
+        self.assertEqual(st["racks"][0], "KAEIN_T")
+        r = apply(st, 0, "RACK", "QUOD", "1")                   # another seat's rack, as its program dealt it
+        self.assertEqual(r["events"], [])
+        st = r["state"]
+        self.assertEqual(st["racks"], ["KAEIN_T", "QUOD"])
+        self.assertEqual((len(st["bag"]), self.tile_set(st)), (89, full))
+        self.assertNotIn("K", st["bag"])
+        self.assertIn("RACK letters [seat]", apply(st, 0, "RACK", "AB", "2")["error"])
+        # another seat says only its own rack, from the bag
+        self.assertIn("another seat's rack", apply(st, 1, "RACK", "AB", "0")["error"])
+        self.assertIn("the bag has no K", apply(st, 1, "RACK", "QUODK")["error"])
+        r2 = apply(st, 1, "RACK", "QUODS")
+        self.assertEqual((r2["state"]["racks"][1], len(r2["state"]["bag"])), ("QUODS", 88))
+        # a play draws nothing at the table: the authority's RACK says what came
+        r = apply(st, 0, "PLAY", "8", "8", "H", "KAIN", "OWN")
+        self.assertFalse(any(e.startswith("DRAW") for e in r["events"]), r["events"])
+        st = r["state"]
+        self.assertEqual((st["racks"][0], len(st["bag"]), self.tile_set(st)), ("E_T", 89, full))
         hidden = new_state()
         self.assertIn("error", apply(hidden, 0, "RACK", hidden["racks"][0]))
 
+    def test_the_hosts_rack_with_a_tile_the_table_gave_another_seat(self):
+        """The authority's program and the table disagree about where a tile is: its RACK holds the K the table
+        has on another seat's rack, and so not in its bag. The program deals, so the table takes it, and the
+        bag comes right once the program says the other seat's rack too."""
+        full = sorted(c for c, (_, n) in P.TILES.items() for _ in range(n))
+        st = self.trust_state(2)
+        st["racks"][1] = "".join(sorted([c for c in st["bag"] if c != "K"][-6:] + ["K"]))   # the one K, at seat 1
+        P.rebag(st)
+        self.assertNotIn("K", st["bag"])
+        hosts = sorted(st["bag"][:6] + "K")             # the host's program dealt it the K
+        r = apply(st, 0, "RACK", "".join(hosts))
+        self.assertNotIn("error", r)
+        st = r["state"]
+        self.assertEqual(sorted(st["racks"][0]), hosts)
+        self.assertNotIn("K", st["bag"])
+        other = st["racks"][1].replace("K", "E", 1)
+        st = apply(st, 0, "RACK", other, "1")["state"]          # and seat 1's rack, as it dealt that
+        self.assertEqual((len(st["bag"]), self.tile_set(st)), (86, full))
+        # at a table that keeps its integrity the bag still decides
+        kept = new_state(racks=["ABCDEFG", "K"], bag="")
+        self.assertIn("error", apply(kept, 0, "RACK", "K"))
+
     def test_the_program_ends_the_game(self):
         st = self.trust_state(2)
+        st = apply(st, 0, "RACK", "QXZTEAB")["state"]
         for i in range(8):                                     # scoreless turns never end it by themselves
             seat = i % 2
             st = apply(st, 0, "TURN", str(seat))["state"] if seat else st
@@ -500,6 +541,8 @@ class NoIntegrity(WordList):
             self.assertFalse(st["over"])
         st["bag"] = st["bag"][:3]
         st = apply(st, 0, "EXCH", st["racks"][0][:3])["state"]   # as many tiles as the bag has
+        self.assertEqual((st["racks"][0], len(st["bag"])), ("TEAB", 6))     # back in the bag; its program deals
+        st["bag"] = st["bag"][:3]
         self.assertIn("only 3 tiles", apply(st, 0, "EXCH", st["racks"][0][:4])["error"])
         self.assertIn("only the program", apply(st, 1, "OVER")["error"])
         r = apply(st, 0, "OVER")

@@ -87,12 +87,16 @@ OPEN_RACKS = ("open", "hidden")
 # so in new ("integrity": false) with the seat of the table's creator, whose program it is ("authority"). Then
 # the state has "trust" and "auth", and:
 #   - every move hands the turn to the authority, and only the authority gives it on: TURN n;
+#   - the authority's program deals: the table deals no rack at the start and draws no tile after a play or an
+#     exchange; the authority says what any seat's rack holds, RACK letters [seat], and is not checked against
+#     the table's bag, which is then what the tile set leaves after the board and the racks (rebag);
+#   - another seat may say what its own rack holds, drawn from the same bag: RACK letters, checked;
 #   - the authority may take back the play just made by another seat, which its program refused: VOID, with
 #     the word it refused, which is then refused at the table too;
 #   - the authority may end the game when its program does: OVER, alone or after a move of its own;
-#   - a seat may say what its own rack holds, drawn by its own program from the same bag: RACK letters;
 #   - a play may carry OWN, and an exchange needs only as many tiles in the bag as it puts back;
 #   - turns without a word played never end the game: the authority's program decides.
+# With no authority (the creator is not seated) the table deals and draws as usual.
 TRUST_VERBS = ("RACK", "TURN", "VOID", "OVER")
 REFUSED_KEEP = 200          # the words a table remembers that its authority's program refused (VOID word)
 
@@ -367,7 +371,32 @@ def next_turn(st, events):
     events.append("TURN %d" % st["turn"])
 
 
+def host_deals(st):
+    """A table that keeps no integrity, with an authority: its program deals every seat's tiles (RACK)."""
+    return bool(st.get("trust")) and st.get("auth", -1) >= 0
+
+
+def rebag(st):
+    """The bag as what the tile set leaves after the board and the racks, its tiles kept in their order and any
+    others put under them (drawn last). At a table whose authority deals, its racks make the bag."""
+    left = {c: n for c, (_, n) in TILES.items()}
+    for c in st["cells"]:
+        if c != ".":
+            left["_" if c.islower() else c] -= 1
+    for r in st["racks"]:
+        for c in r:
+            left[c] -= 1
+    kept = []
+    for c in st["bag"]:
+        if left[c] > 0:
+            kept.append(c)
+            left[c] -= 1
+    st["bag"] = "".join([c for c, n in sorted(left.items()) for _ in range(max(n, 0))] + kept)
+
+
 def draw(st, rack, k):
+    if host_deals(st):              # the authority's program deals: its RACK says what came
+        return rack, 0
     k = min(k, len(st["bag"]))
     if k:
         rack, st["bag"] = rack + st["bag"][-k:], st["bag"][:-k]
@@ -384,22 +413,30 @@ def copy_state(st):
 
 
 def trusted(req, move):
-    """A table that keeps no integrity: what a player's own program says (TRUST_VERBS). RACK is any seat's,
-    about its own rack; TURN, VOID and OVER are the authority's."""
+    """A table that keeps no integrity: what a player's own program says (TRUST_VERBS). RACK is the authority's
+    about any seat's rack, which its program dealt, and another seat's about its own; TURN, VOID and OVER are the
+    authority's."""
     st, seat, verb = req["state"], req.get("seat", -1), move[0].upper()
     check = bool(req.get("check"))
     if not 0 <= seat < st["np"]:
         return {"error": "you are not playing"}
-    if verb != "RACK" and seat != st.get("auth"):
+    auth = seat == st.get("auth")
+    if verb != "RACK" and not auth:
         return {"error": "only the program that runs this table says that"}
     if verb == "RACK":
-        if len(move) != 2:
-            return {"error": "RACK letters, like RACK AEIN_ST (_ is a blank)"}
+        syntax = "RACK letters [seat], like RACK AEIN_ST (_ is a blank)"
+        if len(move) not in (2, 3) or (len(move) == 3 and not move[2].isdigit()):
+            return {"error": syntax}
+        whose = int(move[2]) if len(move) == 3 else seat
+        if not 0 <= whose < st["np"]:
+            return {"error": syntax}
+        if whose != seat and not auth:
+            return {"error": "only the program that runs this table says another seat's rack"}
         want = "" if move[1] == "-" else move[1].upper()
         if len(want) > RACK or not all(c == "_" or "A" <= c <= "Z" for c in want):
-            return {"error": "RACK letters, like RACK AEIN_ST (_ is a blank)"}
-        pool = list(st["racks"][seat] + st["bag"])     # the rack goes back under the bag, then the letters come out
-        for c in want:
+            return {"error": syntax}
+        pool = list(st["racks"][whose] + st["bag"])    # the rack goes back under the bag, then the letters come out
+        for c in want if not auth else ():          # the authority's program dealt them from its own bag
             if c not in pool:
                 return {"error": "the bag has no %s for that rack" % ("blank" if c == "_" else c)}
             pool.reverse()
@@ -409,8 +446,11 @@ def trusted(req, move):
             return {"info": "0"}
         new = copy_state(st)
         new["undo"] = st.get("undo")        # saying a rack is no move: a play just made may still be taken back
-        new["racks"][seat] = want
-        new["bag"] = "".join(pool)
+        new["racks"][whose] = want
+        if auth:
+            rebag(new)                      # the bag is what its program's racks leave
+        else:
+            new["bag"] = "".join(pool)
         return {"state": new, "events": []}
     if verb == "TURN":
         if len(move) != 2 or not move[1].isdigit() or not 0 <= int(move[1]) < st["np"]:
@@ -481,8 +521,10 @@ def op_new(req):
         st["trust"] = True
         st["auth"] = auth if isinstance(auth, int) and 0 <= auth < n else -1
         st["undo"] = None
-        if st["auth"] >= 0:                 # the authority's program says who starts (TURN)
+        if st["auth"] >= 0:                 # the authority's program says who starts (TURN) and deals (RACK)
             st["turn"] = st["auth"]
+            st["racks"] = [""] * n
+            rebag(st)
     return {"state": st, "events": ["TURN %d" % st["turn"]]}
 
 
