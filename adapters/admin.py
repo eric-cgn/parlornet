@@ -706,7 +706,7 @@ class Admin:
                     await self.set("site.contribute_url", v)
             elif tag == "Docs":
                 v = await ui.inputbox("Docs address", "The documentation site the web pages link to (Docs, and "
-                                      "each protocol on the Protocols page; by default http://docs.parlornet.org/). "
+                                      "the client pages; by default http://docs.parlornet.org/). "
                                       "Empty: no link to documentation. Up to 73 characters.",
                                       g["settings"].get("site.docs_url", e.get("site.docs_url", "")), maxlen=73)
                 if v is not None:

@@ -36,11 +36,12 @@ ALLOWED = {
     "select": {"name", "size"}, "option": {"value", "selected"}, "textarea": {"name", "rows", "cols"},
 }
 FACES = {"Geneva,Helvetica,Arial", "Chicago,Charcoal,Arial Black"}
-PUBLIC_NAV = ["Welcome", "Lobby", "Games", "Protocols", "Docs", "Sign in", "New account"]
-SIGNED_NAV = ["Lobby", "Activity", "Games", "Protocols", "Docs", "Account", "Sign out"]
+# The navigation bar, exactly: these entries in this order, and Sign out last only while a player is signed in.
+PUBLIC_NAV = ["Welcome", "Lobby", "Games", "Docs"]
+SIGNED_NAV = PUBLIC_NAV + ["Sign out"]
 
 # Byte budgets: the target modems run at 2400 to 14,400 bit/s. (page, most bytes of HTML)
-BUDGETS = {"/welcome.htm": 12 * 1024, "/games.htm": 9 * 1024, "/protocols.htm": 6 * 1024}
+BUDGETS = {"/welcome.htm": 14 * 1024, "/games.htm": 9 * 1024}     # welcome: the forms and the guide by machine
 GAME_PAGE_BUDGET = 8 * 1024         # a game's page
 SMALL_BUDGET = 3 * 1024             # sign-in steps, notices, the resign question
 LOBBY_BUDGET = (11 * 1024, 600)     # the lobby: bytes, plus this for each table it lists
@@ -55,14 +56,14 @@ MOTD = ("Welcome to the <test> parlor: Ann & Bob's \"club\".\n"
 # Every address the site has published; each must answer 200 or a redirect. The documentation's (MOVED)
 # redirect to the docs site, where the page and its anchors are (tests/test_docs_site.py).
 OLD_URLS = ["/", "/index.htm", "/index.html", "/welcome.htm", "/games.htm", "/login.htm", "/lobby.htm",
-            "/table.htm?t=1", "/welcome.htm#clients", "/protocols.htm"]
+            "/table.htm?t=1", "/welcome.htm#clients"]
 MOVED = ["/docs/index.htm", "/eclipse-68k-fix.htm", "/download/eclipse-68k-fix.hqx",
          "/download/eclipse-68k-fix.bin", "/download/eclipse-68k-fix.dsk", "/download/eclipse-68k-fix-readme.txt",
          "/img/eclipse-68k-fix.gif", "/docs/frontends.htm", "/docs/protocols.htm", "/docs/protocol.htm",
          "/docs/pnp.htm", "/docs/clients.htm", "/docs/accounts.htm", "/frontends.htm", "/frontends.htm#web",
          "/frontends.htm#telnet", "/frontends.htm#period", "/frontends.htm#reversi", "/frontends.htm#backgammon",
          "/frontends.htm#native", "/frontends.htm#frontends", "/frontends.htm#clients", "/browsers.htm",
-         "/telnet.htm", "/setup/eclipse.htm", "/setup/macfibs.htm", "/setup/outland.htm"]
+         "/telnet.htm", "/setup/eclipse.htm", "/setup/macfibs.htm", "/setup/outland.htm", "/protocols.htm"]
 
 
 class Checker(HTMLParser):
@@ -138,8 +139,7 @@ class Site(Stack):
 
     def public_pages(self):
         from adapters import web as W
-        paths = ["/welcome.htm", "/games.htm", "/protocols.htm"] + ["/games/%s.htm" % r["type"]
-                                                                    for r in W.game_rows()]
+        paths = ["/welcome.htm", "/games.htm"] + ["/games/%s.htm" % r["type"] for r in W.game_rows()]
         out = {}
         for path in paths:
             st, _, ct, body = self.get(path)
@@ -191,20 +191,32 @@ class Site(Stack):
             self.assertIn("Server: <b>parlornet</b>", page[-700:], name)
             self.assertIn('<a href="/welcome.htm#motd">Message of the day</a>', page[-700:], name)
 
+    @staticmethod
+    def nav_labels(page):
+        """The navigation bar's entries, in order: a link's text, or the current page's in bold."""
+        text = plain(page)
+        top = text[:text.index("</table>")]
+        nav = top[top.rindex("<td"):] if "</td></tr>\n<tr><td" in top else top[top.rindex("&nbsp; "):]
+        return re.findall(r">([^<>|]+)</(?:a|b)>", nav)
+
     def test_nav_on_every_page(self):
+        """Exactly Welcome, Lobby, Games and Docs on every page, Docs leading to the docs site; Sign out last
+        while a player is signed in, on the signed-in pages and on the public ones alike."""
+        from parlord import DOCS_URL
         for name, page in {**self.public_pages(), **self.other_pages()}.items():
-            text = plain(page)
-            nav = text[text.index("</td></tr>\n<tr><td"):text.index("</table>")]
-            for label in PUBLIC_NAV:
-                self.assertTrue(">%s</a>" % label in nav or "<b>%s</b>" % label in nav, (name, label))
+            self.assertEqual(self.nav_labels(page), PUBLIC_NAV, name)
+            self.assertIn('<a href="%s">Docs</a>' % DOCS_URL, page[:page.index("</table>")], name)
         for name, page in self.signed_in_pages().items():
             if name in ("error", "out of date", "/password.htm"):    # notices and sign-in steps: the public bar
                 continue
-            nav = plain(page)
-            nav = nav[:nav.index("</table>")]
-            for label in SIGNED_NAV:
-                self.assertTrue(">%s</a>" % label in nav or "<b>%s</b>" % label in nav, (name, label))
+            self.assertEqual(self.nav_labels(page), SIGNED_NAV, name)
+            nav = plain(page)[:plain(page).index("</table>")]
             self.assertIn('href="/lobby.htm?x=', nav)                # the signed-in links carry the action check
+            self.assertRegex(nav, r'href="/out\.htm\?x=[0-9a-f]+[^"]*">Sign out</a></td></tr>$')
+        for path in ("/welcome.htm", "/games.htm", "/games/reversi.htm"):     # public pages, signed in
+            page = self.ann.get(path)[3]
+            self.assertEqual(self.nav_labels(page), SIGNED_NAV, path)
+            self.assertEqual(self.nav_labels(self.get(path)[3]), PUBLIC_NAV, path)   # nobody signed in
 
     def test_reading_order(self):
         """With the tags stripped, as Lynx reads a page: the name and the navigation, then the page's own
@@ -217,7 +229,7 @@ class Site(Stack):
             bottom = page.rindex("<br>\n<table")
             masthead, content, footer = text(page[page.index("<body"):top]), text(page[top:bottom]), text(page[bottom:])
             self.assertTrue(masthead.startswith("ParlorNet"), name)
-            self.assertTrue(masthead.endswith(("New account", "Sign out")), (name, masthead))
+            self.assertTrue(masthead.endswith(("Docs", "Sign out")), (name, masthead))
             h1 = text(re.search(r"<h1>(.*?)</h1>", page, re.S).group(1))
             self.assertTrue(content.startswith(h1), (name, content[:80]))
             at = len(h1)
@@ -262,19 +274,20 @@ class Site(Stack):
         for r in W.game_rows():                       # old links to a game's section land on its row
             self.assertIn('<a name="%s"></a>' % r["type"], games_page)
         welcome = self.get("/welcome.htm")[3]
-        for anchor in ("games", "play", "frontends", "clients", "protocols", "ways-in", "motd"):
+        for anchor in ("games", "play", "frontends", "clients", "protocols", "ways-in", "motd", "machines",
+                       "signin", "new"):
             self.assertIn('<a name="%s">' % anchor, welcome)
 
     def test_game_pages_link_the_docs(self):
         """A game's page links to its type spec, its protocol guide chapter and its programs on the docs site
-        (tests/test_docs_site.py checks they resolve there), and to this server's protocols."""
+        (tests/test_docs_site.py checks they resolve there), and to no list of protocols here."""
         from adapters import web as W
         from parlord import DOCS_URL
         for r in W.game_rows():
             page = plain(self.get("/games/%s.htm" % r["type"])[3])
             part = page[page.index('<a name="frontends">'):]
             self.assertIn('<a href="%sindex.html#%s">Clients page</a>' % (DOCS_URL, r["type"]), part)
-            self.assertIn('<a href="/protocols.htm">Protocols</a>', part)
+            self.assertNotIn("protocols.htm", page)
 
     def test_welcome_is_the_motd_then_the_two_ways_in(self):
         """The welcome text is the message of the day, in <pre>, escaped, with its address a link; then Sign
@@ -292,10 +305,11 @@ class Site(Stack):
         self.assertLess(box.index("Message of the Day"), box.index("<pre>"))
         body = plain(page)
         self.assertLess(body.index("<h1>Welcome</h1>"), body.index("<pre>"))
-        self.assertLess(body.index("</pre>"), body.index('<a name="play">'))
+        self.assertLess(body.index("</pre>"), body.index('<a name="signin">'))
         self.assertNotIn("ParlorNet is a game server for turn-based games", page)     # no prose of its own
-        signin, new = body.index('<a name="signin">Sign in</a></h3>'), body.index('<a name="new">New account</a></h3>')
+        signin, new = body.index('<a name="signin">Sign in</a></h2>'), body.index('<a name="new">New account</a></h2>')
         self.assertLess(signin, new)
+        self.assertLess(new, body.index('<a name="machines">Play from your computer</a></h2>'))   # then by machine
         forms = re.findall(r'<form action="([^"]+)" method="post">(.*?)</form>', page, re.S)
         self.assertEqual([f for f, _ in forms], ["/login.htm", "/signup.htm"])
         self.assertIn('value="Sign in"', forms[0][1])
@@ -303,6 +317,63 @@ class Site(Stack):
         self.assertIn('value="Make the account"', forms[1][1])
         self.assertNotIn('name="k"', forms[1][1])                           # the sign-up steps ask for it
         self.assertIn('<a href="%s">' % PROJECT_URL, page)                 # run your own server
+
+    def test_welcome_by_machine(self):
+        """Play from your computer, after Sign in and New account: the machines' names first, each a jump to its
+        row, then a row per machine of adapters/clients.py (PLAY_MACHINES) in order, then Any old computer and
+        Any new computer. Each row names its clients as machine_clients gives them, best first, each linking to
+        its page on the docs site, with its medal; then a browser and a telnet program. No ports, no protocols."""
+        from adapters import clients as C, web as W
+        from parlord import DOCS_URL
+        page = plain(self.get("/welcome.htm")[3])
+        sec = page[page.index('<a name="machines">'):page.rindex("<br>\n<table")]
+        machines = [(m[0], m[1]) for m in C.PLAY_MACHINES] + [W.ANY_OLD[:2], W.ANY_NEW[:2]]
+        jumps = re.findall(r'<a href="#([a-z0-9-]+)">([^<]+)</a>', sec)
+        self.assertEqual(jumps, [(anchor, C.esc(name)) for anchor, name in machines])
+        rows = re.findall(r'<tr[^>]*><td><a name="([a-z0-9-]+)"></a>(.+?) ((?:\([^)]*\))?<br>.*?)</td></tr>', sec,
+                          re.S)
+        self.assertEqual([(r[0], r[1]) for r in rows], [(anchor, C.esc(name)) for anchor, name in machines])
+        cells = {r[0]: r[2] for r in rows}
+        for anchor, _, _, targets in C.PLAY_MACHINES:
+            cell, at = cells[anchor], 0
+            for c, groups in C.machine_clients(targets):         # best first, each linking to its page there
+                link = '<a href="%sclients/%s.html">%s</a>' % (DOCS_URL, c.id, C.esc(c.name))
+                at = cell.index(link, at) if groups[0][0] else cell.index(link)
+                if groups[0][0]:
+                    self.assertIn(C.medal_img(groups[0][0]) + " " + link, cell)
+            browsers, telnets = C.machine_generic(targets)
+            for found in (browsers, telnets):
+                if found:
+                    self.assertIn('<a href="%sclients/%s.html">' % (DOCS_URL, found[0].id), cell, anchor)
+        for anchor in ("apple-ii", "c64"):                       # ParlorNet's own 8-bit programs, Gold there
+            self.assertIn(C.medal_img(C.GOLD) + ' <a href="%sclients/parlornet-8bit.html">' % DOCS_URL, cells[anchor])
+        self.assertIn('<a href="%stelnet.html">' % DOCS_URL, cells["any-old"])
+        self.assertIn('<a href="%sbrowsers.html">' % DOCS_URL, cells["any-old"])
+        self.assertIn('<a href="%sdocs/serial.html">' % DOCS_URL, cells["any-old"])
+        self.assertIn('<a href="%stelnet.html">' % DOCS_URL, cells["any-new"])
+        # nothing technical: no ports, no protocol keys, no list of protocols
+        for word in ("port", "protocol", "PARLORNET/1", "HTTP", "protocols.htm", str(self.tel_port),
+                     str(self.web_port), str(self.core)):
+            self.assertNotIn(word, re.sub(r"<[^>]+>", "", page), word)
+        self.assertNotIn("protocols.htm", page)
+
+    def test_sign_out_from_the_bar(self):
+        """Sign out, last in the bar while signed in, ends this session and lands on Welcome, whose bar then
+        has no Sign out; the welcome page of a signed-in player has the lobby's link in place of the forms."""
+        b = Browser(self.web_port)
+        b.login("cyd", "cyd-Pass-word")
+        page = b.get("/welcome.htm")[3]
+        self.assertEqual(self.nav_labels(page), SIGNED_NAV)
+        self.assertNotIn('<form action="/login.htm"', page)
+        self.assertIn("You are signed in.", page)
+        st, _, _, page = b.get(b.link(r"/out\.htm\?x=", page[:page.index("</table>")]))
+        self.assertEqual(st, 200)
+        self.assertIn("Signed out.", page)
+        self.assertIn("<h1>Welcome</h1>", plain(page))
+        self.assertEqual(self.nav_labels(page), PUBLIC_NAV)
+        self.assertNotIn("pn", b.jar)
+        self.assertEqual(self.nav_labels(b.get("/welcome.htm")[3]), PUBLIC_NAV)
+        self.assertIn("Sign in to play.", b.get("/lobby.htm?a=1")[3])
 
     def test_the_same_motd_on_the_web_telnet_and_the_protocol(self):
         import html
@@ -353,8 +424,12 @@ class Site(Stack):
         self.assertLess(len(body), 1024)
         self.assertEqual((ord(body[6]), ord(body[8])), (33, 33))
         welcome = self.get("/welcome.htm")[3]
-        self.assertEqual(welcome.count("<img "), 1)
-        self.assertIn('<img src="/img/parlor.gif" width="33" height="33" alt="">', welcome)
+        self.assertEqual(welcome.count('<img src="/img/parlor.gif" width="33" height="33" alt="">'), 1)
+        for src in set(re.findall(r'<img src="([^"]+)"', welcome)) - {"/img/parlor.gif"}:    # the rating marks
+            self.assertRegex(src, r"^/img/medal-(gold|silver|bronze)\.gif$")
+            st, _, ct, body = self.get(src)
+            self.assertEqual((st, ct), (200, "image/gif"), src)
+            self.assertTrue(body.startswith("GIF89a"), src)
 
 
 class Palette(unittest.TestCase):

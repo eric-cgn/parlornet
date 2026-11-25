@@ -10,7 +10,7 @@ Pull requests go to the `dev` branch. Each one is tested there and squashed into
 
 ## Ports to other 8-bit computers
 
-ParlorNet's 8-bit programs share one core, the protocol, the lobby, the table and the ten games, and each machine adds its own screen, input, storage and connection code. The Apple II family (the IIe and IIgs) is done, and the Commodore 64 is being added; a Commodore 128 runs the Commodore 64 version, booting it by itself. Ports to other machines are welcome, and these would fit especially well: the Commodore 128 in its own 80-column mode, the Atari 8-bit computers (the same 6502 and compiler, with FujiNet or a serial modem), the ZX Spectrum, the MSX and the Amstrad CPC (Z80, with the z88dk compiler), the Tandy Color Computer (6809, with the CMOC compiler), and CP/M as one text-mode program for many machines. The parlornet-8bit repository describes how a port is built and what it needs before it is merged.
+ParlorNet's 8-bit programs share one core, the protocol, the lobby, the table and the ten games, and each machine adds its own screen, input, storage and connection code. The Apple II family (the IIe and IIgs) and the Commodore 64 are done; a Commodore 128 runs the Commodore 64 version, booting it by itself. Ports to other machines are welcome, and these would fit especially well: the Commodore 128 in its own 80-column mode, the Atari 8-bit computers (the same 6502 and compiler, with FujiNet or a serial modem), the ZX Spectrum, the MSX and the Amstrad CPC (Z80, with the z88dk compiler), the Tandy Color Computer (6809, with the CMOC compiler), and CP/M as one text-mode program for many machines. The parlornet-8bit repository describes how a port is built and what it needs before it is merged.
 
 ## Names, trademarks and terms
 

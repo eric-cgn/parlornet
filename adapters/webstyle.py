@@ -38,21 +38,20 @@ MOTD = [False]              # whether the server has a message of the day (web.p
 
 DOCS = ["http://docs.parlornet.org/"]     # site.docs_url, the docs site ("" when cleared; web.py keeps it current)
 
-# The public navigation bar: (path, label). The page being shown is in bold instead of a link. Docs is the
-# docs site, another site, between Protocols and Sign in (left out when the operator cleared site.docs_url).
-PUBLIC_NAV = [("/welcome.htm", "Welcome"), ("/lobby.htm", "Lobby"), ("/games.htm", "Games"),
-              ("/protocols.htm", "Protocols"), ("/login.htm", "Sign in"), ("/signup.htm", "New account")]
+# The game server's navigation bar: (path, label). The page being shown is in bold instead of a link. Docs is
+# the docs site, another site, last (left out when the operator cleared site.docs_url). A signed-in player's
+# bar adds Sign out after it (adapters/web.py, site_nav); sign-in and sign-up are on the welcome page.
+PUBLIC_NAV = [("/welcome.htm", "Welcome"), ("/lobby.htm", "Lobby"), ("/games.htm", "Games")]
 
 
 def public_nav():
-    docs = [(DOCS[0], "Docs")] if DOCS[0] else []
-    return PUBLIC_NAV[:4] + docs + PUBLIC_NAV[4:]
+    return PUBLIC_NAV + ([(DOCS[0], "Docs")] if DOCS[0] else [])
 
 
 def protocol_anchor(key):
     """The anchor of a protocol's entry in the docs site's protocols reference (protocols.html#IOS): its key,
-    with any character but letters, digits and - as - (PARLORNET/1: PARLORNET-1). The server's Protocols page and
-    the docs site's clients tables link to it alike."""
+    with any character but letters, digits and - as - (PARLORNET/1: PARLORNET-1). The docs site's clients tables
+    link to it."""
     return "".join(c if c.isascii() and (c.isalnum() or c == "-") else "-" for c in key)
 
 

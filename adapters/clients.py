@@ -148,7 +148,7 @@ SIGNIN_METHODS = [("none", "Name only"), ("password", "Password")]
 # tried with the program itself is "not yet rated", with what has been tested instead.
 GOLD, SILVER, BRONZE, UNSUPPORTED, NOT_RATED = "gold", "silver", "bronze", "unsupported", ""
 # medal -> (its word, which is the icon's ALT text, the icon on the docs site, what it means). The icons are
-# ParlorNet's own, drawn by tools/medal_icons.py into static/img/.
+# ParlorNet's own, drawn by adapters/medals.py (tools/medal_icons.py writes them into static/img/).
 MEDALS = {GOLD: ("Gold", "/img/medal-gold.gif", "works fully with ParlorNet, tested with the program itself"),
           SILVER: ("Silver", "/img/medal-silver.gif", "works once the program itself is patched, and the "
                    "rating says which patch and links to it"),
@@ -269,8 +269,14 @@ class Client:
         return self.status == "planned"
 
     def key(self):
-        """The key of the protocol it speaks: HTTP, TELNET, or its server extension's (IOS, FIBS, OUTLAND)."""
-        return {"browser": "HTTP", "telnet": "TELNET"}.get(self.kind) or self.protocol.upper()
+        """The key of the protocol it speaks: HTTP, TELNET, its server extension's (IOS, FIBS, OUTLAND), or the
+        core's own, PARLORNET/1."""
+        return ({"browser": "HTTP", "telnet": "TELNET"}.get(self.kind) or PROTOCOL_KEYS.get(self.protocol)
+                or self.protocol.upper())
+
+    def guide(self):
+        """Its protocol's part of the guide to the protocols (docs/protocols.md): PROTOCOLS_DOC#anchor."""
+        return "%s#%s" % (PROTOCOLS_DOC, GUIDE_ANCHORS.get(self.protocol, self.protocol))
 
     def original(self):
         """The original server of its protocol that is still running, or None (ORIGINALS)."""
@@ -860,6 +866,32 @@ PERIOD = [
                       "Commodore, play with ParlorNet's own C64 and C128 client."),
                Rating(NOT_RATED, "amiga", ("68000",), "4.01",
                       "Not tried: in an emulator it needs a Kickstart ROM, which AROS cannot stand in for."),)),
+    Client("parlornet-8bit", "ParlorNet for the Apple IIe, IIgs and C64", "period", "2026",
+           "Version 1.0, for the Apple IIe and IIgs, came out in November 2026, and 2.0 added the Commodore 64 the "
+           "same month.",
+           "Apple IIe and IIgs, Commodore 64 and 128", (("apple2", ("6502",)), ("c64", ("6502",))),
+           ((AUTHOR, "ParlorNet's releases on GitHub", "https://github.com/eric-cgn/parlornet-8bit/releases/tag/v2.0",
+             "`parlornet.dsk`, the Apple IIe's self-booting disk; `parlor-files.po`, the program for your own "
+             "ProDOS; `parlornet-gs.po`, the Apple IIgs program for GS/OS with Marinetti; and `parlornet.d64`, "
+             "the Commodore 64's disk, which a Commodore 128 boots too. MIT license."),),
+           version="2.0",
+           games=("reversi", "backgammon", "gridwords", "dotsandboxes", "navalcombat", "checkers", "mancala",
+                  "fiveinarow", "rummytile", "cannonfire"),
+           port=6501, protocol="parlornet", style="parlornet",
+           status_note="Version 2.0 has played all ten games to the end against the bot on an emulated Apple IIe "
+                       "and an emulated Commodore 64.",
+           ratings=(
+               Rating(GOLD, "apple2", ("6502",), "2.0 on the Apple IIe",
+                      "On an emulated Apple IIe (MAME, with a Super Serial Card), version 2.0 played each of the "
+                      "ten games to the end against the bot.", "2026-11-24", short="2.0, Apple IIe"),
+               Rating(NOT_RATED, "apple2", (), "2.0 on the Apple IIgs",
+                      "The GS/OS program for the Apple IIgs has not been through that test in an emulator yet. On a "
+                      "IIgs, the Apple IIe disk also runs as it is, with a Super Serial Card or an Uthernet II "
+                      "card. " + A_REAL_TEST),
+               Rating(GOLD, "c64", ("6502",), "2.0 on the Commodore 64",
+                      "On an emulated Commodore 64 (VICE, with its user-port RS-232), version 2.0 played each of "
+                      "the ten games to the end against the bot. A Commodore 128 runs the same program in its "
+                      "64 mode.", "2026-11-24", short="2.0, Commodore 64"),)),
 ]
 
 # ---- planned clients ----------------------------------------------------------------------------------
@@ -1055,6 +1087,64 @@ def summary_grid(games):
         "%s %s" % (abbr(t), esc(n)) for n, t in games) + ". " + GRID_MEDALS
     return ('<table border="0" cellpadding="2" cellspacing="0">\n<tr bgcolor="%s">%s</tr>\n%s</table>\n'
             % (IVORY, head, "".join(rows)) + p(key, 2))
+
+
+# ---- by machine: the game server's welcome page (adapters/web.py, machines_html) ----------------------------
+# The machines a visitor may come with, under the names people know them by, so they find theirs without
+# knowing its processor: (anchor, name, a short note, ((platform, processor), ...)). A processor of "" is any.
+# Every client listed for a machine comes from the client data above, with its games and its medals there.
+PLAY_MACHINES = [
+    ("mac-plus", "Macintosh Plus, SE, Classic", "68000 Macs", (("mac", "68000"),)),
+    ("mac-ii", "Macintosh II, LC, Quadra", "68020, 68030 and 68040 Macs", (("mac", "68020"),)),
+    ("power-mac", "Power Macintosh", "PowerPC Macs", (("mac", "ppc"),)),
+    ("apple-ii", "Apple IIe, IIgs", "", (("apple2", "6502"),)),
+    ("c64", "Commodore 64, 128", "", (("c64", "6502"),)),
+    ("ibm-pc", "IBM PC with MS-DOS", "and compatibles", (("dos", ""),)),
+    ("windows", "Windows PC", "", (("win", ""),)),
+    ("amiga", "Amiga", "", (("amiga", ""),)),
+    ("atari-st", "Atari ST", "ST, STe, TT, Falcon", (("atari", ""),)),
+    ("unix", "Unix and Linux", "workstations and PCs", (("unix", ""), ("linux", ""))),
+]
+MEDAL_ORDER = (GOLD, SILVER, BRONZE, NOT_RATED)
+
+
+def best_medal(c, gtype, targets):
+    """A client's best medal for a game on any of a machine's (platform, processor), or NOT_RATED."""
+    found = {r.medal for plat, arch in targets for r in c.medals(gtype, plat, arch)}
+    return next(m for m in MEDAL_ORDER if m in found or m == NOT_RATED)
+
+
+def machine_clients(targets):
+    """A machine's native clients, best first: [(client, [(medal, [game types]), ...])], each client's games
+    grouped by its best medal there, the best group first, games in GAME_NAMES order. A client with a better
+    first medal comes first, then one with more games under it. A client marked untested is left out: nobody
+    has played it on a parlor yet, and its page on the docs site says so."""
+    out = []
+    for c in PERIOD:
+        if c.status == "untested" or not any(c.runs_on(plat, arch) for plat, arch in targets):
+            continue
+        groups = {}
+        for g in GAME_NAMES:
+            if g in c.games:
+                groups.setdefault(best_medal(c, g, targets), []).append(g)
+        out.append((c, [(m, groups[m]) for m in MEDAL_ORDER if m in groups]))
+    out.sort(key=lambda e: (MEDAL_ORDER.index(e[1][0][0]), -len(e[1][0][1])))
+    return out
+
+
+def machine_generic(targets):
+    """The browsers and the telnet programs that run on a machine, each in table order: (browsers, telnets)."""
+    found = []
+    for plat, arch in targets:
+        found += [c for c in generic_for(plat, arch) if c not in found]
+    return [c for c in found if c.kind == "browser"], [c for c in found if c.kind == "telnet"]
+
+
+def games_text(gtypes):
+    """Game types in words: 'Reversi, Checkers', or 'every game'."""
+    if set(gtypes) >= set(GAME_NAMES):
+        return "every game"
+    return ", ".join(GAME_NAMES.get(g, g) for g in gtypes)
 
 
 # ---- the tables ---------------------------------------------------------------------------------------
@@ -1299,6 +1389,14 @@ SIGNIN = {
         "new": "Make your account on the web site (New account) or by telnet (log in as `new`) first. `/quit` "
                "signs out and hangs up.",
     },
+    "parlornet": {
+        "none": "At the sign-in screen, type your name; nothing else is asked.",
+        "password": "At the sign-in screen, type your name, then your password when the parlor asks for it. With a "
+                    "password the server emailed you, the program then asks for a password of your own, typed "
+                    "twice.",
+        "new": "Type `new` at the sign-in screen, then the name you want, and answer the parlor's questions: a "
+               "password typed twice, or an email address, depending on the server.",
+    },
     "outland": {
         "none": "Your name as the account name; the password is not used.",
         "password": "Your name as the account name and your ParlorNet password as the password. " +
@@ -1349,7 +1447,7 @@ def contents(clients):
 
 
 HOST_NOTE = ("In these steps, %s means the name of the ParlorNet server you play on. The ports shown are the "
-             "usual ones. Each server&#39;s Protocols page lists the ports it uses." % HOST)
+             "usual ones." % HOST)
 
 
 def browsers_body(host=HOST, auth=None):
@@ -1415,7 +1513,9 @@ def telnet_body(host=HOST, auth=None):
             programs("programs", "The programs", TELNETS))
 
 
-PROTOCOL_NAMES = {"ios": "IOS", "fibs": "FIBS", "outland": "Outland", "doom": "DOoM", "qlink": "Q-Link", "gamemaster": "GameMaster",
+PROTOCOL_KEYS = {"parlornet": "PARLORNET/1"}       # a protocol whose key is not its name in capitals
+GUIDE_ANCHORS = {"parlornet": "native-protocol"}    # a protocol whose part of the guide is not anchored by its name
+PROTOCOL_NAMES = {"parlornet": "ParlorNet", "ios": "IOS", "fibs": "FIBS", "outland": "Outland", "doom": "DOoM", "qlink": "Q-Link", "gamemaster": "GameMaster",
                   "netsprocket": "NetSprocket", "batnav": "batnav",
                   "awale": "IRC", "netluff": "NetLuff", "icds": "ICDS", "worthy": "Worthy Opponent",
                   "networdz": "Networdz", "rscards": "RSCARDS"}
