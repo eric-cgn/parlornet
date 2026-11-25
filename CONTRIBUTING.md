@@ -4,6 +4,10 @@ Contributions are welcome: a new client, a fix to a client's page, a game, a fro
 
 ParlorNet's own software for period machines lives in repositories of its own, with its own build: the rulebooks for GameMaster and their installer in [eric-cgn/parlornet-gamemaster](https://github.com/eric-cgn/parlornet-gamemaster), Eclipse 68k Fix in [eric-cgn/parlornet-eclipse-fix](https://github.com/eric-cgn/parlornet-eclipse-fix), and ParlorNet's own programs for 8-bit computers in [eric-cgn/parlornet-8bit](https://github.com/eric-cgn/parlornet-8bit). Changes to those programs go there; their pages on the docs site, and the server's side of what they speak, stay here. The guidance below applies to them too.
 
+## Pull requests
+
+Pull requests go to the `dev` branch. Each one is tested there and squashed into a single commit, and `main` takes only merges from `dev`, which is how a release is made (README.md, Branches and releases). A pull request into `main` from any other branch fails its check.
+
 ## Ports to other 8-bit computers
 
 ParlorNet's 8-bit programs share one core, the protocol, the lobby, the table and the ten games, and each machine adds its own screen, input, storage and connection code. The Apple II family (the IIe and IIgs) is done, and the Commodore 64 is being added; a Commodore 128 runs the Commodore 64 version, booting it by itself. Ports to other machines are welcome, and these would fit especially well: the Commodore 128 in its own 80-column mode, the Atari 8-bit computers (the same 6502 and compiler, with FujiNet or a serial modem), the ZX Spectrum, the MSX and the Amstrad CPC (Z80, with the z88dk compiler), the Tandy Color Computer (6809, with the CMOC compiler), and CP/M as one text-mode program for many machines. The parlornet-8bit repository describes how a port is built and what it needs before it is merged.

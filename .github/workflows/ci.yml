@@ -1,0 +1,32 @@
+# Every push to main and every pull request: the whole test suite and the Docker image. A pull request into
+# main fails unless it comes from dev: features go into dev, and main only takes dev, as a release.
+# Python 3.13, as in the Dockerfile: the extension channel needs its TLS pre-shared keys, and the tests that use
+# it skip on an older Python.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45   # the suite takes about a quarter of an hour
+    steps:
+      - name: Into main only from dev
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref != 'dev'
+        run: |
+          echo "::error::Pull requests into main come from dev. Point this one at dev instead."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Test
+        run: python3 -m unittest discover -s tests
+      - name: Docker image
+        run: docker build -t parlornet .
