@@ -1,6 +1,7 @@
-"""Fetch the docs site's downloads from the GitHub Releases that docsite/downloads.json pins, and check each one's
-SHA-256, into build/downloads/ (git-ignored), where tools/build_docs.py finds them. The docs workflow runs it
-before it builds the site.
+"""Fetch the docs site's downloads from the GitHub Releases that docsite/downloads.json pins, or from the
+repository's source at the pinned tag for a file the manifest gives a path, and check each one's SHA-256, into
+build/downloads/ (git-ignored), where tools/build_docs.py finds them. The docs workflow runs it before it builds
+the site.
 
     python3 tools/fetch_downloads.py              # into build/downloads (or PARLOR_DOWNLOADS)
     python3 tools/fetch_downloads.py --out DIR
@@ -33,13 +34,17 @@ def fetch(entries, out, opener=urllib.request.urlopen):
             with open(path, "rb") as f:
                 if hashlib.sha256(f.read()).hexdigest() == e["sha256"]:
                     continue
-        url = downloads.release_url(e)
+        url = downloads.source_url(e)
         try:
             with opener(url, timeout=TIMEOUT) as r:
                 data = r.read()
         except urllib.error.HTTPError as err:
             err.close()
-            if err.code == 404:
+            if err.code == 404 and "path" in e:
+                problems.append("%s: not found (HTTP 404). The tag %s of %s has no file %s: push that tag to "
+                                "github.com/%s before the docs site is built" % (url, e["tag"], e["repo"], e["path"],
+                                                                                e["repo"]))
+            elif err.code == 404:
                 problems.append("%s: not found (HTTP 404). The release %s of %s is not published, or it has no "
                                 "file %s: publish that release (push the tag %s to github.com/%s and let its "
                                 "release workflow finish) before the docs site is built"

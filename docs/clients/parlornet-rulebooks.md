@@ -6,7 +6,7 @@ ParlorNet wrote seven game rulebooks for GameMaster 1.0.0 in 2026: Checkers, Man
 
 ## Getting it
 
-[Install ParlorNet Rulebooks](/gamemaster-rulebooks.html) puts the game rulebooks and ParlorNet's own rulebook in the folder that holds GameMaster: open it and follow its steps (Choose... picks the folder). Their source, their build and their releases are in their own repository, [eric-cgn/parlornet-gamemaster](https://github.com/eric-cgn/parlornet-gamemaster), whose GitHub Releases also have each rulebook on its own. GameMaster 1.0.0 is not included; the GameMaster page says where to find it.
+[Install ParlorNet Rulebooks](/gamemaster-rulebooks.html) puts the game rulebooks and ParlorNet's own rulebook in the folder that holds GameMaster: open it and follow its steps (Choose... picks the folder). Their source, their build and their releases are in their own repository, [eric-cgn/parlornet-gamemaster](https://github.com/eric-cgn/parlornet-gamemaster), whose GitHub Releases have the installer as BinHex, as MacBinary and on an 800K disk image for emulators and floppy writers. GameMaster 1.0.0 is not included; the GameMaster page says where to find it.
 
 ## Setting it up
 

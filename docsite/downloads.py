@@ -1,9 +1,11 @@
 """The downloads of ParlorNet's classic Mac software on the docs site: Eclipse 68k Fix, and Install ParlorNet
 Rulebooks with the READMEs of the ParlorNet rulebook and the game rulebooks. Each is built and released in its own
-repository (REPOS), not here. docsite/downloads.json pins each file: the repository, the release tag, the file
-name and its SHA-256. tools/fetch_downloads.py fetches them from the GitHub Releases into build/downloads/ (the
-docs workflow runs it before it builds the site), checking each one's SHA-256, and the site serves them over
-plain HTTP at download/<file>, which period browsers can fetch where GitHub's HTTPS addresses are out of reach.
+repository (REPOS), not here. docsite/downloads.json pins each file: the repository, the tag, the file name and
+its SHA-256. A file of a GitHub Release has no more than that. A file of the repository's source at that tag, such
+as the rulebooks' READMEs, which their release does not carry, also has its path there. tools/fetch_downloads.py
+fetches them into build/downloads/ (the docs workflow runs it before it builds the site), checking each one's
+SHA-256, and the site serves them over plain HTTP at download/<file>, which period browsers can fetch where
+GitHub's HTTPS addresses are out of reach.
 
 A build of the site without them leaves the downloads out, and each page says so and links its README in the
 repository instead. A file whose SHA-256 is not the manifest's is never served. PARLOR_DOWNLOADS names another
@@ -24,12 +26,12 @@ ECLIPSE_REPO = "eric-cgn/parlornet-eclipse-fix"
 GAMEMASTER_REPO = "eric-cgn/parlornet-gamemaster"
 REPOS = (ECLIPSE_REPO, GAMEMASTER_REPO)
 EXTENSIONS = ("hqx", "bin", "dsk")
-INSTALLER = "parlornet-rulebooks-installer"        # an application made by EUP: no disk image
+INSTALLER = "parlornet-rulebooks-installer"        # an application made by EUP, also on a disk image
 # The site's downloads, as the pages offer them: {file name: (repository, path of the file in the repository
 # when it is a source file there, for the link of a site built without the downloads)}
 FILES = {"eclipse-68k-fix.%s" % e: (ECLIPSE_REPO, None) for e in EXTENSIONS}
 FILES["eclipse-68k-fix-readme.txt"] = (ECLIPSE_REPO, "release/eclipse-68k-fix-readme.txt")
-FILES.update({"%s.%s" % (INSTALLER, e): (GAMEMASTER_REPO, None) for e in EXTENSIONS[:2]})
+FILES.update({"%s.%s" % (INSTALLER, e): (GAMEMASTER_REPO, None) for e in EXTENSIONS})
 FILES["parlornet-rulebook-readme.txt"] = (GAMEMASTER_REPO, "release/parlornet-rulebook-readme.txt")
 FILES["gamemaster-rulebooks-readme.txt"] = (GAMEMASTER_REPO, "release/gamemaster-rulebooks-readme.txt")
 _cache = {}
@@ -48,12 +50,14 @@ def folder():
 
 
 def entries(path=None):
-    """The manifest: [{repo, tag, file, sha256}], one for each file of FILES."""
+    """The manifest: [{repo, tag, file, sha256}], one for each file of FILES, with the file's path in the
+    repository when it comes from the source at that tag rather than from its release."""
     with open(path or manifest_path()) as f:
         out = json.load(f)["files"]
     for e in out:
-        if set(e) != {"repo", "tag", "file", "sha256"}:
-            raise DownloadError("%s: an entry needs repo, tag, file and sha256: %r" % (path or manifest_path(), e))
+        if set(e) - {"path"} != {"repo", "tag", "file", "sha256"}:
+            raise DownloadError("%s: an entry needs repo, tag, file and sha256, and may have path: %r"
+                                % (path or manifest_path(), e))
     return out
 
 
@@ -68,12 +72,29 @@ def release_url(e):
     return "https://github.com/%s/releases/download/%s/%s" % (e["repo"], e["tag"], e["file"])
 
 
+def source_url(e):
+    """Where tools/fetch_downloads.py fetches a file: its release, or its path in the source at the tag."""
+    if "path" in e:
+        return "https://raw.githubusercontent.com/%s/%s/%s" % (e["repo"], e["tag"], e["path"])
+    return release_url(e)
+
+
 def repo_url(repo):
     return "https://github.com/%s" % repo
 
 
 def describe(e):
+    if "path" in e:
+        return "%s from %s at the tag %s of %s (%s)" % (e["file"], e["path"], e["tag"], e["repo"], source_url(e))
     return "%s from the %s release of %s (%s)" % (e["file"], e["tag"], e["repo"], release_url(e))
+
+
+def release_page(repo):
+    """The GitHub page of the release the manifest pins for repo."""
+    tags = {e["tag"] for e in entries() if e["repo"] == repo}
+    if len(tags) != 1:
+        raise DownloadError("%s pins %d tags of %s, not one" % (manifest_path(), len(tags), repo))
+    return "%s/releases/tag/%s" % (repo_url(repo), tags.pop())
 
 
 def get(name):
@@ -96,7 +117,7 @@ def get(name):
 
 
 def extensions(slug):
-    return EXTENSIONS[:2] if slug == INSTALLER else EXTENSIONS
+    return EXTENSIONS
 
 
 def fetched(slug):
