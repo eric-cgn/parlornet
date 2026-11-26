@@ -2,10 +2,9 @@
 import asyncio
 import os
 import random
-import subprocess
-import sys
 import unittest
 
+import procs
 from test_core import ROOT, Client, free_port
 
 import importlib.util  # noqa: E402
@@ -269,14 +268,9 @@ class Extensions(unittest.TestCase):
 class OverProtocol(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.port = free_port()
-        self.proc = subprocess.Popen([sys.executable, "-m", "parlord", "--port", str(self.port), "--auth", "none", "--rate", "1000",
-                                      "--burst", "1000"], cwd=ROOT, stdout=subprocess.PIPE)
-        self.proc.stdout.readline()
-
-    async def asyncTearDown(self):
-        self.proc.kill()
-        self.proc.wait()
-        self.proc.stdout.close()
+        self.proc = procs.spawn("parlord", "--port", str(self.port), "--auth", "none", "--rate", "1000",
+                                "--burst", "1000", stderr=None)
+        self.addCleanup(procs.stop, self.proc)
 
     async def test_staged_turns(self):
         a, b = await Client.connect(self.port), await Client.connect(self.port)

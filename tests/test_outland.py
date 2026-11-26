@@ -15,12 +15,12 @@ import socket
 import struct
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from collections import deque
 from urllib.parse import parse_qs, urlsplit
 
+import procs
 from test_adapters import WebPlayers, spawn
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
@@ -607,17 +607,14 @@ class LiveBase(WebPlayers, unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe, cls.port, cls.web = free_port(), free_port(), free_port(), free_port()
         cls.keys = make_keys("outland", "web")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", cls.auth),
-                     spawn(*adapter_args("adapters.outland", cls.port, cls.fe, cls.keys, "outland"), *FAST),
-                     spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web"))]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", cls.auth))
+        cls.procs.append(spawn(*adapter_args("adapters.outland", cls.port, cls.fe, cls.keys, "outland"), *FAST))
+        cls.procs.append(spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)
 
 
     def web_table(self, name):
@@ -986,8 +983,9 @@ class LiveMotd(LiveBase):
         cls.motd.close()
         cls.core, cls.fe, cls.port = free_port(), free_port(), free_port()
         cls.keys = make_keys("outland")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none", "--motd", cls.motd.name),
-                     spawn(*adapter_args("adapters.outland", cls.port, cls.fe, cls.keys, "outland"), *FAST)]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none", "--motd", cls.motd.name))
+        cls.procs.append(spawn(*adapter_args("adapters.outland", cls.port, cls.fe, cls.keys, "outland"), *FAST))
 
     @classmethod
     def tearDownClass(cls):
@@ -1046,60 +1044,54 @@ class LiveEmail(unittest.TestCase):
         with open(settings, "w") as f:
             f.write("email.transport=test\nemail.test_file=%s\n" % mails)
         fe, keys = free_port(), make_keys("outland")
-        procs = [spawn(*stack_args(core, fe, keys), "--auth", "password", "--signup", "email",
-                       "--settings-file", settings),
-                 spawn(*adapter_args("adapters.outland", port, fe, keys, "outland"), *FAST)]
-        try:
-            s = socket.create_connection(("127.0.0.1", core), timeout=5)
-            s.sendall(b"PARLORNET/1\r\n")       # the opening first, then the greeting
-            f = s.makefile("rb")
-            f.readline()
+        running = procs.owned(self)
+        running.append(spawn(*stack_args(core, fe, keys), "--auth", "password", "--signup", "email",
+                             "--settings-file", settings))
+        running.append(spawn(*adapter_args("adapters.outland", port, fe, keys, "outland"), *FAST))
+        s = socket.create_connection(("127.0.0.1", core), timeout=5)
+        s.sendall(b"PARLORNET/1\r\n")       # the opening first, then the greeting
+        f = s.makefile("rb")
+        f.readline()
 
-            def req(text):
-                s.sendall(text.encode() + b"\r\n")
-                while True:
-                    l = f.readline().decode().strip()
-                    if l.startswith(("OK", "ERR", "ASK")):
-                        return l
-            self.assertEqual(req("REG tia"), "ASK email Email_address")
-            self.assertEqual(req("AUT email tia@example.org"), "ASK password Password_from_the_email secret")
-            s.close()
-            pw = mailed_password(mails, "tia@example.org")
-            g = Gateway(port)                  # the pending account, from the Gateway: where to go instead
-            g.login("tia", pw)
-            self.assertEqual(g.ctl("b")[4:], NEWPASS_TEXT.encode() + b"\0")     # the text window, all of it
-            self.assertEqual(g.ctl("V"), b"V" + struct.pack(">H", 2))
-            g.close()
-            s = socket.create_connection(("127.0.0.1", core), timeout=5)    # as on the web or by telnet
-            s.sendall(b"PARLORNET/1\r\n")
-            f = s.makefile("rb")
-            f.readline()
-            self.assertEqual(req("USER tia"), "ASK password Password secret cred")
-            self.assertEqual(req("AUT password %s" % pw), "ASK password New_password secret new")
-            self.assertEqual(req("AUT password Tia-own-pass1"), "ASK confirm Type_it_again secret new")
-            self.assertEqual(req("AUT confirm Tia-own-pass1"), "OK -")
-            s.close()
-            g = Gateway(port)
-            g.login("tia", "Tia-own-pass1")
-            self.assertEqual(g.ctl("Y"), Y_BOTH)
-            g.pump(0.3)
-            self.assertFalse(any(c[:1] == b"b" for c in list(g.seen) + list(g.cmds)))  # no token to show
-            g.close()
-            time.sleep(0.3)
-            for name, password, code, reason in (("newbie", "123456", 1, b"There is no account named newbie here."
-                                                                         b" Make one on the web"),
-                                                 ("tia", "Not-her-pass1", 2, b"Wrong password")):
-                h = Gateway(port)
-                h.login(name, password)
-                self.assertIn(reason, h.ctl("b"))
-                self.assertEqual(h.ctl("V"), b"V" + struct.pack(">H", code))
-                h.close()
-        finally:
-            for p in procs:
-                p.kill()
-                p.wait()
-                p.stdout.close()
-                p.stderr.close()
+        def req(text):
+            s.sendall(text.encode() + b"\r\n")
+            while True:
+                l = f.readline().decode().strip()
+                if l.startswith(("OK", "ERR", "ASK")):
+                    return l
+        self.assertEqual(req("REG tia"), "ASK email Email_address")
+        self.assertEqual(req("AUT email tia@example.org"), "ASK password Password_from_the_email secret")
+        s.close()
+        pw = mailed_password(mails, "tia@example.org")
+        g = Gateway(port)                  # the pending account, from the Gateway: where to go instead
+        g.login("tia", pw)
+        self.assertEqual(g.ctl("b")[4:], NEWPASS_TEXT.encode() + b"\0")     # the text window, all of it
+        self.assertEqual(g.ctl("V"), b"V" + struct.pack(">H", 2))
+        g.close()
+        s = socket.create_connection(("127.0.0.1", core), timeout=5)    # as on the web or by telnet
+        s.sendall(b"PARLORNET/1\r\n")
+        f = s.makefile("rb")
+        f.readline()
+        self.assertEqual(req("USER tia"), "ASK password Password secret cred")
+        self.assertEqual(req("AUT password %s" % pw), "ASK password New_password secret new")
+        self.assertEqual(req("AUT password Tia-own-pass1"), "ASK confirm Type_it_again secret new")
+        self.assertEqual(req("AUT confirm Tia-own-pass1"), "OK -")
+        s.close()
+        g = Gateway(port)
+        g.login("tia", "Tia-own-pass1")
+        self.assertEqual(g.ctl("Y"), Y_BOTH)
+        g.pump(0.3)
+        self.assertFalse(any(c[:1] == b"b" for c in list(g.seen) + list(g.cmds)))  # no token to show
+        g.close()
+        time.sleep(0.3)
+        for name, password, code, reason in (("newbie", "123456", 1, b"There is no account named newbie here."
+                                                                     b" Make one on the web"),
+                                             ("tia", "Not-her-pass1", 2, b"Wrong password")):
+            h = Gateway(port)
+            h.login(name, password)
+            self.assertIn(reason, h.ctl("b"))
+            self.assertEqual(h.ctl("V"), b"V" + struct.pack(">H", code))
+            h.close()
 
 
 # ---- Outland Reversi ------------------------------------------------------------------------------
@@ -1136,10 +1128,6 @@ class ReversiCodec(unittest.TestCase):
         self.assertTrue(b.can_move(1))
 
 
-def drain(proc):
-    threading.Thread(target=lambda: [None for _ in iter(proc.stdout.readline, b"")], daemon=True).start()
-
-
 @slow
 class LiveReversi(WebPlayers, unittest.TestCase):
     """Outland Reversi against a web player, the bot, another Outland player and an invitation from the
@@ -1149,13 +1137,12 @@ class LiveReversi(WebPlayers, unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe, cls.port, cls.web = free_port(), free_port(), free_port(), free_port()
         cls.keys = make_keys("outland", "web", "bot")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none"),
-                     spawn(*adapter_args("adapters.outland", cls.port, cls.fe, cls.keys, "outland"), *FAST),
-                     spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")),
-                     spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", os.path.join(cls.keys, "bot.key"),
-                           "--think", "0,0", "--pace", "0", "--poll", "0.3")]
-        for p in cls.procs:
-            drain(p)
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none"))
+        cls.procs.append(spawn(*adapter_args("adapters.outland", cls.port, cls.fe, cls.keys, "outland"), *FAST))
+        cls.procs.append(spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")))
+        cls.procs.append(spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", os.path.join(cls.keys, "bot.key"),
+                               "--think", "0,0", "--pace", "0", "--poll", "0.3"))
         end = time.time() + 20
         while "bot" not in cls.who():
             assert time.time() < end, "the bot did not sign in"
@@ -1163,11 +1150,7 @@ class LiveReversi(WebPlayers, unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)
 
     @classmethod
     def who(cls):

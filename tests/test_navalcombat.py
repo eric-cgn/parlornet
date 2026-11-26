@@ -4,13 +4,12 @@ import importlib.util
 import json
 import os
 import re
-import subprocess
-import sys
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
 from game_checks import LONG, ansi_screens, board_image, plain_screen, web_page
 from test_adapters import Native, Stack
+import procs
 from test_core import ROOT, Client, free_port
 
 from adapters.games import navalcombat as G  # noqa: E402
@@ -357,14 +356,9 @@ class Hidden(unittest.TestCase):
 class OverProtocol(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.port = free_port()
-        self.proc = subprocess.Popen([sys.executable, "-m", "parlord", "--port", str(self.port), "--rate", "1000",
-                                      "--burst", "1000", "--auth", "none"], cwd=ROOT, stdout=subprocess.PIPE)
-        self.proc.stdout.readline()
-
-    async def asyncTearDown(self):
-        self.proc.kill()
-        self.proc.wait()
-        self.proc.stdout.close()
+        self.proc = procs.spawn("parlord", "--port", str(self.port), "--rate", "1000",
+                                "--burst", "1000", "--auth", "none", stderr=None)
+        self.addCleanup(procs.stop, self.proc)
 
     async def test_whole_game(self):
         a, b, w = await Client.connect(self.port), await Client.connect(self.port), await Client.connect(self.port)

@@ -19,6 +19,7 @@ import time
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
+import procs
 from test_adapters import WebPlayers, spawn
 from test_backgammon import bg
 from test_core import adapter_args, free_port, make_keys, stack_args
@@ -470,18 +471,15 @@ class Stack(WebPlayers, unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe, cls.fibs, cls.web = free_port(), free_port(), free_port(), free_port()
         cls.keys = make_keys("fibs", "web")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", cls.auth),
-                     spawn(*adapter_args("adapters.fibs", cls.fibs, cls.fe, cls.keys, "fibs"), "--poll", "0.25",
-                           "--prompt-wait", "2"),
-                     spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web"))]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", cls.auth))
+        cls.procs.append(spawn(*adapter_args("adapters.fibs", cls.fibs, cls.fe, cls.keys, "fibs"), "--poll", "0.25",
+                               "--prompt-wait", "2"))
+        cls.procs.append(spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)
 
     def client(self, cls):
         c = cls(self.fibs)
@@ -1037,6 +1035,7 @@ class FibsNeverVolunteers(unittest.TestCase):
         from parlord import auth
         for signin, name, want in (("none", "ned", []), ("password", "pia", ["AUT password pia-Pass-word"])):
             core = RecordingCore(signin, None, ("fibs",))
+            self.addCleanup(core.stop)          # also when the extension does not start (stop twice is fine)
             if signin == "password":
                 p = core.srv.accounts.player(name, create=True)
                 p.cred = auth.hash_password("pia-Pass-word")
@@ -1054,10 +1053,7 @@ class FibsNeverVolunteers(unittest.TestCase):
                 self.assertIn(first, core.lines)
                 self.assertEqual([l for l in core.lines if "pia-Pass-word" in l], want, signin)
             finally:
-                proc.kill()
-                proc.wait()
-                proc.stdout.close()
-                proc.stderr.close()
+                procs.stop(proc)
                 core.stop()
 
 

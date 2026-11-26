@@ -18,6 +18,7 @@ import threading
 import time
 import unittest
 
+import procs
 from test_core import adapter_args, free_port, make_keys, stack_args
 from test_adapters import Native, spawn
 from test_play import WS, kill_all
@@ -234,9 +235,7 @@ class Notices(unittest.IsolatedAsyncioTestCase):
         self.core, self.fe = free_port(), free_port()
         self.keys = make_keys("play", "telnet")
         self.proc = spawn(*stack_args(self.core, self.fe, self.keys), "--auth", "none")
-
-    async def asyncTearDown(self):
-        kill_all([self.proc])
+        self.addCleanup(procs.stop, self.proc)
 
     async def ext(self, name="play", player=None):
         c = await CoreClient.connect("127.0.0.1", self.fe, os.path.join(self.keys, name + ".key"))
@@ -349,21 +348,19 @@ class EndToEnd(unittest.TestCase):
         cls.data = tempfile.mkdtemp(prefix="pnplaydata")
         cls.core, cls.fe, cls.play_port = free_port(), free_port(), free_port()
         cls.keys = make_keys("play")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password")]
+        cls.procs = procs.owned(cls)
+        cls.logs = [[], []]             # everything each server prints, for the check that no key reaches it
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password",
+                               out=cls.logs[0], err=cls.logs[0]))
         cls.procs.append(spawn(*adapter_args("adapters.playserver", cls.play_port, cls.fe, cls.keys, "play"),
                                "--public-url", cls.ORIGIN + "/play/", "--proxies", "127.0.0.1",
                                "--data", cls.data, "--push-contact", cls.CONTACT,
-                               "--push-hosts", "127.0.0.1:%d" % cls.svc_port))
+                               "--push-hosts", "127.0.0.1:%d" % cls.svc_port, out=cls.logs[1], err=cls.logs[1]))
 
     @classmethod
     def tearDownClass(cls):
-        out = b""
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            out += p.stdout.read() + p.stderr.read()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)          # it waits until the drains have read the last of the output
+        out = "\n".join("\n".join(log) for log in cls.logs).encode()
         cls.svc.shutdown()
         key = open(os.path.join(cls.data, "vapid.key")).read().strip()
         shutil.rmtree(cls.data, True)

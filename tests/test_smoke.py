@@ -4,10 +4,10 @@ board, invites the bot and plays to the end. The slow tests play every game thro
 import os
 import socket
 import subprocess
-import sys
 import time
 import unittest
 
+import procs
 from test_core import ROOT, free_port, make_keys, stack_args
 
 WAIT = 30
@@ -58,25 +58,20 @@ class Smoke(unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe = free_port(), free_port()
         cls.keys = make_keys("bot")
-        cls.procs = []
+        cls.procs = procs.owned(cls)
         cls.spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password")
         cls.spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", os.path.join(cls.keys, "bot.key"),
                   "--think", "0,0", "--pace", "0", "--poll", "0.2")
 
     @classmethod
     def spawn(cls, *args):
-        p = subprocess.Popen([sys.executable, "-m"] + list(args), cwd=ROOT, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT)
+        p = procs.spawn(*args, stderr=subprocess.STDOUT)    # after its first line: listening, or signed in
         cls.procs.append(p)
-        p.stdout.readline()             # its first line: listening, or signed in
         return p
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
+        procs.stop_all(cls.procs)
 
     def test_sign_up_sign_in_and_a_game_against_the_bot(self):
         a = Conn(self.core)

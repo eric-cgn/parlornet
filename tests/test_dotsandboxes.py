@@ -3,12 +3,11 @@ import importlib.util
 import os
 import random
 import re
-import subprocess
-import sys
 import unittest
 import asyncio
 
 from game_checks import LONG, FakeIO, ScreenCore, ansi_screens, board_image, plain_screen, session, web_page
+import procs
 from test_core import ROOT, Client, free_port
 
 from adapters import games  # noqa: E402
@@ -289,14 +288,9 @@ class Rules(unittest.TestCase):
 class OverProtocol(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.port = free_port()
-        self.proc = subprocess.Popen([sys.executable, "-m", "parlord", "--port", str(self.port), "--rate", "1000",
-                                      "--burst", "1000", "--auth", "none"], cwd=ROOT, stdout=subprocess.PIPE)
-        self.proc.stdout.readline()
-
-    async def asyncTearDown(self):
-        self.proc.kill()
-        self.proc.wait()
-        self.proc.stdout.close()
+        self.proc = procs.spawn("parlord", "--port", str(self.port), "--rate", "1000",
+                                "--burst", "1000", "--auth", "none", stderr=None)
+        self.addCleanup(procs.stop, self.proc)
 
     async def test_a_whole_game(self):
         a, b = await Client.connect(self.port), await Client.connect(self.port)

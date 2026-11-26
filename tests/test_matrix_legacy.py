@@ -10,6 +10,7 @@ import unittest
 import test_fibs as TF
 import test_ios as TI
 import test_outland as TO
+import procs
 from test_adapters import spawn
 from test_core import adapter_args, free_port, make_keys, stack_args
 from test_matrix import Conn, table, until
@@ -43,16 +44,13 @@ class Ios(unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe, cls.ios = free_port(), free_port(), free_port()
         cls.keys = make_keys("ios")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none"),
-                     spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"), "--prompt-wait", "2")]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none"))
+        cls.procs.append(spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"), "--prompt-wait", "2"))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)
 
     def test_reversi(self):
         clients = {}

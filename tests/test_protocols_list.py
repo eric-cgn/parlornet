@@ -13,6 +13,7 @@ import time
 import unittest
 
 from test_core import ROOT, adapter_args, free_port, make_keys
+import procs
 from test_adapters import Stack, spawn
 
 sys.path.insert(0, ROOT)
@@ -249,10 +250,7 @@ class LiveList(Stack):
             _, rows = self.protocols_page(("IOS",))
             self.assertEqual(rows["IOS"][0], 7503)            # the port players connect to
         finally:
-            ios.kill()
-            ios.wait()
-            ios.stdout.close()
-            ios.stderr.close()
+            procs.stop(ios)
         _, rows = self.protocols_page((), ("IOS",))
         self.assertNotIn("IOS", rows)
 

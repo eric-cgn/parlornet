@@ -3,7 +3,7 @@
 Accounts are three separate pieces, each replaceable:
 
 1. **Sign-in and sign-up methods** (how a player proves who they are, and how an account is made): two pluggable registries, run as one dialog the server drives. The operator picks one of each.
-2. **Account management** (`parlord/accounts.py`): players, sessions, lockouts, suspending, resetting, deleting.
+2. **Account management** (`parlord/accounts.py`): players, sessions, sign-in keys for staying signed in, lockouts, suspending, resetting, deleting.
 3. **The admin panel**: configures the server from what is installed.
 
 The table host only ever sees a player id and a display name; games see seat numbers. The threat model, the trust boundaries and the reasons behind this design are in docs/security-design.md.
@@ -43,7 +43,7 @@ The greeting names both: `PARLORNET/1 parlornet.org AUTH=password SIGNUP=email`,
 
 ## Wrong answers
 
-Every wrong answer counts toward the name's lockout: a wrong password, or a wrong temporary password. The first two wrong answers in a row are only refused (`ERR WRONG Wrong password; try again`). The third locks the name for 1 minute and the fifth for 15 minutes, and the wait grows by the same factor each time to at most 4 hours. The count survives restarts, and each 8 hours without a wrong answer halve it. A refusal with a wait carries it for programs: `ERR LOCKED wait=60 Wrong password; try again in 60 seconds`. A right answer clears the count, and so does a right temporary password (the mailbox is proven).
+Every wrong answer counts toward the name's lockout: a wrong password, a wrong temporary password, or a sign-in key the server does not take (Staying signed in, below). The first two wrong answers in a row are only refused (`ERR WRONG Wrong password; try again`). The third locks the name for 1 minute and the fifth for 15 minutes, and the wait grows by the same factor each time to at most 4 hours. The count survives restarts, and each 8 hours without a wrong answer halve it. A refusal with a wait carries it for programs: `ERR LOCKED wait=60 Wrong password; try again in 60 seconds`. A right answer clears the count, and so does a right temporary password (the mailbox is proven).
 
 **Budgets per address and for the server.** A wrong answer for a name its client address has not signed in from in the last 30 days also counts against that address (12 a day) and the whole server (48 a day); once either is spent, untrusted addresses are refused before anything is checked (`ERR LOCKED wait=N Too many wrong answers from your address`, `ERR BUSY wait=N Too many wrong answers on this server; try later, or answer reset`). An address a player signed in from is never held up by them. docs/security-design.md has the arithmetic.
 
@@ -164,19 +164,42 @@ After a successful check the accounts component creates a **session**, the same 
 - **On the extension channel** (docs/security-design.md: TLS 1.3, a pre-shared key per server extension) the reply is `OK sid`, where `sid` is 22 characters of `[A-Za-z0-9_-]` (128 random bits). Only its SHA-256 is stored. A server extension that serves many short requests (the web) resumes it on a new connection with `SES sid`; the session belongs to that server extension only and to the sign-in and sign-up pair in force (changing either ends every session).
 - **On the public port** (6501, plain text for 8-bit clients) the session lasts as long as the connection and has no id; the reply is `OK -`. `SES` is refused there (`ERR NOTFRONTEND`).
 - **Expiry** (settings): idle `session.idle_secs` (default 7200 seconds, checked when resuming) and absolute `session.max_secs` (default 86400, also cuts off a live connection).
-- **Ending**: `OUT` ends the current session; `OUT all` ends every session of the player, live connections included (they get `ERR SIGNEDOUT` on their next request). A password change, a recovery, the operator's suspend, reset and delete end sessions too.
+- **Ending**: `OUT` ends the current session and forgets its sign-in key, if it has one; `OUT all` ends every session of the player, live connections included (they get `ERR SIGNEDOUT` on their next request), and forgets every sign-in key. A password change, a recovery, the operator's suspend, reset and delete end sessions too.
 - **Wrong `SES`**: nothing is locked. A connection gets three tries, then `ERR RATE`; the core counts failures per server extension in its log (counts only, never ids). The web also stops resuming for a client address after 10 failures in 10 minutes.
 
 What server extensions do with sessions:
 
 | Server extension | Session |
 |---|---|
-| web | cookie `pn=<sid>; Path=/; HttpOnly; SameSite=Lax`, no expiry (ends with the browser); for a browser that returns no cookie, `s=<sid>` in links, decided on the first page after sign-in (the redirect carries a one-time 60-second handle, not the session). Every page resumes with `SES`. Actions carry `x=` (an HMAC of the session id) against cross-site requests. "Sign out" (`OUT`) on every page, "Sign out everywhere" (`OUT all`) and "Change your password" in the lobby |
+| web | cookie `pn=<sid>; Path=/; HttpOnly; SameSite=Lax`, no expiry (ends with the browser); with Stay signed in, a second cookie for the sign-in key (below); for a browser that returns no cookie, `s=<sid>` in links, decided on the first page after sign-in (the redirect carries a one-time 60-second handle, not the session). Every page resumes with `SES`. Actions carry `x=` (an HMAC of the session id) against cross-site requests. "Sign out" (`OUT`) on every page, "Sign out everywhere" (`OUT all`) and "Change your password" in the lobby |
 | telnet, IOS, FIBS, Outland, DOoM, NetBoxes, batnav, Networdz, NetLuff, ICDS, Worthy Opponent, RSCARDS | the connection's own sign-in; `OUT` when the player leaves |
-| Play | cookie `pnplay=<sid>; Path=/play/; HttpOnly; SameSite=Strict`, with `Secure` when `play.public_url` is https; the page gets a one-time 60-second handle after signing in over its WebSocket and trades it for the cookie (`POST /play/session`), so the session id never reaches the page. A reload resumes with `SES` |
+| Play | cookie `pnplay=<sid>; Path=/play/; HttpOnly; SameSite=Strict`, with `Secure` when `play.public_url` is https; the page gets a one-time 60-second handle after signing in over its WebSocket and trades it for the cookie (`POST /play/session`), so the session id never reaches the page. A reload resumes with `SES`. With Stay signed in, a second cookie for the sign-in key (below) |
 | GameMaster | the sign-in on the ParlorNet rulebook's connection, which carries that Mac's games; each game's connections to the core resume it (`SES`). Sign out in the window (`OUT`), or closing it, ends it |
 
-No server extension ever shows a credential or a session id.
+No server extension ever shows a credential, a session id or a sign-in key.
+
+## Staying signed in
+
+**Stay signed in** is a feature of the server that any client may offer, and every client uses it the same way. The 8-bit program has it among its settings and keeps the key on its disk (docs/design.md). The web's and Play's sign-in forms have a Stay signed in checkbox, and the browser keeps the key in a cookie. A client that cannot keep a little data of its own does not offer it. Telnet doesn't, because a telnet program has nowhere to keep a key, and neither does a 1997 game program whose login screen sends only a name and a password. No client has rules of its own for it.
+
+1. **Asking for a key.** With Stay signed in on, the client signs in with the password as always, and right after that, on the same connection, it asks for a sign-in key for this computer (`KEY NEW`, with a label such as "Apple IIe"). The first successful sign-in gets the key, and the player is asked nothing more. The client keeps the key and never the password.
+2. **Signing in with it.** Next time the client signs in with the name and the key (`USER name`, then `AUT key` at the password question), and the player is asked nothing.
+3. **A refused key.** The server answers `ERR NOKEY` when it does not take the key, because the key was forgotten, it expired or the password changed. The client then forgets the key and asks for the password. A refused key counts as one wrong answer.
+4. **Signing out** always forgets the key, on that computer and on the server, whatever the setting. "Sign out everywhere" (`OUT all`) forgets every key.
+5. **The player's list.** Each player can list the computers where they stay signed in, with each one's label, the day it was made and the day it was last used, and forget any of them or all of them (`KEY LST`, `KEY DEL`). The web's profile page (`/player.htm`, your own) shows the list with a Forget link for each and Forget them all. A session that signed in with a forgotten key ends.
+6. **What else forgets them.** A password change (`PWD`), choosing a new password after a temporary one (a recovery by mail or the operator's reset) and the operator's reset forget every key of the player. Deleting the account deletes them.
+7. **Expiry.** A key unused for 90 days expires. Each sign-in with it starts the 90 days again. The setting is `keys.idle_secs` (seconds, default 7776000), in the settings file, as the sessions' expiry is.
+8. **Lockouts.** A wrong key counts toward the name's lockout and the per-address and server budgets exactly as a wrong password does: the first two are refused, and the third locks the name for a minute. A right key still signs in while the name is locked, as a temporary password does, because nobody guesses a key of 128 random bits. A wrong key while the name is locked is refused with the wait and not counted again.
+9. **Where it works.** A key works only where it was given. That is the public port, where the 8-bit programs sign in, or the server extension that asked for it, such as the web or Play. A key given to the web does not sign in on the public port or through Play.
+10. **At most 20** keys a player (`ERR LIMIT`), and none under sign-in `none`, where there is no password to stand in for.
+
+The server keeps only a key's SHA-256, as it does for session ids, and compares keys in constant time. A key never goes in a URL, a page or a log, and no client shows it on screen. The reasons, the threats (a stolen key, a copied floppy) and what limits them are in docs/security-design.md, Staying signed in.
+
+| Client | Where it keeps the key |
+|---|---|
+| the 8-bit program (public port, docs/design.md) | its settings file on its disk, with the name |
+| web | `pnkey=name.key; Path=/; Max-Age=34560000; HttpOnly; SameSite=Lax`, with `Secure` when the page came over https. The web sets it when Stay signed in was checked at sign-in and clears it at sign-out. A visit with no session signs in with it. |
+| Play | `pnplaykey=name.key; Path=/play/; Max-Age=34560000; HttpOnly; SameSite=Strict`, with `Secure` when `play.public_url` is https. The page gets a one-time handle for it and never the key. A reload with no session signs in with it. |
 
 ## Who is online
 
@@ -202,7 +225,7 @@ An invitation to a player who is not online is kept like any other. It waits in 
 
 ## Account management interface
 
-`parlord/accounts.py`, class `Accounts`: the only code that decides who a connection is. The core calls `greeting`, `begin` (HELO, USER, REG), `answer` (AUT), `resume` (SES), `current` (every request), `sign_out` (OUT), `change` (PWD); the admin calls `suspend`, `reset`, `delete`; `sweep` drops expired sessions, deletes pending accounts past their 24 hours and forgets temporary passwords past theirs. It keeps players and sessions in parlord's SQLite database.
+`parlord/accounts.py`, class `Accounts`: the only code that decides who a connection is. The core calls `greeting`, `begin` (HELO, USER, REG), `answer` (AUT), `resume` (SES), `current` (every request), `sign_out` (OUT), `change` (PWD), `key_issue`, `key_list` and `key_forget` (KEY); the admin calls `suspend`, `reset`, `delete`; `sweep` drops expired sessions, deletes pending accounts past their 24 hours and forgets temporary passwords past theirs. It keeps players and sessions in parlord's SQLite database.
 
 ## Admin panel
 
@@ -212,7 +235,7 @@ Blue-screen menus over telnet, in the manner of dialog and whiptail (a blue scre
 - **Sign-in**: the sign-in method (`none`, `password`) and the sign-up method (`none`, `password`, `email`), each explained, and the label; for sign-up `email`, the SMTP relay (host, port, user, a password typed hidden and never shown, From), the caps below with their counters, the sign-up limits (below), pause and resume sending, and a test email to an address the operator types.
 - **Games**: which installed games and rulesets are offered (Offered: `GAM` lists only those and `NEW` refuses the others; running tables play on), and the limits on tables and games (below).
 - **Adapters**: which server extensions the container starts (web 6500, telnet 6502, IOS 6503, FIBS 6505, Outland 6506, DOoM 6507, GameMaster 6508, admin 6510, NetSprocket 6512, Play 6513, batnav 6514, Awale 6515, Networdz 6516, NetLuff 6517, ICDS 6518, Worthy Opponent 6519, RSCARDS 6520, and the bot, which has no port); a change takes effect when the container restarts.
-- **Accounts**: search by name or address; suspend (ends every session) and unsuspend; reset (`password`: a temporary password shown to the operator to give the player, who signs in with it within 24 hours and chooses a new password, while the old password stops working at once; any method: the lockout is cleared and every session ends); delete (every session ends, and the player's profile, its counts, their recorded turns, their score, the programs and machines kept with their moves, and what the tables were told they played with are deleted too). All of these go through the accounts component.
+- **Accounts**: search by name or address; suspend (ends every session) and unsuspend; reset (`password`: a temporary password shown to the operator to give the player, who signs in with it within 24 hours and chooses a new password, while the old password stops working at once; any method: the lockout is cleared, every session ends and every sign-in key is forgotten); delete (every session ends, and the player's profile, its counts, their recorded turns, their score, the programs and machines kept with their moves, and what the tables were told they played with are deleted too). All of these go through the accounts component.
 - **Tables**: list; end a table (a running game ends with `END abandoned`, an open table is removed).
 - **Scores**: whether the leaderboard is shown (`scores.show`), the points for each result (below), and Reset scores, which after a confirmation sets every player's score back to nothing, at the start of a festival for example. The games stay recorded: their tables, events and turns, and the points each gave. The admin socket's request is `reset_scores`.
 - **Status**: uptime, connections, players, tables, email counters, the budgets (Clear budgets), and the sign-ups: the pending accounts as "n of max", how long each may wait (24 hours), and how many addresses are in their cooldown and for how long. Its Sign-ups button clears the cooldown of one address, typed by the operator (hashed for the lookup, never stored or logged), or of every address after a confirmation ("Clear address cooldowns"). The admin socket's requests are `signups`, `clear_cooldown` (with `address`) and `clear_cooldowns`.
@@ -293,6 +316,6 @@ The cap for new addresses bounds how many bounces a flood of made-up addresses c
 
 ## The database
 
-Players (with their password hashes, temporary password hashes and pending accounts), sessions, tables, games and settings live in one SQLite file, `/data/parlord.db` in the container. A database from before sign-up mailed passwords keeps accounts in another format and is not carried over. When the server starts and finds one, it renames it to `parlord.db.old-<date and time>` (with its `-wal` and `-shm` files) in the same directory, says so in its log, and starts a new, empty database: players, tables and games in progress start over, and the admin menus ask to be set up again with a new setup password. Settings from the environment and the settings file still apply. The old file is left for the operator to keep or delete.
+Players (with their password hashes, temporary password hashes and pending accounts), sessions, sign-in keys (their hashes), tables, games and settings live in one SQLite file, `/data/parlord.db` in the container. A database from before sign-up mailed passwords keeps accounts in another format and is not carried over. When the server starts and finds one, it renames it to `parlord.db.old-<date and time>` (with its `-wal` and `-shm` files) in the same directory, says so in its log, and starts a new, empty database: players, tables and games in progress start over, and the admin menus ask to be set up again with a new setup password. Settings from the environment and the settings file still apply. The old file is left for the operator to keep or delete.
 
 **Operator controls.** The admin menus show the counters, can pause email sending and can change the caps. Every shipped server extension passes its client's address with `SRC` (docs/protocol.md); the public port uses the connection's own. IPv6 addresses are counted by their /48. The Status screen shows the server's wrong-answer and mail budgets, with an alarm when one is used up, and Clear budgets frees them without a restart (each name's lockout and caps stay); it also shows the sign-up limits and clears address cooldowns (Sign-up limits, above).

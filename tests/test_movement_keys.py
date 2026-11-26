@@ -338,7 +338,7 @@ class Login(TelnetBase):
         c.until("4) WASD       W up, A left, S down, D right")
         c.until("Choice [1]: ")
         c.send("2\r\n")
-        c.until("Would you like a two-minute practice game", screen=True)
+        c.until("Would you like a short tutorial", screen=True)
         c.send("n")
         c.until("IJKL pick", screen=True)
         c.send("n")                                         # the game picker: the letters move in it too
@@ -366,8 +366,8 @@ class Login(TelnetBase):
         out = c.until("Press Enter for the lobby")
         self.assertIn("You move the cursor with IJKL, as you chose before.", out)
         c.send("\r\n")
-        c.until("IJKL pick", screen=True)                     # and the practice game is not offered again
-        self.assertNotIn("practice game to learn", c.vt.text())
+        c.until("IJKL pick", screen=True)                     # and the tutorial is not offered again
+        self.assertNotIn("short tutorial on how", c.vt.text())
         c.close()
 
     def hint_says(self, c, text):
@@ -385,7 +385,7 @@ class Login(TelnetBase):
         out = c.until("Press Enter for the lobby.")
         self.assertNotIn("movement keys", out)
         c.send("\r\n")
-        c.until("Would you like a two-minute practice game", screen=True)
+        c.until("Would you like a short tutorial", screen=True)
         c.send("n")
         c.until("Arrows pick", screen=True)
         c.close()

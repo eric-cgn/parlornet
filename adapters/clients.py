@@ -1499,8 +1499,9 @@ def telnet_body(host=HOST, auth=None):
               "in every game, such as <tt>R</tt> to resign. The <tt>/</tt> key opens the command line, where you "
               "type a command such as <tt>/say hello</tt> or a move such as <tt>/d3</tt>. <tt>T</tt> opens the "
               "chat, <tt>?</tt> opens help, and Esc cancels or goes back to the lobby. The line above the keys "
-              "always says what you can do now. A practice game in the lobby teaches the keys, and nothing you "
-              "do there reaches the parlor.") +
+              "always says what you can do now. The tutorial in the lobby teaches the keys, and nothing you do "
+              "there reaches the parlor. Your first sign-in offers it once, and <tt>/tutorial</tt> runs it again "
+              "any time.") +
             h2("keys", "Movement keys") +
             p("If your telnet program sends no arrow keys, letters can move the cursor instead: IJKL, ESDF, WASD "
               "or HJKL (as in vi). Choose them with <tt>/keys</tt> in the lobby, or with <tt>K</tt> at the "

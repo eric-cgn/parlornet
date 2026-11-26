@@ -9,6 +9,7 @@ import sys
 import time
 import unittest
 
+import procs
 from test_core import ROOT, Client as CoreClient, free_port, make_keys
 from test_adapters import Client
 
@@ -402,28 +403,22 @@ class LiveTUI(unittest.TestCase):
     def setUp(self):
         self.core, self.adm, self.tui = free_port(), free_port(), free_port()
         self.keys = make_keys("admin", role="admin")
-        self.p = subprocess.Popen([sys.executable, "-m", "parlord", "--port", str(self.core), "--admin-port",
-                                   str(self.adm), "--admin-telnet", str(self.tui), "--keys", self.keys,
-                                   "--frontend-port", "0"], cwd=ROOT,
-                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        out = b""
+        running = procs.owned(self)
+        self.p = procs.spawn("parlord", "--port", self.core, "--admin-port", self.adm, "--admin-telnet", self.tui,
+                             "--keys", self.keys, "--frontend-port", "0", stderr=subprocess.DEVNULL,
+                             drain_output=False)
+        running.append(self.p)
+        out = self.p.first.encode()
         while out.count(b"=" * 72) < 2:
             line = self.p.stdout.readline()
             self.assertTrue(line, out)
             out += line
+        procs.drain(self.p)
         self.banner = out.decode()
         self.setup = re.search(r"setup password:\s+(\S+)", self.banner).group(1)
-        self.a = subprocess.Popen([sys.executable, "-m", "adapters.admin", "--port", str(self.tui),
-                                   "--core-admin", "127.0.0.1:%d" % self.adm,
-                                   "--key", os.path.join(self.keys, "admin.key")], cwd=ROOT,
-                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        self.a.stdout.readline()
-
-    def tearDown(self):
-        for p in (self.p, self.a):
-            p.kill()
-            p.wait()
-            p.stdout.close()
+        self.a = procs.spawn("adapters.admin", "--port", self.tui, "--core-admin", "127.0.0.1:%d" % self.adm,
+                             "--key", os.path.join(self.keys, "admin.key"), stderr=subprocess.DEVNULL)
+        running.append(self.a)
 
     def greeting(self):
         async def get():

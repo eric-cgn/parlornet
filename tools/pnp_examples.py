@@ -16,8 +16,8 @@ the server over the native protocol; every line sent and received is written int
     # text                                            a note, not part of the session
 
 Values that differ from run to run are written as placeholders: <secs> (seconds left on a turn
-clock), <sid> (a session id), <mailed> (the temporary password in the latest mail), <n> (a wait in
-seconds), <when> (the time of a turn). tests/test_pnp_doc.py replays every block against a fresh server started the same way and
+clock), <sid> (a session id), <key> (a sign-in key), <mailed> (the temporary password in the latest mail),
+<n> (a wait in seconds), <when> (the time of a turn), <date> (a day). tests/test_pnp_doc.py replays every block against a fresh server started the same way and
 fails if a server line differs from the block (a placeholder matches any one word).
 
 The server process seeds Python's random generator before it starts and draws the tables' seeds from
@@ -494,6 +494,32 @@ async def _signup_email_password(r):
     await r.say("B", "AUT password <mailed>")
     await r.say("B", "AUT password " + NEW_PASSWORD)
     await r.say("B", "AUT confirm " + NEW_PASSWORD)
+
+
+DATE_MASK = [(r"\b\d{4}-\d{2}-\d{2}\b", "<date>")]
+
+
+@scenario("stay-signed-in", args=["--auth", "password"])
+async def _stay_signed_in(r):
+    await r.say("A", "REG bo", note="bo makes an account on his Apple IIe, with Stay signed in on.")
+    await r.say("A", "AUT password " + PASSWORD)
+    await r.say("A", "AUT confirm " + PASSWORD)
+    await r.say("A", "CLI MACH Apple IIe", note="The program names the machine; the key is labeled with it.")
+    await r.say("A", "KEY NEW", bind="key", note="Right after the password, the key for this computer. The "
+                "program keeps it, never the password.")
+    await r.say("A", "KEY LST", masks=DATE_MASK, note="The computers where bo stays signed in.")
+    await r.say("B", "USER bo", note="Another day: the key answers the password question, and nothing is asked.")
+    await r.say("B", "AUT key <key>")
+    await r.say("B", "OUT", note="Signing out forgets the key, on the server and in the program.")
+    await r.say("C", "USER bo", note="A key the server no longer has is refused, and counts as a wrong answer.")
+    await r.say("C", "AUT key <key>")
+    await r.say("C", "USER bo", note="The program forgets it and asks for the password.")
+    await r.say("C", "AUT password " + PASSWORD)
+    await r.say("C", "KEY NEW Apple IIe", bind="key", note="Stay signed in is still on, so this sign-in gets "
+                "a new key. A label may come with the request.")
+    await r.say("C", "KEY LST", masks=DATE_MASK)
+    await r.say("C", "KEY DEL all", note="Forget every key: no computer stays signed in as bo.")
+    await r.say("C", "KEY LST")
 
 
 @scenario("sessions", args=NONE, ext=("X", "Y", "Z"))
