@@ -12,6 +12,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import procs  # noqa: E402
 from test_core import free_port  # noqa: E402
 from speed import slow  # noqa: E402
 
@@ -24,11 +25,10 @@ ATZ = os.path.join(ROOT, "tools", "ATZ")
 class Atz(unittest.TestCase):
     def setUp(self):
         self.port, closed = free_port(), free_port()
-        self.parlor = subprocess.Popen([sys.executable, "-m", "parlord", "--host", "127.0.0.1", "--port",
-                                        str(self.port), "--name", "test", "--auth", "none", "--db", ":memory:",
-                                        "--frontend-port", "0", "--admin-port", "0"],
-                                       cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        self.parlor.stdout.readline()           # listening
+        self.parlor = procs.spawn("parlord", "--host", "127.0.0.1", "--port", self.port, "--name", "test",
+                                  "--auth", "none", "--db", ":memory:", "--frontend-port", "0", "--admin-port", "0",
+                                  stderr=subprocess.DEVNULL)
+        self.addCleanup(procs.stop, self.parlor)
         self.closed = closed
         self.tmp = tempfile.TemporaryDirectory()
         self.pid = None
@@ -58,9 +58,6 @@ class Atz(unittest.TestCase):
                 os.kill(self.pid, 9)
                 os.waitpid(self.pid, 0)
             os.close(self.fd)               # an ATZ the shell ran gets SIGHUP
-        self.parlor.kill()
-        self.parlor.wait()
-        self.parlor.stdout.close()
 
     def say(self, data, want=None, secs=5.0):
         """Send data as the period program; what comes back until want has come and the line is quiet."""

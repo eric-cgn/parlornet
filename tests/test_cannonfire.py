@@ -8,6 +8,7 @@ import sys
 import unittest
 
 from game_checks import LONG, ansi_screens, board_image, plain_screen, web_page
+import procs
 from test_adapters import Native, Stack
 from test_core import ROOT, Client, free_port
 
@@ -637,16 +638,11 @@ def harmless(st, seat):
 class OverProtocol(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.port = free_port()
-        self.proc = subprocess.Popen([sys.executable, "-m", "parlord", "--port", str(self.port), "--rate", "1000",
-                                      "--burst", "1000", "--turn-min", "1", "--sweep", "0.5",
-                                      "--auth", "none"],          # sign-in is tested in test_auth and below
-                                     cwd=ROOT, stdout=subprocess.PIPE)
-        self.proc.stdout.readline()
-
-    async def asyncTearDown(self):
-        self.proc.kill()
-        self.proc.wait()
-        self.proc.stdout.close()
+        self.proc = procs.spawn("parlord", "--port", self.port, "--rate", "1000", "--burst", "1000",
+                                "--turn-min", "1", "--sweep", "0.5",
+                                "--auth", "none",           # sign-in is tested in test_auth and below
+                                stderr=None)
+        self.addCleanup(procs.stop, self.proc)
 
     @staticmethod
     def state_from(view):

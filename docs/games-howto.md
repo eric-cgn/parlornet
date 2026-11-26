@@ -144,7 +144,7 @@ Reversi puts what both share in a base class (`ReversiBase(telnet.GameBase)`: `p
 | `play_word(word)` | A move the board's keys make (the default: `self.move(word)`). Backgammon's sends `undo` and `end` as `UND` and `END`, and its drop asks first. |
 | `offer()` | An offer waiting for this player's answer, such as a double or a draw offer, or None. The full screen opens it as a dialog with Accept and Decline, and plain mode asks at the prompt. |
 | `last_move(text)`, `view_last()` | An event as the last-move sentence ("ann placed a disc on d3 and flipped 2."; `self.actor(seat)` says "You" for the player), and the same from the view alone where it carries the last move. |
-| `HELP_MOVING`, `HELP_KEYS`, `HELP_COMMANDS`, `HELP_REFERENCE`, `reference()` | Help's two pages. Page 1 has Moving, Keys for the game, Commands and Every game, and page 2 is the reference, ending with the commands every table takes and the practice game. At most 17 lines a page and 70 columns a line. |
+| `HELP_MOVING`, `HELP_KEYS`, `HELP_COMMANDS`, `HELP_REFERENCE`, `reference()` | Help's two pages. Page 1 has Moving, Keys for the game, Commands and Every game, and page 2 is the reference, ending with the commands every table takes and the tutorial. At most 17 lines a page and 70 columns a line. |
 | `playing()`, `my_turn()` | (the defaults.) Override when "my turn" needs more than `turn` and `moves`, as Backgammon's phases do. |
 | `on_event(text)` | Called for every new event; Backgammon keeps the last roll. |
 

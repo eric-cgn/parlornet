@@ -8,11 +8,11 @@ import re
 import struct
 import subprocess
 import sys
-import threading
 import time
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
+import procs
 from test_adapters import Client, WebPlayers
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 from test_ios import Eclipse, legal, scanf
@@ -186,27 +186,25 @@ class Stack(WebPlayers, unittest.TestCase):
         cls.web, cls.tel, cls.ios, cls.fibs, cls.out = [free_port() for _ in range(5)]
         cls.keys = make_keys("web", "telnet", "ios", "fibs", "outland", "bot")
         args = stack_args(cls.core, cls.fe, cls.keys)[1:] + ["--auth", "none", "--sweep", "0.3"]
-        cls.procs = [cls.spawn("tests.matrix_core", *args),
-                     cls.spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")),
-                     cls.spawn(*adapter_args("adapters.telnet", cls.tel, cls.fe, cls.keys, "telnet")),
-                     cls.spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"), "--prompt-wait", "2"),
-                     cls.spawn(*adapter_args("adapters.fibs", cls.fibs, cls.fe, cls.keys, "fibs"), "--poll", "0.25",
-                               "--prompt-wait", "2"),
-                     cls.spawn(*adapter_args("adapters.outland", cls.out, cls.fe, cls.keys, "outland"), *FAST)]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(cls.spawn("tests.matrix_core", *args))
+        cls.procs.append(cls.spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")))
+        cls.procs.append(cls.spawn(*adapter_args("adapters.telnet", cls.tel, cls.fe, cls.keys, "telnet")))
+        cls.procs.append(cls.spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"),
+                                   "--prompt-wait", "2"))
+        cls.procs.append(cls.spawn(*adapter_args("adapters.fibs", cls.fibs, cls.fe, cls.keys, "fibs"),
+                                   "--poll", "0.25", "--prompt-wait", "2"))
+        cls.procs.append(cls.spawn(*adapter_args("adapters.outland", cls.out, cls.fe, cls.keys, "outland"), *FAST))
         cls.bot_out = []
-        cls.bot = cls.spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", os.path.join(cls.keys, "bot.key"),
-                            "--think", "0,0", "--pace", "0", "--poll", "0.3")
+        cls.bot = procs.spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", os.path.join(cls.keys, "bot.key"),
+                              "--think", "0,0", "--pace", "0", "--poll", "0.3", stderr=subprocess.STDOUT,
+                              out=cls.bot_out)
         cls.procs.append(cls.bot)
-        threading.Thread(target=lambda: [cls.bot_out.append(l) for l in iter(cls.bot.stdout.readline, b"")],
-                         daemon=True).start()
         cls.wait_for_bot()
 
     @staticmethod
     def spawn(*args):
-        p = subprocess.Popen([sys.executable, "-m"] + list(args), cwd=ROOT, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT if args[0] == "bot" else subprocess.DEVNULL)
-        p.stdout.readline()
-        return p
+        return procs.spawn(*args, stderr=subprocess.STDOUT if args[0] == "bot" else subprocess.DEVNULL)
 
     @classmethod
     def wait_for_bot(cls):
@@ -230,10 +228,7 @@ class Stack(WebPlayers, unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
+        procs.stop_all(cls.procs)
 
     def eclipse(self, name):
         c = Eclipse(self.ios)
@@ -454,25 +449,20 @@ class Idle(WebPlayers, unittest.TestCase):
         cls.keys = make_keys("web", "ios", "fibs")
         env = dict(os.environ, PARLOR_ACT_EVERY="0")
         args = stack_args(cls.core, cls.fe, cls.keys)[1:] + ["--auth", "none", "--settings-file", settings]
-        cls.procs = [Stack.spawn("tests.matrix_core", *args),
-                     cls.spawn_env(env, *adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")),
-                     cls.spawn_env(env, *adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios")),
-                     cls.spawn_env(env, *adapter_args("adapters.fibs", cls.fibs, cls.fe, cls.keys, "fibs"),
-                                   "--poll", "0.25")]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(Stack.spawn("tests.matrix_core", *args))
+        cls.procs.append(cls.spawn_env(env, *adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")))
+        cls.procs.append(cls.spawn_env(env, *adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios")))
+        cls.procs.append(cls.spawn_env(env, *adapter_args("adapters.fibs", cls.fibs, cls.fe, cls.keys, "fibs"),
+                                       "--poll", "0.25"))
 
     @staticmethod
     def spawn_env(env, *args):
-        p = subprocess.Popen([sys.executable, "-m"] + list(args), cwd=ROOT, env=env, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL)
-        p.stdout.readline()
-        return p
+        return procs.spawn(*args, env=env, stderr=subprocess.DEVNULL)
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
+        procs.stop_all(cls.procs)
         cls.tmp.cleanup()
 
     def who(self):

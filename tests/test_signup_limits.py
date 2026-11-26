@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 
+import procs
 from test_auth import first_sign_in, mail_password, say, server
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
@@ -351,10 +352,7 @@ class AddressesAsHashes(unittest.IsolatedAsyncioTestCase):
 
 def spawn(*args):
     import subprocess
-    p = subprocess.Popen([sys.executable, "-m"] + list(args), cwd=ROOT, stdout=subprocess.PIPE,
-                         stderr=subprocess.DEVNULL)
-    p.stdout.readline()
-    return p
+    return procs.spawn(*args, stderr=subprocess.DEVNULL)
 
 
 class FrontendsWhenFull(unittest.TestCase):
@@ -368,18 +366,16 @@ class FrontendsWhenFull(unittest.TestCase):
         cls.core, cls.fe = free_port(), free_port()
         cls.web, cls.tel, cls.fibs = free_port(), free_port(), free_port()
         cls.keys = make_keys("web", "telnet", "fibs")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password", "--signup", "email",
-                           "--settings-file", conf)]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password", "--signup", "email",
+                               "--settings-file", conf))
         for mod, port, name in (("adapters.web", cls.web, "web"), ("adapters.telnet", cls.tel, "telnet"),
                                 ("adapters.fibs", cls.fibs, "fibs")):
             cls.procs.append(spawn(*adapter_args(mod, port, cls.fe, cls.keys, name)))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
+        procs.stop_all(cls.procs)
         cls.dir.cleanup()
 
     def test_web_telnet_and_fibs(self):

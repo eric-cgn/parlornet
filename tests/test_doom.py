@@ -19,11 +19,12 @@ import re
 import socket
 import sys
 import tempfile
-import threading
 import time
 import unittest
 
-from test_adapters import WebPlayers, spawn
+import procs
+from procs import owned, spawn
+from test_adapters import WebPlayers
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 from test_gridwords import WORDS, apply, best_play, form_fields, new_state, put, write_words
 
@@ -33,6 +34,7 @@ from adapters.common import MOTD_BOTTOM, MOTD_TOP  # noqa: E402
 from speed import slow  # noqa: E402
 
 WAIT = 20
+GUIDE = "   a b c d e f g"     # the start of the column guide, above and below a board
 MOTD = ["Welcome to the test parlor.", "Be kind."]
 
 
@@ -61,6 +63,8 @@ def bobgrid_board(lines, me=""):
                 rack, rest = rest[0], rest[1:]
                 if name.lower() == me.lower():
                     out["rack"] = rack
+            assert len(rest) >= 2, ("a player's row with no score and clock after the rack (this reader, as "
+                                    "ported, takes a negative score for a rack)", line)
             score, t = rest[0], rest[1].rjust(5)
             assert t[2] == ":", ("BobGrid's clock needs MM:SS", line)
             names[row] = name
@@ -161,6 +165,21 @@ class Lines:
             if pred(l):
                 return got
 
+    def board_rows(self, timeout=WAIT):
+        """The rest of a board whose top guide line was just read: the border, fifteen rows, the border and the
+        bottom guide, read up to that guide however the lines arrive. A board that is not whole fails here,
+        with its lines, rather than in a reader."""
+        rows = []
+        end = time.time() + timeout
+        while not (rows and rows[-1].startswith(GUIDE)):
+            if len(rows) >= 18:
+                break
+            rows.append(self.line(max(0.1, end - time.time())))
+        whole = (len(rows) == 18 and rows[-1].startswith(GUIDE) and rows[0].startswith("  +")
+                 and rows[16].startswith("  +") and all(re.match(r"[ \d]\d\|", r) for r in rows[1:16]))
+        assert whole, "not a whole board after the guide line: %r" % (rows,)
+        return rows
+
     def until_raw(self, text, timeout=WAIT):
         end = time.time() + timeout
         while text.encode() not in self.buf:
@@ -186,8 +205,8 @@ class Telnet(Lines):
     def board(self):
         """`b', read the way BobGrid reads it."""
         self.send("b")
-        self.until(lambda l: l.startswith("   a b c d e f g"))
-        rows = [self.line() for _ in range(18)]
+        self.until(lambda l: l.startswith(GUIDE))
+        rows = self.board_rows()
         return bobgrid_board(rows, self.me), rows
 
 
@@ -217,8 +236,8 @@ class BobGrid(Lines):
                 if not self.queue:
                     continue
             l = self.queue.pop(0)
-            if l.startswith("   a b c d e f g"):
-                self.state = bobgrid_board([self.line() for _ in range(18)], self.me)
+            if l.startswith(GUIDE):
+                self.state = bobgrid_board(self.board_rows(), self.me)
             elif l.startswith("[BEGIN]"):
                 self.read_tagged()
             if l.endswith("starts the clock.") or l.endswith("plays out.") or l.endswith("ends the game."):
@@ -385,21 +404,18 @@ class Stack(WebPlayers, unittest.TestCase):
             f.write("\n".join(MOTD) + "\n")
         cls.core, cls.fe, cls.doom, cls.web = free_port(), free_port(), free_port(), free_port()
         cls.keys = make_keys("doom", "web", "bot")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password", "--motd", cls.motd_file),
-                     spawn(*adapter_args("adapters.doom", cls.doom, cls.fe, cls.keys, "doom"), "--poll", "0.2",
-                           "--prompt-wait", "3"),
-                     spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web"))]
+        cls.procs = owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password", "--motd",
+                               cls.motd_file))
+        cls.procs.append(spawn(*adapter_args("adapters.doom", cls.doom, cls.fe, cls.keys, "doom"), "--poll", "0.2",
+                               "--prompt-wait", "3"))
+        cls.procs.append(spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")))
         cls.procs.append(spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", os.path.join(cls.keys, "bot.key"),
                                "--think", "0,0", "--pace", "0", "--poll", "0.3", "--gridwords-secs", "0.3"))
-        for p in cls.procs:         # nobody reads their output: drain it, so no pipe fills up
-            for f in (p.stdout, p.stderr):
-                threading.Thread(target=lambda f=f: [None for _ in iter(f.readline, b"")], daemon=True).start()
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
+        procs.stop_all(cls.procs)
         if cls.old_words is None:
             os.environ.pop("GRIDWORDS_WORDS", None)
         else:

@@ -5,7 +5,6 @@ import http.client
 import os
 import re
 import socket
-import subprocess
 import sys
 import time
 import unittest
@@ -15,19 +14,14 @@ from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
 from adapters import telnet as T  # noqa: E402
+import procs  # noqa: E402
+from procs import owned, spawn  # noqa: E402,F401  (the extension tests import spawn from here)
 from speed import slow  # noqa: E402
 
 
 def plain(html):
     """A page without its FONT tags (the site's faces and sizes), for checks on the markup around the text."""
     return re.sub(r"</?font[^>]*>", "", html)
-
-
-def spawn(*args):
-    p = subprocess.Popen([sys.executable, "-m"] + list(args), cwd=ROOT, stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE)
-    p.stdout.readline()
-    return p
 
 
 class Stack(unittest.TestCase):
@@ -38,17 +32,16 @@ class Stack(unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe, cls.web_port, cls.tel_port = free_port(), free_port(), free_port(), free_port()
         cls.keys = make_keys("web", "telnet")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", cls.auth, *cls.core_extra)]
-        cls.procs.append(spawn(*adapter_args("adapters.web", cls.web_port, cls.fe, cls.keys, "web")))
-        cls.procs.append(spawn(*adapter_args("adapters.telnet", cls.tel_port, cls.fe, cls.keys, "telnet")))
+        cls.procs = owned(cls)
+        cls.output = []         # every line the processes print, for the tests that check what is logged
+        out = dict(out=cls.output, err=cls.output)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", cls.auth, *cls.core_extra, **out))
+        cls.procs.append(spawn(*adapter_args("adapters.web", cls.web_port, cls.fe, cls.keys, "web"), **out))
+        cls.procs.append(spawn(*adapter_args("adapters.telnet", cls.tel_port, cls.fe, cls.keys, "telnet"), **out))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)
 
     def get(self, path, host="parlornet.org:6500"):
         c = http.client.HTTPConnection("127.0.0.1", self.web_port, timeout=5)
@@ -1148,8 +1141,8 @@ class TelnetBase(Stack):
                 c.send(pw + "\r\n")
         out = c.until("Press Enter for the lobby")
         c.send("\r\n")
-        if c.display != "4":                    # the first sign-in on a full screen offers the practice game
-            c.until("Would you like a two-minute practice game", screen=True)
+        if c.display != "4":                    # the first sign-in on a full screen offers the tutorial
+            c.until("Would you like a short tutorial", screen=True)
             c.send("n")
         c.until("Your tables", screen=c.display != "4")
         return out
@@ -1564,7 +1557,7 @@ class TelnetScreens(unittest.TestCase):
                          "Type your password first.", "Your password is changed", "their move", "your move", "/xyz"):
                 self.assertIn(want, text, mode)
             empty = self.run_menu(mode, ["DOWN"], tabs=[])
-            self.assertIn("The practice game teaches the keys.", "\n".join(empty.screens[-1]))
+            self.assertIn("The tutorial teaches the keys.", "\n".join(empty.screens[-1]))
 
     def test_boards(self):
         for mode in ("pc", "utf8", "ansi"):
@@ -1858,7 +1851,7 @@ class NewTableTelnet(unittest.TestCase):
         s = T.Session(FakeIO("pc"), self.core(), "pc", "ann")
         menu = T.AnsiMenu(s)
         asyncio.run(menu.load())
-        self.assertFalse([it for it in menu.items if it[0] not in ("table", "invite", "practice")])  # no new-table rows
+        self.assertFalse([it for it in menu.items if it[0] not in ("table", "invite", "tutorial")])  # no new-table rows
         reqs, text = self.run_new("pc", ["reversi"], ["ENTER", "ENTER"], whom=None)     # a day a turn, the bot
         self.assertIn("Whom do you want to play?", text)
         self.assertIn("Reversi against the bot", text)

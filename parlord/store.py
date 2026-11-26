@@ -1,13 +1,13 @@
 """SQLite storage for parlord: players, sessions, tables (with game state),
 events, invitations, each table's notes and data, the turns played (who, with which client program, on
-which machine), the players' profiles and their scores. Passwords (temporary ones too) are stored as scrypt
-hashes, session ids as SHA-256 hashes, and the mail tables' addresses as keyed hashes
-(docs/security-design.md, data at rest).
+which machine), the players' profiles and their scores, and the sign-in keys of the computers where players
+stay signed in. Passwords (temporary ones too) are stored as scrypt hashes, session ids and sign-in keys as
+SHA-256 hashes, and the mail tables' addresses as keyed hashes (docs/security-design.md, data at rest).
 
 A database in an earlier format (players without the temp column: from before sign-up mailed a
 password) is not migrated: it is moved aside to <path>.old-<date and time> and a new one is made. A later
-one gains the tables it lacks, and the events table gains the columns it lacks (MIGRATE_COLUMNS), so
-everything it held is kept.
+one gains the tables it lacks (CREATE TABLE IF NOT EXISTS: the sign-in keys' table, say), and its tables
+gain the columns they lack (MIGRATE_COLUMNS), so everything it held is kept.
 
 Write-through: every change is saved when it happens, and the server loads
 everything back on start, so a restart loses nothing."""
@@ -43,7 +43,10 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions (
     hash TEXT PRIMARY KEY, player TEXT NOT NULL, frontend TEXT NOT NULL, method TEXT NOT NULL,
-    created REAL NOT NULL, used REAL NOT NULL, fp TEXT NOT NULL DEFAULT '');
+    created REAL NOT NULL, used REAL NOT NULL, fp TEXT NOT NULL DEFAULT '', devkey INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS signin_keys (player TEXT NOT NULL, n INTEGER NOT NULL, hash TEXT NOT NULL UNIQUE,
+    frontend TEXT NOT NULL DEFAULT '', label TEXT NOT NULL DEFAULT '', created REAL NOT NULL, used REAL NOT NULL,
+    PRIMARY KEY (player, n));
 CREATE TABLE IF NOT EXISTS email_log (addr TEXT NOT NULL, name TEXT NOT NULL, at REAL NOT NULL, new INTEGER NOT NULL,
     kind TEXT NOT NULL DEFAULT 'signup', source TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS email_blocked (addr TEXT PRIMARY KEY, why TEXT NOT NULL, at REAL NOT NULL);
@@ -77,6 +80,7 @@ MIGRATE_COLUMNS = [
     ("events", "client", "TEXT NOT NULL DEFAULT ''"),     # ... the client program they said they used (CLI)
     ("events", "machine", "TEXT NOT NULL DEFAULT ''"),    # ... and the machine
     ("tables", "clients", "TEXT NOT NULL DEFAULT '{}'"),  # what each seat's player plays with (CLIENT events)
+    ("sessions", "devkey", "INTEGER NOT NULL DEFAULT 0"),  # the sign-in key the session signed in with or was given
 ]
 
 
@@ -184,6 +188,7 @@ class Store:
     def delete_player(self, name):
         self.db.execute("DELETE FROM players WHERE key=?", (name.lower(),))
         self.db.execute("DELETE FROM sessions WHERE player=?", (name.lower(),))
+        self.db.execute("DELETE FROM signin_keys WHERE player=?", (name.lower(),))
         self.db.execute("DELETE FROM prefs WHERE player=?", (name.lower(),))
         self.db.execute("DELETE FROM profiles WHERE player=?", (name.lower(),))
         self.db.execute("DELETE FROM playstats WHERE player=?", (name.lower(),))
@@ -324,9 +329,12 @@ class Store:
 
     # ---- sessions (only hashes of the ids) -------------------------------
     def save_session(self, rec):
-        self.db.execute("INSERT OR REPLACE INTO sessions (hash, player, frontend, method, created, used, fp)"
-                        " VALUES (?,?,?,?,?,?,?)", (rec.hash, rec.key, rec.frontend, rec.method, rec.created, rec.used,
-                                                    rec.fp or ""))
+        self.db.execute("INSERT OR REPLACE INTO sessions (hash, player, frontend, method, created, used, fp, devkey)"
+                        " VALUES (?,?,?,?,?,?,?,?)", (rec.hash, rec.key, rec.frontend, rec.method, rec.created,
+                                                      rec.used, rec.fp or "", rec.devkey or 0))
+
+    def set_session_devkey(self, h, n):
+        self.db.execute("UPDATE sessions SET devkey=? WHERE hash=?", (n or 0, h))
 
     def touch_session(self, h, used):
         self.db.execute("UPDATE sessions SET used=? WHERE hash=?", (used, h))
@@ -338,7 +346,45 @@ class Store:
         self.db.execute("DELETE FROM sessions WHERE player=? AND hash IS NOT ?", (key, keep))
 
     def load_sessions(self):
-        return self.db.execute("SELECT hash, player, frontend, method, created, used, fp FROM sessions").fetchall()
+        return self.db.execute("SELECT hash, player, frontend, method, created, used, fp, devkey FROM sessions"
+                               ).fetchall()
+
+    # ---- sign-in keys: the computers where a player stays signed in (only hashes of the keys) ------
+    def add_key(self, player, h, frontend, label, at):
+        """A new key for player; returns its number. Numbers count up across the server and are never used
+        again (meta keys:next), so a number a session still holds never names a later key."""
+        n = max(int(self.get("keys:next", "1") or 1),
+                (self.db.execute("SELECT MAX(n) FROM signin_keys").fetchone()[0] or 0) + 1)
+        self.set("keys:next", n + 1)
+        self.db.execute("INSERT INTO signin_keys (player, n, hash, frontend, label, created, used) VALUES (?,?,?,?,?,?,?)",
+                        (player, n, h, frontend or "", label or "", at, at))
+        return n
+
+    def keys_of(self, player):
+        """[(n, hash, frontend, label, created, used)] of one player, by number."""
+        return self.db.execute("SELECT n, hash, frontend, label, created, used FROM signin_keys WHERE player=?"
+                               " ORDER BY n", (player,)).fetchall()
+
+    def touch_key(self, player, n, at):
+        self.db.execute("UPDATE signin_keys SET used=? WHERE player=? AND n=?", (at, player, n))
+
+    def delete_key(self, player, n):
+        """Forget one key; returns 1 if it was there, else 0."""
+        had = self.db.execute("SELECT COUNT(*) FROM signin_keys WHERE player=? AND n=?", (player, n)).fetchone()[0]
+        self.db.execute("DELETE FROM signin_keys WHERE player=? AND n=?", (player, n))
+        return had
+
+    def delete_keys(self, player):
+        """Forget every key of a player; returns how many there were."""
+        had = self.db.execute("SELECT COUNT(*) FROM signin_keys WHERE player=?", (player,)).fetchone()[0]
+        self.db.execute("DELETE FROM signin_keys WHERE player=?", (player,))
+        return had
+
+    def forget_unused_keys(self, before):
+        """Forget the keys last used before then (expired); returns how many."""
+        had = self.db.execute("SELECT COUNT(*) FROM signin_keys WHERE used < ?", (before,)).fetchone()[0]
+        self.db.execute("DELETE FROM signin_keys WHERE used < ?", (before,))
+        return had
 
     def settings(self):
         rows = self.db.execute("SELECT key, value FROM meta WHERE key LIKE 'set:%'").fetchall()

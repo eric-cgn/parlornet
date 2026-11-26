@@ -14,7 +14,7 @@ import sys
 import time
 
 from . import DOCS_URL, PROJECT_URL, bots, commands, frontends, native
-from .accounts import STEP_KINDS, Accounts, Player, source_key  # noqa: F401  (Player: for code that imports it from here)
+from .accounts import KEY_LABEL_LEN, STEP_KINDS, Accounts, Player, source_key  # noqa: F401  (Player: for code that imports it from here)
 from .store import Store
 
 VERSION = 1
@@ -440,6 +440,7 @@ class Session:
         self.signin = None
         self.pending = None
         self.ses_fails = 0
+        self.key_ok = False               # it may ask for a sign-in key now (KEY NEW): right after a password
         self.mails = 0
         self.can = STEP_KINDS             # the sign-in step kinds this client can show (CAN)
         self.prog = ""                    # what the client says it is (CLI PROG), cleaned; "" if it did not say
@@ -1419,6 +1420,32 @@ class Server:
         if active:
             sess.player.active = time.time()    # signing in is activity
         return [ok(*r[2])]
+
+    # ---- staying signed in: sign-in keys (KEY; docs/protocol.md, Staying signed in) ------------------
+    async def cmd_key(self, sess, args, line):
+        """KEY NEW [label]: a sign-in key for this computer, right after signing in with the password: OK key.
+        KEY LST: the player's keys, KEY n made used here|- label lines, then OK count. KEY DEL: forget this
+        session's key; KEY DEL n: a listed one; KEY DEL all: every one. OK count. The key is a credential:
+        it is on the OK line once and nowhere else, and it is never logged."""
+        sub = args[0].upper() if args else ""
+        if sub == "NEW":
+            label = clean_claim(line.strip().split(None, 2)[2] if len(args) > 1 else "", KEY_LABEL_LEN)
+            r = self.accounts.key_issue(sess, label or sess.mach or sess.prog or "unnamed")
+            return [err(r[1], r[2])] if r[0] == "err" else [ok(r[1])]
+        if sub == "LST" and len(args) == 1:
+            rows = self.accounts.key_list(sess)
+            day = lambda at: time.strftime("%Y-%m-%d", time.gmtime(at))     # noqa: E731
+            return ["KEY %d %s %s %s %s" % (n, day(made), day(used), "here" if here else "-", label)
+                    for n, made, used, here, label in rows] + [ok(len(rows))]
+        if sub == "DEL" and len(args) <= 2:
+            which = args[1].lower() if len(args) > 1 else None
+            if which is not None and which != "all":
+                if not re.match(r"^[0-9]{1,9}\Z", which):
+                    return [err("SYNTAX", "KEY DEL, KEY DEL n or KEY DEL all")]
+                which = int(which)
+            r = self.accounts.key_forget(sess, which)
+            return [err(r[1], r[2])] if r[0] == "err" else [ok(r[1])]
+        return [err("SYNTAX", "KEY NEW [label], KEY LST, KEY DEL, KEY DEL n or KEY DEL all")]
 
     async def cmd_bye(self, sess, args, line):
         sess.closing = True

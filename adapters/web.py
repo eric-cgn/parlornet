@@ -7,6 +7,9 @@ tables, forms, links and GIFs, a game's board as one image with an image map
 separate pages; each relays the core's dialog (ASK labels) through POST forms;
 the session id the core issues goes in a cookie (pn), or for browsers that do
 not return cookies in the links (s=). Every page resumes the session with SES.
+With "Stay signed in" checked on the sign-in form, the core's sign-in key for
+this browser goes in a long-lived cookie of its own (pnkey), and a visit with
+no session signs in with it (docs/accounts.md, Staying signed in).
 Actions carry x=, an HMAC of the session id, against cross-site requests.
 Credentials never appear in a URL or a page (docs/security-design.md).
 Pages end in .htm. Every page is built in one frame with one palette
@@ -76,11 +79,15 @@ HANDOFF_SECS = 60           # the one-time handle on the redirect after sign-in
 SES_FAIL_LIMIT = (10, 600)  # failed resumes per client address in that many seconds, then no more tries
 MAX_BODY = 2048
 COOKIE = "pn"
+KEY_COOKIE = "pnkey"        # Stay signed in: name.key, the core's sign-in key for this browser
+KEY_COOKIE_SECS = 400 * 86400    # the longest a browser keeps a cookie (the core forgets a key unused 90 days)
+KEY_COOKIE_RE = re.compile(r"^([A-Za-z0-9_-]{1,12})\.([A-Za-z0-9_-]{22})\Z")
+KEY_LABEL_LEN = 32          # a key's label, as the core keeps it (parlord.accounts.KEY_LABEL_LEN)
 AUTO_PATHS = ("/seq.htm", "/board.gif")    # what a page asks for on its own: not the player's activity
 # requests that change something: they need x= (the session's HMAC), so another site cannot make them
 ACTIONS = ("/new.htm", "/join.htm", "/invite.htm", "/uninvite.htm", "/leave.htm", "/resign.htm", "/und.htm",
            "/end.htm", "/move.htm", "/check.htm", "/password.htm", "/out.htm", "/click.htm", "/colours.htm",
-           "/note.htm", "/bghome.htm", "/profile.htm")
+           "/note.htm", "/bghome.htm", "/profile.htm", "/forget.htm")
 MAX_FIELDS = 16             # query or form fields in one request (the colors form has the most)
 # Keep-alive: a connection may carry this many requests, waiting this long between them; offered only while
 # the adapter and the client's address are well under their limits (MAX_REQUESTS, REQUESTS_PER_ADDR).
@@ -691,6 +698,26 @@ def set_cookie(sid):
 CLEAR_COOKIE = "Set-Cookie: %s=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n" % COOKIE
 
 
+def set_key_cookie(req, name, key):
+    """Stay signed in: the sign-in key in a cookie of its own for a long time, never readable by scripts, sent
+    with links from other sites only for a plain visit (Lax), and only over https when the page came that way."""
+    return "Set-Cookie: %s=%s.%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax%s\r\n" % (
+        KEY_COOKIE, name, key, KEY_COOKIE_SECS, "; Secure" if req.get("proto") == "https" else "")
+
+
+CLEAR_KEY = "Set-Cookie: %s=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n" % KEY_COOKIE
+
+
+def cookie_key(req):
+    """(name, key) from the Stay signed in cookie, or None."""
+    for part in req["headers"].get("cookie", "").split(";"):
+        k, _, v = part.strip().partition("=")
+        m = KEY_COOKIE_RE.match(v) if k == KEY_COOKIE else None
+        if m:
+            return m.group(1), m.group(2)
+    return None
+
+
 def cookie_sid(req):
     for part in req["headers"].get("cookie", "").split(";"):
         k, _, v = part.strip().partition("=")
@@ -706,8 +733,10 @@ def hidden_fields(href):
 
 
 def err_reason(text):
-    """'wait=60 Wrong code; ...' -> 'Wrong code; ...' (the wait is for programs)."""
-    return re.sub(r"^wait=\d+ ", "", text).capitalize()
+    """'wait=60 Wrong code; ...' -> 'Wrong code; ...' (the wait is for programs). Only the first letter is
+    made a capital, so a second sentence and a name keep theirs."""
+    text = re.sub(r"^wait=\d+ ", "", text)
+    return text[:1].upper() + text[1:]
 
 
 # ---- pages --------------------------------------------------------------------
@@ -724,7 +753,8 @@ def signin_form(auth, name=""):
     method, label = auth[0], auth[1]
     cred = ""
     if method != "none":
-        cred = ' &nbsp; %s: <input type="password" name="k" size="16" maxlength="64">' % esc(label)
+        cred = (' &nbsp; %s: <input type="password" name="k" size="16" maxlength="64">'
+                ' &nbsp; <input type="checkbox" name="stay" value="1"> Stay signed in' % esc(label))
     return ('<form action="%s" method="post">\n<p>%s</p>\n</form>\n'
             % (SIGNIN_PAGE, font('Your name: <input name="n" value="%s" size="12" maxlength="12">%s '
                                  '<input type="submit" value="Sign in">' % (esc(name), cred))))
@@ -1169,9 +1199,28 @@ def activity_page(link, turns, gam):
     return respond(200, page("ParlorNet activity", body, nav=signed_in_nav(link), compact=True))
 
 
-def player_page(me, link, prof, turns, gam):
+STAY_NOTES = {"forgot": "That computer will sign in with the password next time.",
+              "kept": "That computer was not on the list. It may have been forgotten already."}
+
+
+def keys_html(link, keys):
+    """Your own profile's Stay signed in list (KEY LST): each computer with when it was made and last used,
+    and a link to forget it (KEY DEL n), then one to forget them all."""
+    rows = [[esc(k["label"]) + (" <b>(this browser)</b>" if k["here"] else ""), esc(k["made"]), esc(k["used"]),
+             a(link("/forget.htm", n=k["n"]), "Forget")] for k in keys]
+    return (h2(None, "Stay signed in") +
+            p("These computers stay signed in as you. Each one forgets you when you sign out there, and all of "
+              "them do when you change your password. A computer you leave unused for a while (90 days unless "
+              "this server says otherwise) is forgotten too. Forget any you do not know or no longer use.") +
+            (data_table(["Computer", "Made", "Last used", ""], rows, None, (None, None, None, None)) +
+             p(a(link("/forget.htm", n="all"), "Forget them all"), 2)
+             if rows else p("No computer stays signed in as you. Check Stay signed in when you sign in.", 2)))
+
+
+def player_page(me, link, prof, turns, gam, keys=None, note=""):
     """/player.htm?who=name: a player's profile, from PFL (what they entered, and what was counted at public
-    tables) and their latest public turns (FEED n name)."""
+    tables) and their latest public turns (FEED n name). keys: on your own profile, the computers where you
+    stay signed in (KEY LST); note: forgot or kept, after forgetting one."""
     name = prof["name"]
     mine = name.lower() == me.lower()
     pref = (p("Preferred machine: <b>%s</b>" % esc(prof["pref"])) if prof["pref"] else
@@ -1188,8 +1237,8 @@ def player_page(me, link, prof, turns, gam):
               p("No games played to the end at public tables yet.", 2))
     used = "<br>\n".join(data_table([title, "Turns"], [[esc(v), str(n)] for v, n in items], None, (None, "right"))
                          for title, items in (("Program", prof["progs"]), ("Machine", prof["machs"])) if items)
-    body = (h1(esc(name)) + pref +
-            h2(None, "Games") + played +
+    body = (h1(esc(name)) + (p("<b>%s</b>" % esc(STAY_NOTES[note])) if mine and note in STAY_NOTES else "") +
+            pref + h2(None, "Games") + played +
             h2(None, "Played with") +
             (used or p("No program or machine named yet: a program that says what it is (with CLI) shows up "
                        "here.", 2)) +
@@ -1197,7 +1246,8 @@ def player_page(me, link, prof, turns, gam):
             ("<ul>\n%s</ul>\n" % "".join("<li>%s\n" % turn_html(t, link, gam) for t in turns) if turns else
              p("No turns at public tables yet.", 2)) +
             p("The games and what they were played with are counted from public tables only." +
-              (" The score counts every game." if sc else ""), 1))
+              (" The score counts every game." if sc else ""), 1) +
+            (keys_html(link, keys) if mine and keys is not None else ""))
     return respond(200, page("ParlorNet: %s" % name, body, nav=signed_in_nav(link), compact=True))
 
 
@@ -1444,12 +1494,13 @@ class Dialogue:
     """A sign-in, sign-up or password change waiting for its next answer;
     born: when its first page was made (kept across its steps); kind: signin,
     signup or change (the heading of its pages, and where a refusal goes)."""
-    __slots__ = ("core", "name", "until", "done", "addr", "born", "kind")
+    __slots__ = ("core", "name", "until", "done", "addr", "born", "kind", "stay")
 
-    def __init__(self, core, name, until, done, addr, born=None, kind="signin"):
+    def __init__(self, core, name, until, done, addr, born=None, kind="signin", stay=False):
         self.core, self.name, self.until, self.done, self.addr = core, name, until, done, addr
         self.born = born or time.time()
         self.kind = kind
+        self.stay = stay            # Stay signed in was checked: a sign-in key when the dialog ends
 
 
 class Web:
@@ -1707,8 +1758,8 @@ class Web:
         if path == SIGNIN_PAGE:
             if req["method"] == "POST":
                 return await self.login(req, req["form"])
-            if cookie_sid(req):         # signed in already, most likely: the lobby (it asks again if not)
-                return redirect(req, "/lobby.htm")
+            if cookie_sid(req) or cookie_key(req):      # signed in already, most likely: the lobby (it asks
+                return redirect(req, "/lobby.htm")      # again if not, or signs in with the key)
             return await self.signin_page(req)      # GET never signs in: credentials go by POST only
         if path == SIGNUP_PAGE:
             if req["method"] == "POST":
@@ -1717,6 +1768,8 @@ class Web:
         self.sweep_signins()
         sid, cookieless = self.session_of(req, q)
         if sid is None:
+            if cookie_key(req):             # Stay signed in: sign in with the key, no question asked
+                return await self.key_signin(req, "Sign in to play.")
             return await self.signin_page(req, "Sign in to play." if path != "/lobby.htm" or q else "")
         addr = req["src"]
         if not self.resume_allowed(addr, sid):
@@ -1728,6 +1781,8 @@ class Web:
             except CoreError:
                 self.ses_fails.setdefault(addr, []).append(time.time())
                 self.good.pop(hashlib.sha256(sid.encode("ascii", "replace")).hexdigest(), None)
+                if not cookieless and cookie_key(req):
+                    return await self.key_signin(req, "Your session has ended; sign in again.", CLEAR_COOKIE)
                 return await self.signin_page(req, "Your session has ended; sign in again.",
                                               extra="" if cookieless else CLEAR_COOKIE)
             self.good[hashlib.sha256(sid.encode("ascii", "replace")).hexdigest()] = time.time()
@@ -1770,18 +1825,20 @@ class Web:
             try:
                 sid = await core.aut(field, value)
             except NeedAuth as ask:
-                return self.ask(req, core, name, ask, done, entry.born, kind)
+                return self.ask(req, core, name, ask, done, entry.born, kind, entry.stay)
             except CoreError as e:
                 core.close()
                 if done:
                     return error_page(err_reason(str(e)), done)
                 return await self.flow_page(req, kind, err_reason(str(e)), name)
+            extra = await self.stay_signed_in(req, core, name) if entry.stay and not done else ""
             core.close()
             if done:
                 return redirect(req, done + ("&" if "?" in done else "?") + "note=password")
-            return self.signed_in(req, sid)
+            return self.signed_in(req, sid, extra)
         name = (q.get("n") or [""])[0].strip()
         cred = (q.get("k") or [""])[0].strip() or None      # answers the credential question only, if asked
+        stay = (q.get("stay") or [""])[0] == "1"
         if not NAME_RE.match(name):
             return await self.signin_page(req, NAMES_RULE)
         if not self.make_room(req["src"]):
@@ -1795,13 +1852,42 @@ class Web:
                     raise
                 sid = await core.aut(ask.field, cred)
         except NeedAuth as ask:
-            return self.ask(req, core, name, ask)
+            return self.ask(req, core, name, ask, stay=stay)
         except CoreError as e:
             core.close()
             if e.code == "NOPLAYER":
                 return await self.signin_page(req, unknown_name_html(name), name, raw=True)
             return await self.signin_page(req, err_reason(str(e)), name)
+        extra = await self.stay_signed_in(req, core, name) if stay else ""
         core.close()
+        return self.signed_in(req, sid, extra)
+
+    async def stay_signed_in(self, req, core, name):
+        """Stay signed in was checked and the sign-in succeeded: a sign-in key for this browser, named after
+        it (its program and machine), in the key cookie. "" when the core gives none."""
+        prog, mach = browser_claim(req["headers"].get("user-agent", ""))
+        label = " on ".join(x for x in (prog, mach) if x)
+        label = (label if len(label) <= KEY_LABEL_LEN else prog or mach) or "a web browser"
+        try:
+            key = await core.key_new(label)
+        except CoreError:
+            key = None
+        return set_key_cookie(req, core.name or name, key) if key else ""
+
+    async def key_signin(self, req, message, extra=""):
+        """A visit with no session and the Stay signed in cookie: sign in with its key (no question is asked)
+        and go on to the lobby. A key the core refuses is forgotten here too (the cookie is cleared), and the
+        sign-in page asks for the password. For anything else, such as a busy server, the cookie is kept."""
+        name, key = cookie_key(req)
+        core = await self.connect(req)
+        try:
+            sid = await core.key_signin(name, key)
+        except CoreError as e:
+            gone = e.code in ("NOKEY", "NOPLAYER", "SUSPENDED", "STATE")
+            return await self.signin_page(req, message if gone and e.code != "NOKEY" else err_reason(str(e)), name,
+                                          extra=extra + (CLEAR_KEY if gone else ""))
+        finally:
+            core.close()
         return self.signed_in(req, sid)
 
     async def signup(self, req, q):
@@ -1826,24 +1912,25 @@ class Web:
         core.close()
         return self.signed_in(req, sid)
 
-    def ask(self, req, core, name, ask, done=None, born=None, kind=None):
+    def ask(self, req, core, name, ask, done=None, born=None, kind=None, stay=False):
         """Keep the dialog (and its core connection) for the next answer."""
         if not self.make_room(req["src"]):
             core.close()
             return notice(BUSY[0], BUSY[1], BUSY[2], status=503)
         kind = kind or ("change" if done else "signin")
         lid = secrets.token_urlsafe(16)
-        self.signins[lid] = Dialogue(core, name, time.time() + SIGNIN_IDLE_SECS, done, req["src"], born, kind)
+        self.signins[lid] = Dialogue(core, name, time.time() + SIGNIN_IDLE_SECS, done, req["src"], born, kind,
+                                     stay)
         return ask_page(lid, ask, kind=kind)
 
-    def signed_in(self, req, sid):
+    def signed_in(self, req, sid, extra=""):
         """The session goes in a cookie; the redirect carries a one-time handle
         (not the session) so that a browser that drops cookies can still be
-        given its session in links."""
+        given its session in links. extra: more headers (the Stay signed in cookie)."""
         h = secrets.token_urlsafe(12)
         self.handoffs[h] = (sid, time.time() + HANDOFF_SECS)
         self.good[hashlib.sha256(sid.encode("ascii", "replace")).hexdigest()] = time.time()   # it resumes even past the address's limit
-        return redirect(req, url("/lobby.htm", h=h), set_cookie(sid))
+        return redirect(req, url("/lobby.htm", h=h), set_cookie(sid) + extra)
 
     def linker(self, sid, cookieless, rate, js):
         """The link maker for a signed-in page: a link keeps the session (only for browsers without
@@ -1878,7 +1965,8 @@ class Web:
             everywhere = arg("all") == "1"
             await core.out(everywhere)
             self.good.pop(hashlib.sha256(sid.encode("ascii", "replace")).hexdigest(), None)    # the bar: signed out
-            return await self.welcome(req, "Signed out%s." % (" everywhere" if everywhere else ""), CLEAR_COOKIE)
+            return await self.welcome(req, "Signed out%s." % (" everywhere" if everywhere else ""),
+                                      CLEAR_COOKIE + CLEAR_KEY)     # signing out forgets the key, here and there
         if path == "/password.htm":
             # the server's change flow, as pages; this connection stays open between them
             try:
@@ -1949,8 +2037,26 @@ class Web:
             prof = parse_profile(pdata)
             gdata, _ = await core.req("GAM")
             fdata, final = await core.req("FEED %d %s" % (PLAYER_TURNS, prof["name"] or who))
+            keys = None
+            if (prof["name"] or who).lower() == me.lower():     # your own: the computers where you stay signed in
+                try:
+                    keys = await core.keys()
+                except CoreError:
+                    keys = None
             return player_page(me, link, prof, parse_turns(fdata) if final.startswith("OK") else [],
-                               parse_games(gdata))
+                               parse_games(gdata), keys, arg("note"))
+        if path == "/forget.htm":
+            which = arg("n")
+            if which != "all" and not re.match(r"^[0-9]{1,9}\Z", which):
+                return error_page("That link is out of date.", lobby)
+            try:
+                here = [k["n"] for k in await core.keys() if k["here"]]
+            except CoreError:
+                here = []
+            done = await core.key_del(which)
+            mine = which == "all" or (which.isdigit() and int(which) in here)
+            r = redirect(req, link.plain(PLAYER_PAGE, note="forgot" if done else "kept"))
+            return self.with_header(r, CLEAR_KEY) if done and mine else r
         if path == PROFILE_PAGE:
             note = ""
             if arg("save") == "1":

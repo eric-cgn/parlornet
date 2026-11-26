@@ -574,7 +574,7 @@ class DocsPages(Built):
         page = plain(self.pages["docs/design.html"])
         self.assertIn('<h1><a name="frontend-design">Frontend design</a></h1>', page)
         for anchor in ("the-principles", "the-shared-words", "the-program-flow", "each-games-actions",
-                       "the-practice-game", "how-each-kind-of-frontend-carries-it", "what-the-server-provides"):
+                       "the-tutorial", "commands-the-client-handles-itself", "how-each-kind-of-frontend-carries-it", "what-the-server-provides"):
             self.assertIn('<a name="%s">' % anchor, page)
         self.assertIn('href="docs/design.html"', self.pages["docs.html"])
         self.assertIn('href="design.html"', self.pages["docs/frontends.html"])

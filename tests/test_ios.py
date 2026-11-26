@@ -10,6 +10,7 @@ import time
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
+import procs
 from test_adapters import Browser, spawn
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 import json
@@ -326,17 +327,14 @@ class Ios(unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe, cls.ios, cls.web = free_port(), free_port(), free_port(), free_port()
         cls.keys = make_keys("ios", "web")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none"),     # the games; sign-in below
-                     spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"), "--prompt-wait", "2"),
-                     spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web"))]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none"))  # the games; sign-in below
+        cls.procs.append(spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"), "--prompt-wait", "2"))
+        cls.procs.append(spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)
 
     def web_table(self, name):
         """A web player who opens a Reversi table and waits; returns (browser, table id)."""
@@ -529,17 +527,14 @@ class IosPassword(unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe, cls.ios, cls.web = free_port(), free_port(), free_port(), free_port()
         cls.keys = make_keys("ios", "web")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys)),
-                     spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"), "--prompt-wait", "2"),
-                     spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web"))]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys)))
+        cls.procs.append(spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"), "--prompt-wait", "2"))
+        cls.procs.append(spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)
 
     def test_sign_up_in_the_window_then_sign_in(self):
         """A new name: the IOS password is the password chosen; "Type it again"
@@ -634,22 +629,21 @@ class IosNeverVolunteers(unittest.TestCase):
 
     def run_ios(self, signin, signup, name, password, typed=None, prepare=None):
         core = RecordingCore(signin, signup)
-        if prepare:
-            prepare(core.srv)
-        port, proc = core.adapter("adapters.ios", "ios")
         try:
-            c = Eclipse(port)
-            ok, asked, text = c.login(name, password, typed=typed(core) if callable(typed) else typed)
-            if ok:
-                c.raw_line()
-            c.close()
-            time.sleep(0.3)
-            return ok, asked, text, list(core.lines)
+            if prepare:
+                prepare(core.srv)
+            port, proc = core.adapter("adapters.ios", "ios")
+            try:
+                c = Eclipse(port)
+                ok, asked, text = c.login(name, password, typed=typed(core) if callable(typed) else typed)
+                if ok:
+                    c.raw_line()
+                c.close()
+                time.sleep(0.3)
+                return ok, asked, text, list(core.lines)
+            finally:
+                procs.stop(proc)
         finally:
-            proc.kill()
-            proc.wait()
-            proc.stdout.close()
-            proc.stderr.close()
             core.stop()
 
     def test_none_drops_the_password(self):
@@ -736,17 +730,14 @@ class IosEmail(unittest.TestCase):
         settings = os.path.join(cls.tmp.name, "settings")
         with open(settings, "w") as f:
             f.write("email.transport=test\nemail.test_file=%s\n" % cls.mails)
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password", "--signup", "email",
-                           "--settings-file", settings),
-                     spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"), "--prompt-wait", "2")]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password", "--signup", "email",
+                               "--settings-file", settings))
+        cls.procs.append(spawn(*adapter_args("adapters.ios", cls.ios, cls.fe, cls.keys, "ios"), "--prompt-wait", "2"))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)
         cls.tmp.cleanup()
 
     def signup(self, name, addr):
@@ -815,21 +806,15 @@ class IosNone(unittest.TestCase):
     def test_name_alone(self):
         core, fe, ios = free_port(), free_port(), free_port()
         keys = make_keys("ios")
-        procs = [spawn(*stack_args(core, fe, keys), "--auth", "none"),
-                 spawn(*adapter_args("adapters.ios", ios, fe, keys, "ios"))]
-        try:
-            c = Eclipse(ios)
-            ok, asked, text = c.login("nan")
-            self.assertTrue(ok, text)
-            self.assertEqual(c.raw_line(), " [nan(-) connected")
-            self.assertFalse(any("token" in l for l in c.quiet(0.5)))
-            c.close()
-        finally:
-            for p in procs:
-                p.kill()
-                p.wait()
-                p.stdout.close()
-                p.stderr.close()
+        running = procs.owned(self)
+        running.append(spawn(*stack_args(core, fe, keys), "--auth", "none"))
+        running.append(spawn(*adapter_args("adapters.ios", ios, fe, keys, "ios")))
+        c = Eclipse(ios)
+        ok, asked, text = c.login("nan")
+        self.assertTrue(ok, text)
+        self.assertEqual(c.raw_line(), " [nan(-) connected")
+        self.assertFalse(any("token" in l for l in c.quiet(0.5)))
+        c.close()
 
 
 if __name__ == "__main__":

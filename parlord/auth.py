@@ -18,9 +18,11 @@ everything after a successful check belong to parlord/accounts.py. begin()
 answers HELO (sign in, or sign up a free name), USER (sign in only) and REG
 (sign up only), answer() answers AUT, and each step is one of a few generic
 kinds that any frontend able to show a line and read one back can handle:
-    ("ok", player, None[, {"revoke": True}])
+    ("ok", player, None[, {"revoke": True} or {"key": n}])
                                         done; revoke: a credential was replaced,
-                                        the player's other sessions end
+                                        the player's other sessions end and
+                                        its sign-in keys go; key: signed in
+                                        with sign-in key n (AUT key)
     ("ask", field, label, secret[, extra])
                                         the server wants a value; extra may hold
                                         "info" (lines the player needs first),
@@ -275,6 +277,7 @@ TEMP_SECS = 86400           # a temporary password (sign-up, forgotten password,
 PENDING_SECS = 86400        # a pending account nobody signs into within this long is deleted
 TEMP_TEXT = "%d hours" % (TEMP_SECS // 3600)
 NEWPASS_TEXT = "Sign in on the web or by telnet first to choose your password."
+NOKEY_TEXT = "This computer was signed out. Sign in again"
 
 
 def same(a, b):
@@ -688,7 +691,7 @@ class PasswordSignIn(Part):
 
     def begin(self, conn, p, given):
         lock = self.locked(p)
-        if lock and not self.recoverable(p) and not temp_live(p.temp):
+        if lock and not self.recoverable(p) and not temp_live(p.temp) and not self.acc.has_keys(p):
             return lock
         if given:
             return lock or ("err", "SYNTAX", "HELO name, then the password when it is asked")
@@ -715,6 +718,8 @@ class PasswordSignIn(Part):
             conn.pending = None
             return ("err", "STATE", "no such player")
         step = pend["step"]
+        if step == "password" and field == "key" and pend.get("flow") == "signin":
+            return self.key_answer(conn, p, value)
         if step in ("password", "current") and field == step:
             if step == "password" and value.strip().lower() == "reset" and self.recoverable(p):
                 pw = temp_password()
@@ -759,6 +764,29 @@ class PasswordSignIn(Part):
             return ("ok", p, None, {"revoke": True})    # a new password: other sessions end
         conn.pending = None
         return ("err", "STATE", "not what was asked")
+
+    def key_answer(self, conn, p, value):
+        """AUT key: a sign-in key (docs/accounts.md, Staying signed in) answers the password question. A right
+        key signs in like the password, also while the name is locked or the wrong-answer budgets are spent,
+        as a temporary password does (128 random bits are not guessed). A wrong one, an expired one or a
+        forgotten one is refused with ERR NOKEY, so the computer forgets it and asks for the password. It
+        counts toward the name's lockout and the budgets like a wrong password, unless the name is locked or
+        the budgets are spent already, when it is refused with the wait and not counted again."""
+        conn.pending = None
+        refused = self.acc.rate(conn, "check", CHECKS_PER_SOURCE)
+        if refused:
+            return refused
+        n = self.acc.key_check(p, value, conn)
+        if n:
+            self.passed(p)
+            return ("ok", p, None, {"key": n})
+        lock = self.locked(p) or self.budget(conn, p)
+        if lock:
+            return ("err", "NOKEY", lock[2])
+        secs = self.count_miss(p, conn)
+        if not secs:
+            return ("err", "NOKEY", NOKEY_TEXT)
+        return ("err", "NOKEY", "wait=%d %s in %s" % (secs, NOKEY_TEXT, wait_text(secs)))
 
     def change_now(self, pend, p, value):
         """A right temporary password: the account is confirmed (a pending one keeps its name from now on)

@@ -13,6 +13,7 @@ import sys
 import time
 import unittest
 
+import procs
 from test_core import adapter_args, free_port, make_keys, stack_args
 from test_adapters import MailCapture, Native, Stack, plain, spawn
 
@@ -120,12 +121,8 @@ class WS:
             pass
 
 
-def kill_all(procs):
-    for p in procs:
-        p.kill()
-        p.wait()
-        p.stdout.close()
-        p.stderr.close()
+def kill_all(running):
+    procs.stop_all(running)
 
 
 class PlayStack(unittest.TestCase):
@@ -138,9 +135,13 @@ class PlayStack(unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe, cls.play_port = free_port(), free_port(), free_port()
         cls.keys = make_keys("play")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password", *cls.core_extra)]
+        cls.procs = procs.owned(cls)
+        cls.output = []         # every line the processes print, for the tests that check what is logged
+        out = dict(out=cls.output, err=cls.output)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password", *cls.core_extra,
+                               **out))
         cls.procs.append(spawn(*adapter_args("adapters.playserver", cls.play_port, cls.fe, cls.keys, "play"),
-                               *cls.play_args))
+                               *cls.play_args, **out))
 
     @classmethod
     def tearDownClass(cls):
@@ -922,7 +923,8 @@ class WebAndPlay(unittest.TestCase):
         cls.core, cls.fe = free_port(), free_port()
         cls.web_port, cls.web2_port, cls.play_port = free_port(), free_port(), free_port()
         cls.keys = make_keys("web", "play")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password")]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password"))
         cls.procs.append(spawn(*adapter_args("adapters.playserver", cls.play_port, cls.fe, cls.keys, "play")))
         cls.procs.append(spawn(*adapter_args("adapters.web", cls.web_port, cls.fe, cls.keys, "web")))
         cls.procs.append(spawn(*adapter_args("adapters.web", cls.web2_port, cls.fe, cls.keys, "web"),

@@ -8,6 +8,7 @@ import sys
 import time
 import unittest
 
+import procs
 from test_core import ROOT, free_port, make_keys, stack_args
 from test_smoke import Conn, until
 
@@ -343,21 +344,15 @@ class WithTheBot(unittest.TestCase):
         import subprocess
         cls.core, cls.fe = free_port(), free_port()
         cls.keys = make_keys("bot")
-        cls.procs = []
+        cls.procs = procs.owned(cls)
         for args in (stack_args(cls.core, cls.fe, cls.keys) + ["--auth", "none"],
                      ["bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", os.path.join(cls.keys, "bot.key"),
                       "--think", "0,0", "--pace", "0", "--poll", "0.2"]):
-            p = subprocess.Popen([sys.executable, "-m"] + args, cwd=ROOT, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT)
-            cls.procs.append(p)
-            p.stdout.readline()
+            cls.procs.append(procs.spawn(*args, stderr=subprocess.STDOUT))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
+        procs.stop_all(cls.procs)
 
     def test_invite_bot_seats_the_bot(self):
         c = Conn(self.core)

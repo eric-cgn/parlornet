@@ -1,8 +1,7 @@
 """Plugin and core tests: python3 -m unittest discover -s tests"""
 import asyncio
 import os
-import socket
-import subprocess
+import signal
 import sys
 import time
 import unittest
@@ -10,6 +9,8 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "plugins", "reversi"))
 import plugin as rv  # noqa: E402
+import procs  # noqa: E402
+from procs import free_port  # noqa: E402,F401  (the tests import it from here)
 from speed import slow  # noqa: E402
 
 
@@ -78,14 +79,6 @@ def adapter_args(module, port, fe, keys, name):
     return [module, "--port", str(port), "--core", "127.0.0.1:%d" % fe, "--key", os.path.join(keys, name + ".key")]
 
 
-def free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    p = s.getsockname()[1]
-    s.close()
-    return p
-
-
 class Client:
     def __init__(self, r, w):
         self.r, self.w = r, w
@@ -96,6 +89,9 @@ class Client:
         w.write(b"PARLORNET/1\r\n")       # the opening first (CR LF), then the greeting
         c = cls(r, w)
         c.greeting = await c.line()
+        if not c.greeting.startswith("PARLORNET/1 "):
+            w.close()
+            raise AssertionError("connected to the wrong service on port %d: %r" % (port, c.greeting))
         return c
 
     async def line(self):
@@ -116,13 +112,8 @@ class Integration(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.port = free_port()
-        self.proc = subprocess.Popen([sys.executable, "-m", "parlord", "--port", str(self.port)] + self.extra,
-                                     cwd=ROOT, stdout=subprocess.PIPE)
-        self.proc.stdout.readline()  # banner: server is listening
-
-    async def asyncTearDown(self):
-        self.proc.kill()
-        self.proc.wait()
+        self.proc = procs.spawn("parlord", "--port", self.port, *self.extra, stderr=None)
+        self.addCleanup(procs.stop, self.proc)
 
     async def test_game_to_the_end(self):
         a = await Client.connect(self.port)
@@ -259,26 +250,20 @@ class Integration(unittest.IsolatedAsyncioTestCase):
 class Persistence(unittest.IsolatedAsyncioTestCase):
     def start(self):
         self.port = free_port()
-        self.proc = subprocess.Popen([sys.executable, "-m", "parlord", "--port", str(self.port), "--db", self.db,
-                                      "--rate", "1000", "--burst", "1000", "--turn-min", "1", "--sweep", "0.5",
-                                      "--frontend-port", "0", "--auth", "none"],
-                                     cwd=ROOT, stdout=subprocess.PIPE)
-        self.proc.stdout.readline()
+        self.proc = procs.spawn("parlord", "--port", self.port, "--db", self.db, "--rate", "1000", "--burst", "1000",
+                                "--turn-min", "1", "--sweep", "0.5", "--frontend-port", "0", "--auth", "none",
+                                stderr=None)
+        self.addCleanup(procs.stop, self.proc)
 
     def stop(self):
-        self.proc.terminate()
-        self.proc.wait()
-        self.proc.stdout.close()
+        procs.stop(self.proc, signal.SIGTERM)
 
     async def asyncSetUp(self):
         import tempfile
         self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
         self.db = os.path.join(self.dir.name, "parlord.db")
         self.start()
-
-    async def asyncTearDown(self):
-        self.stop()
-        self.dir.cleanup()
 
     async def test_leave_keeps_game_restart_keeps_everything(self):
         a, b = await Client.connect(self.port), await Client.connect(self.port)

@@ -1,4 +1,4 @@
-"""The practice game: a lesson in Tic Tac Toe that teaches telnet's keys (docs/design.md, The practice game).
+"""The tutorial: a lesson in Tic Tac Toe that teaches telnet's keys (docs/design.md, The tutorial).
 
 It is a screen of the telnet frontend, not a game: it has no plugin and no module in adapters/games/, so no
 lobby, Games page or table list ever shows it. It runs only on the player's own screen. Every request a
@@ -9,10 +9,12 @@ The screen is a real game screen (AnsiGame): the title bar, the board, the panel
 command line, the keys line, the chat screen, help and dialogs all work as they do at a table. The lesson
 is a list of steps. Each step puts one instruction on the sentence line, and the next step comes only when
 the player does that thing. A move that the step doesn't ask for is refused with the same instruction,
-starting with "Not yet." The practice partner's replies are scripted, so every player sees the same game,
+starting with "Not yet." The tutorial partner's replies are scripted, so every player sees the same game,
 and in step 10 the partner leaves the player's line open on purpose.
 
-Session.practice() opens it, from the lobby's list, /practice, the first-sign-in dialog and help.
+Session.tutorial() opens it, from the lobby's list, /tutorial, the first-sign-in dialog and help. /tutorial is
+one of the commands telnet handles itself (docs/design.md, Commands the client handles itself), so it never
+reaches the server.
 """
 import time
 
@@ -20,15 +22,15 @@ from parlord.commands import DIALOGS, time_text
 from .telnet import (A_BORDER, A_DIM, A_HEAD, A_TEXT, A_YELLOW, COLS, ROWS, AnsiGame, Canvas, dialog_lines, rule,
                      title_bar)
 
-NAME = "Tic Tac Toe practice"
-PARTNER = "practice partner"
-SAYS_NOTHING = "This is a practice game, so that command does nothing here."
-ONLY_HERE = "Practice only. Nothing you do here reaches the parlor."
+NAME = "Tic Tac Toe tutorial"
+PARTNER = "tutorial partner"
+SAYS_NOTHING = "This is the tutorial, so that command does nothing here."
+ONLY_HERE = "This tutorial is not played on the parlor. Nothing you do here reaches it."
 
 # The steps: (the instruction, what it teaches, the move or deed that ends it, the partner's reply).
 # A deed is a square ("b2" placed with Enter or a click), "/c3" (a typed move), or a word below.
 STEPS = [
-    ("This practice game shows how every game works. Press Enter to begin.", "You learn the Enter key.",
+    ("This tutorial shows how every game works. Press Enter to begin.", "You learn the Enter key.",
      "begin", None),
     ("Press the arrows to move to the middle square.", "You learn to move the cursor.", "at b2", None),
     ("Press Enter to place your X.", "Enter plays, and the panel shows the last move.", "b2", "a1"),
@@ -50,7 +52,8 @@ STEPS = [
     ("Press R to see how a game asks before it ends something. Then press Esc to answer No.",
      "You learn dialogs, and that Esc in one is always safe.", "dialog", None),
     ("Move to c2 and press Enter to finish your line.", "You learn how a game ends.", "c2", None),
-    ("You won the practice game. Press Esc to go back to the lobby.", "Esc with nothing to cancel goes back.",
+    ("You won. Press Esc to go back to the lobby. /tutorial runs it again any time.",
+     "Esc with nothing to cancel goes back.",
      "lobby", None),
 ]
 SQUARES = [c + r for r in "123" for c in "abc"]         # a1 b1 c1 a2 ... in reading order
@@ -60,15 +63,15 @@ BX, BY = 6, 3           # the board's top left corner: three cells of 7 columns 
 
 
 class Offline:
-    """Stands in for the core while the practice game is open, so that a request sent by mistake fails
+    """Stands in for the core while the tutorial is open, so that a request sent by mistake fails
     loudly instead of reaching the parlor."""
 
     async def req(self, text):
-        raise AssertionError("the practice game sent %r to the core" % text)
+        raise AssertionError("the tutorial sent %r to the core" % text)
 
 
-class Practice(AnsiGame):
-    """The practice game's screen."""
+class Tutorial(AnsiGame):
+    """The tutorial's screen."""
 
     GAME = NAME
     HOTKEYS = "urt?"
@@ -82,13 +85,13 @@ class Practice(AnsiGame):
                       "the rows from the top. Three in a row, across, down or corner to",
                       "corner, wins.",
                       "",
-                      "The practice game",
+                      "The tutorial",
                       "Nothing you do here reaches the parlor. Your partner's moves are",
                       "the same for every player."]
     EVERY_TABLE = "At a real table, /say, /invite, /note, /time and /leave work too."
 
     def __init__(self, sess):
-        super().__init__(sess, "practice", "practice", 0)
+        super().__init__(sess, "tutorial", "tutorial", 0)
         self.core = Offline()
         self.names = [sess.name, PARTNER]
         self.board = {}                 # square -> "X" or "O"
@@ -98,7 +101,7 @@ class Practice(AnsiGame):
         self.mine = []                  # the squares of your Xs, in the order placed
         self.started_at = time.time()
         self.v = {"rows": True, "turn": 0, "moves": [], "status": ""}
-        self.log = ["The practice game started. You play X."]
+        self.log = ["The tutorial started. You play X."]
 
     # ---- the lesson -----------------------------------------------------------
     def deed(self, what):
@@ -182,7 +185,7 @@ class Practice(AnsiGame):
         self.log.append(self.last)
         self.deed(want)
         if self.winner():
-            self.log.append("You won the practice game.")
+            self.log.append("You won the tutorial game.")
         return None
 
     # ---- keys --------------------------------------------------------------
@@ -242,13 +245,13 @@ class Practice(AnsiGame):
         return cmd if cmd in SQUARES and len(words) == 1 else None
 
     async def run_command(self, line):
-        if line.split()[:1] == ["practice"]:
+        if line.split()[:1] == ["tutorial"]:
             return self.tell(SAYS_NOTHING)
         return await super().run_command(line)
 
     async def shared(self, line):
         """What a table sends to the server is answered here: a move, /time, /say and /resign as in a game, and
-        any other command says that it does nothing in practice."""
+        any other command says that it does nothing in the tutorial."""
         p = line.split()
         cmd = p[0].lower()
         if self.move_word(cmd, p):
@@ -262,7 +265,7 @@ class Practice(AnsiGame):
         elif cmd == "resign":
             words = DIALOGS["resign"] % "Your partner wins."
             if await self.ask_yes("Resign", dialog_lines(words), "resign"):
-                self.over = "You resigned the practice game"
+                self.over = "You resigned the tutorial game"
                 self.step = len(STEPS) - 1
             elif self.step == 15:
                 self.deed("dialog")
@@ -279,7 +282,7 @@ class Practice(AnsiGame):
         return result
 
     def chat_head(self):
-        return "Chat at the practice table. Your partner here is part of the lesson."
+        return "Chat at the tutorial table. Your partner here is part of the lesson."
 
     # ---- drawing -----------------------------------------------------------
     def compose(self):
@@ -341,9 +344,9 @@ class Practice(AnsiGame):
         return None
 
 
-async def run_practice(sess):
-    """Open the practice game on this session's screen; back to the lobby when the player leaves it."""
-    screen = Practice(sess)
+async def run_tutorial(sess):
+    """Open the tutorial on this session's screen. The player goes back to the lobby on leaving it."""
+    screen = Tutorial(sess)
     sess.painter.invalidate()
     await screen.run()
     sess.painter.invalidate()

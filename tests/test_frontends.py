@@ -8,6 +8,7 @@ import sys
 import time
 import unittest
 
+import procs
 from test_core import ROOT, Client, free_port, make_keys
 
 sys.path.insert(0, ROOT)
@@ -20,16 +21,11 @@ class Channel(unittest.IsolatedAsyncioTestCase):
         self.keys = make_keys("web", "telnet")
         frontends.write_key(self.keys, "boss", "admin")
         self.port, self.fe = free_port(), free_port()
-        self.proc = subprocess.Popen(
-            [sys.executable, "-m", "parlord", "--port", str(self.port), "--frontend-port", str(self.fe),
-             "--keys", self.keys, "--auth", "none", "--sweep", "0.3", "--rate", "1000", "--burst", "1000"],
-            cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        self.banner = self.proc.stdout.readline().decode()
-
-    async def asyncTearDown(self):
-        self.proc.kill()
-        self.proc.wait()
-        self.proc.stdout.close()
+        self.proc = procs.spawn("parlord", "--port", self.port, "--frontend-port", self.fe, "--keys", self.keys,
+                                "--auth", "none", "--sweep", "0.3", "--rate", "1000", "--burst", "1000",
+                                stderr=subprocess.DEVNULL)
+        self.addCleanup(procs.stop, self.proc)
+        self.banner = self.proc.first
 
     def key(self, name):
         return os.path.join(self.keys, name + ".key")
