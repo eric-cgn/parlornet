@@ -170,26 +170,26 @@ class SignInAndNewAccount(unittest.IsolatedAsyncioTestCase):
                              "ERR RESERVED %s is a reserved word here; choose another name" % name.lower(), name)
         self.assertEqual(auth.create(srv.accounts, "parlornet")[1], "RESERVED")
 
-    async def test_new_names_start_with_a_letter_and_join_with_one_mark(self):
-        rule = "ERR NAMERULE names start with a letter; - and _ go between letters or digits"
+    async def test_new_names_have_a_letter_and_join_with_one_mark(self):
+        rule = "ERR NAMERULE names need a letter; - and _ go between letters or digits"
         for signin, signup in (("none", None), ("password", None), ("password", "email")):
             srv = server(signin, signup)
-            for name in ("9lives", "-x", "_amy", "amy-", "amy_", "a--b", "a_-b", "1234"):
+            for name in ("1234", "0", "-x", "_amy", "amy-", "amy_", "a--b", "a_-b", "12-34"):
                 for verb in ("REG", "HELO"):
                     self.assertEqual(await say(srv, public(), "%s %s" % (verb, name)), rule, (verb, name))
                 self.assertIsNone(srv.accounts.player(name))
-            self.assertEqual(auth.create(srv.accounts, "9lives")[1], "NAMERULE")      # the last check too
+            self.assertEqual(auth.create(srv.accounts, "1234")[1], "NAMERULE")        # the last check too
         srv = server("password")
-        for name in ("a", "amy", "Amy-Lee", "r2_d2", "abcdefghijkl", "x-1-y-2"):
+        for name in ("a", "amy", "Amy-Lee", "r2_d2", "abcdefghijkl", "x-1-y-2", "9lives", "1in1e6", "2-fast"):
             self.assertFalse((await say(srv, public(), "REG %s" % name)).startswith("ERR"), name)
 
     async def test_names_from_before_the_rule_still_sign_in(self):
         srv = server("password")
-        srv.accounts.player("9lives", create=True)
+        srv.accounts.player("1234", create=True)
         srv.accounts.player("admin", create=True)
-        self.assertTrue((await say(srv, public(), "USER 9lives")).startswith("ASK password"))
+        self.assertTrue((await say(srv, public(), "USER 1234")).startswith("ASK password"))
         self.assertTrue((await say(srv, public(), "USER admin")).startswith("ASK password"))
-        self.assertTrue((await say(srv, public(), "REG 9lives")).startswith("ERR "))
+        self.assertTrue((await say(srv, public(), "REG 1234")).startswith("ERR "))
 
     async def test_unknown_names_count_like_sign_ups(self):
         """USER for names with no account is limited per client address as sign-ups are (HELO for a free

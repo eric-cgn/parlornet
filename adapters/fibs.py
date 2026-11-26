@@ -711,8 +711,8 @@ class Session:
         # end, "You are registered." at the start of a line
         w.write(b"\r\nYou are signing up for a ParlorNet name (this is not a FIBS account).\r\n"
                 b"Type 'name' and the name you want, for example: name alice\r\n"
-                b"(it starts with a letter and has up to 12 letters, digits, - and _, with - and _ only\r\n"
-                b"between letters or digits). Type 'bye' to leave without signing up.\r\n> ")
+                b"(up to 12 letters, digits, - and _, with at least one letter, and - and _ only between\r\n"
+                b"letters or digits). Type 'bye' to leave without signing up.\r\n> ")
         await w.drain()
         while True:
             line = await self.login_line()

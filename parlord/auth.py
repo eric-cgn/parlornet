@@ -112,11 +112,12 @@ RECOVERY_PER_REQUESTER = 2      # recovery mails for one name asked from one cli
 # sign up as one of them, through any frontend or the protocol.
 RESERVED_NAMES = frozenset(("new", "guest", "parlornet", "admin", "administrator", "sysop", "system", "server",
                             "operator", "moderator", "staff", "root"))
-# A new account's name (docs/accounts.md): it starts with a letter, and a - or _ comes only between two
-# letters or digits. Names from before the rule keep working; sign-in takes any name of NAME_RE.
-NEW_NAME_RE = re.compile(r"^[A-Za-z](?:[-_]?[A-Za-z0-9]){0,11}\Z")
-NEW_NAME_RULE = ("Names start with a letter and are up to 12 letters, digits, - and _, "
-                 "with - and _ only between letters or digits.")
+# A new account's name (docs/accounts.md): at least one letter, so no name reads as a table number (/join 12),
+# and a - or _ only between two letters or digits. Names from before the rule keep working; sign-in takes any
+# name of NAME_RE.
+NEW_NAME_RE = re.compile(r"^(?=.{1,12}\Z)(?=.*[A-Za-z])[A-Za-z0-9](?:[-_]?[A-Za-z0-9])*\Z")
+NEW_NAME_RULE = ("Names are up to 12 letters, digits, - and _, with at least one letter, "
+                 "and - and _ only between letters or digits.")
 
 
 def reserved(name, server_name=None):
@@ -133,7 +134,7 @@ def new_name_refusal(name, server_name=None):
     if reserved(name, server_name):
         return reserved_refusal(name)
     if not NEW_NAME_RE.match(name or ""):
-        return ("err", "NAMERULE", "names start with a letter; - and _ go between letters or digits")
+        return ("err", "NAMERULE", "names need a letter; - and _ go between letters or digits")
     return None
 
 
