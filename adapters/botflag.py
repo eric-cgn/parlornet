@@ -1,7 +1,7 @@
 """The bot player for the frontends (docs/bot.md): which seats are bots (the
 core flags them: bot=seat,... on LST's TAB lines), and which bot name to invite
 next (each bot name is one seat: bot, then bot1 to bot3)."""
-from parlord.bots import NAMES
+from parlord.bots import NAMES, listed  # noqa: F401  (listed: the frontends' player lists)
 
 
 def bot_seats(lines):
@@ -36,14 +36,6 @@ def next_name(taken):
 def label(name, bots):
     """A seat's name as a list shows it: 'bot (bot)' for a bot (bots: the bot names there, lower case)."""
     return "%s (bot)" % name if name.lower() in bots else name
-
-
-def listed(players):
-    """WHO's players [(name, is a bot)] -> the names a player list shows: every person, and one bot (the first
-    bot name signed in; the others are the same player for another seat, and can still be invited by name)."""
-    people = [n for n, bot in players if not bot]
-    first = next((n for n, bot in players if bot), None)
-    return people + ([first] if first else [])
 
 
 def is_bot_name(name):

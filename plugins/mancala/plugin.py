@@ -279,8 +279,30 @@ def op_say(req):
     return {"say": ", ".join(out)}
 
 
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+
+INFO["typed"] = True
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. A pit, as /3, /pit 3
+    or /sow 3, sows that pit."""
+    st, seat = req["state"], req.get("seat", -1)
+    words = [w.lower() for w in req.get("words") or []]
+    if words in (["pit"], ["sow"]):
+        return {"error": "Type the pit to sow after /%s, as in /%s 3." % (words[0], words[0])}
+    if len(words) == 2 and words[0] in ("pit", "sow"):
+        words = words[1:]
+    if len(words) != 1 or not (words[0].isascii() and words[0].isdigit() and len(words[0]) <= 2):
+        return {}
+    if seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    pit = int(words[0])
+    return {"move": [str(pit)], "what": "sow pit %d" % pit}
+
+
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply,
-       "result": op_result, "say": op_say}
+       "result": op_result, "say": op_say, "typed": op_typed}
 
 
 def main():

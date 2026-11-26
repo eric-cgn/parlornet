@@ -84,7 +84,7 @@ async def main():
     srv = await asyncio.start_server(relay.handle, "127.0.0.1", 0)
     rport = srv.sockets[0].getsockname()[1]
     s = Stack("password", "email", settings={"email.transport": "smtp", "email.smtp_host": "127.0.0.1",
-                                         "email.smtp_port": str(rport), "email.smtp_user": "ocid1.user.example",
+                                         "email.smtp_port": str(rport), "email.smtp_user": "relay-user",
                                          "email.smtp_password": "relay-password-123",
                                          "email.from": "noreply@parlornet.example"})
     s.seed("alice", password=PASSWORD, email="alice@example.org")

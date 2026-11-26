@@ -21,6 +21,14 @@ def is_name(name):
     return (name or "").lower() in NAMES
 
 
+def listed(players):
+    """WHO's players [(name, is a bot)] -> the names a player list shows: every person, and one bot (the first
+    bot name signed in; the others are the same player for another seat, and can still be invited by name)."""
+    people = [n for n, bot in players if not bot]
+    first = next((n for n, bot in players if bot), None)
+    return people + ([first] if first else [])
+
+
 def flag_key(name):
     return "bot:" + name.lower()
 

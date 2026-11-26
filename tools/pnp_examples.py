@@ -584,6 +584,27 @@ async def _errors(r):
     await r.say("A", "PWD")
 
 
+@scenario("commands", args=NONE)
+async def _commands(r):
+    await r.say("A", "HELO ann")
+    await r.say("B", "HELO bob")
+    await r.say("A", "CMD /open", note="In the lobby, the line goes as typed. Here /open needs a game.")
+    await r.say("A", "CMD /open reversi")
+    await r.say("A", "CMD 1 /invite bob", note="At ann's open table, the command runs there.")
+    await r.say("B", "CMD /accept ann", note="An invitation is answered in its dialog, which sends JON.")
+    await r.say("B", "JON 1")
+    await r.say("A", "CMD 1 /d3", note="A typed move that is played has nothing to say.")
+    await r.say("A", "SIN 1", note="What it did comes as events, as after any request.")
+    await r.say("A", "CMD 1 /f5", note="A refusal is a sentence like any other.")
+    await r.say("B", "CMD 1 /a1")
+    await r.say("B", "CMD 1 /say well played")
+    await r.say("B", "CMD 1 /resign", note="Resigning asks first, with DLG and the dialog's words.")
+    await r.say("B", "CMD 1 YES /resign", note="The dialog's Yes sends the confirmed form.")
+    await r.say("A", "CMD /who")
+    await r.say("A", "CMD who", note="The line starts with its slash.")
+    await r.say("A", "CMD 9 /who")
+
+
 @scenario("prefs", args=NONE)
 async def _prefs(r):
     await r.say("A", "HELO ann")

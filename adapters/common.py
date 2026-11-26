@@ -11,7 +11,11 @@ import ssl
 import time
 
 from parlord.auth import NEWPASS_TEXT
+from parlord.commands import MOTD_BOTTOM, MOTD_TOP, SCORES_NOTE, framed_motd, score_text  # noqa: F401
 from parlord.frontends import client_context, read_key
+from parlord.replies import (SCORE_FIELDS, err_text, parse_client, parse_clients, parse_games,  # noqa: F401
+                             parse_invites, parse_players, parse_profile, parse_score, parse_tables, parse_top,
+                             pending_invites)
 
 
 class CoreError(Exception):
@@ -28,17 +32,6 @@ class Refused(ValueError):
 
 
 BAD_CHARS = re.compile(r"[\x00-\x1f\x7f]")
-
-
-# The message of the day as the text frontends show it: between a top and a bottom rule, 39 columns wide
-# like the message itself, so it is clear where it ends and the server's own instructions begin.
-MOTD_TOP = "========= Message of the Day =========="
-MOTD_BOTTOM = "==== End of the Message of the Day ===="
-
-
-def framed_motd(lines):
-    """The message of the day between its two rules, or nothing when there is none."""
-    return [MOTD_TOP] + list(lines) + [MOTD_BOTTOM] if lines else []
 
 
 CLAIM_LEN = 40      # CLI PROG and CLI MACH (docs/protocol.md, Clients and machines)
@@ -75,7 +68,7 @@ BG_HOMES = ("right", "left")
 ACT_EVERY = float(os.environ.get("PARLOR_ACT_EVERY", "30"))     # a player's typing is reported to the core
                                                                 # (ACT) at most this often (tests set less)
 LOGIN_SECS = 120.0          # to send the first (login) line after connecting
-LOGIN_TOTAL_SECS = 600.0    # to finish signing in (reading a mailed password included) after connecting
+LOGIN_TOTAL_SECS = 300.0    # to finish signing in after connecting, as the core allows on the public port
 PENDING_MAX = 20            # connections that have not signed in yet, per adapter (at least; see Gate)
 PENDING_PER_ADDR = 4        # ... from one client address (IPv6: one /48)
 
@@ -607,27 +600,10 @@ def no_wait(text):
     return text[:1].upper() + text[1:]
 
 
-def err_text(final):
-    """'ERR CODE text' -> 'text'."""
-    parts = final.split(" ", 2)
-    return parts[2] if len(parts) > 2 else (parts[1] if len(parts) > 1 else "error")
-
-
 def more_tables(lines):
     """The n of LST's MORE n line (the tables the list left out), or 0."""
     return next((int(p[1]) for p in (l.split() for l in lines) if len(p) == 2 and p[0] == "MORE"
                  and p[1].isdigit()), 0)
-
-
-def parse_games(lines):
-    """GAM lines -> [{key: type/ver, rules, name, min, max}] (min and max are None if absent)."""
-    out = []
-    for l in lines:
-        p = l.split()
-        if p and p[0] == "GAM" and len(p) >= 4:
-            lo, hi = (int(p[4]), int(p[5])) if len(p) >= 6 and p[4].isdigit() and p[5].isdigit() else (None, None)
-            out.append({"key": p[1], "rules": p[2], "name": p[3].replace("_", " "), "min": lo, "max": hi})
-    return out
 
 
 def group_games(games):
@@ -640,40 +616,6 @@ def group_games(games):
         else:
             out[g["key"]] = dict(g, rulesets=[g["rules"]])
     return list(out.values())
-
-
-def parse_tables(lines):
-    """TAB lines -> list of dicts ("vis" is "public" or "private"). "clients": {seat: what its player plays
-    with} from the CLIENT lines after a TAB line (LST clients), {} without them."""
-    out = []
-    for l in lines:
-        p = l.split()
-        if p and p[0] == "CLIENT" and out:
-            c = parse_client(l)
-            if c:
-                out[-1]["clients"][c[0]] = c[1]
-        if p and p[0] == "TAB" and len(p) >= 7:
-            filled, seats = p[4].split("/")
-            seated = p[6].split(",")
-            turn = next((int(f[5:]) for f in p[7:] if f.startswith("turn=") and f[5:].isdigit()), 0)
-            vis = next((f[4:] for f in p[7:] if f.startswith("vis=")), "public")
-            out.append({"id": p[1], "key": p[2], "rules": p[3], "filled": int(filled),
-                        "seats": int(seats), "status": p[5], "seated": seated,
-                        "names": [n for n in seated if n != "-"],
-                        "seat_of": {n: i for i, n in enumerate(seated) if n != "-"}, "turn": turn, "vis": vis,
-                        "clients": {}})
-    return out
-
-
-def parse_invites(lines):
-    """IVT lines (the reply to IVL) -> list of dicts; "seat" is -1 when no seat is held."""
-    out = []
-    for l in lines:
-        p = l.split()
-        if p and p[0] == "IVT" and len(p) >= 6:
-            seat = next((int(f[5:]) for f in p[6:] if f.startswith("seat=") and f[5:].isdigit()), -1)
-            out.append({"id": p[1], "key": p[2], "rules": p[3], "from": p[4], "status": p[5], "seat": seat})
-    return out
 
 
 def describe_integrity_event(text):
@@ -709,11 +651,6 @@ def uninvite_of(text):
     return None
 
 
-def parse_players(lines):
-    """PLR lines (the reply to WHO) -> [(name, is a bot)], in the core's order."""
-    return [(p[1], "bot" in p[2:]) for p in (l.split() for l in lines) if len(p) >= 2 and p[0] == "PLR"]
-
-
 # ---- turns, the activity feed and profiles (TRN, FEED, PFL; docs/protocol.md) ----------------------------
 
 def parse_turns(lines):
@@ -731,66 +668,7 @@ def parse_turns(lines):
     return out
 
 
-def parse_profile(lines):
-    """PFL lines (the reply to PFL name) -> {"name", "pref", "games": [(type/ver, n)], "progs": [(text, n)],
-    "machs": [(text, n)], "score"}: score is parse_score's dict, or None when the server sent no score."""
-    out = {"name": "", "pref": "", "games": [], "progs": [], "machs": [], "score": None}
-    for l in lines:
-        p = l.split(" ", 3)
-        if p[0] != "PFL" or len(p) < 3:
-            continue
-        if p[1] == "NAME":
-            out["name"] = p[2]
-        elif p[1] == "PREF":
-            out["pref"] = l.split(" ", 2)[2]
-        elif p[1] == "GAME" and len(p) == 4 and p[3].isdigit():
-            out["games"].append((p[2], int(p[3])))
-        elif p[1] in ("PROG", "MACH") and len(p) == 4 and p[2].isdigit():
-            out["progs" if p[1] == "PROG" else "machs"].append((p[3], int(p[2])))
-        elif p[1] == "SCORE":
-            out["score"] = parse_score(l.split()[2:])
-    return out
-
-
-# ---- scores and the leaderboard (TOP, PFL SCORE; docs/protocol.md, Scores) -------------------------------
-
-# What every leaderboard view says, in short (docs/protocol.md, Scores).
-SCORES_NOTE = ("Any score is easy to get on a public server. The leaderboard is meant for conferences, "
-               "festivals and LAN parties.")
-SCORE_FIELDS = ("points", "wins", "draws", "losses", "resigns")
-
-
-def parse_score(words):
-    """points wins draws losses resigns [rank] -> {"points", "wins", "draws", "losses", "resigns", "rank"
-    (None when unranked)}, or None."""
-    if len(words) < 5 or not all(w.isdigit() for w in words[:5]):
-        return None
-    out = dict(zip(SCORE_FIELDS, (int(w) for w in words[:5])))
-    out["rank"] = int(words[5]) if len(words) > 5 and words[5].isdigit() else None
-    return out
-
-
-def parse_top(lines):
-    """TOP lines (the reply to TOP) -> [{"rank", "name", "points", "wins", "draws", "losses", "resigns"}]."""
-    out = []
-    for l in lines:
-        p = l.split()
-        if len(p) == 8 and p[0] == "TOP" and p[1].isdigit():
-            row = parse_score(p[3:])
-            if row:
-                row.update(rank=int(p[1]), name=p[2])
-                out.append(row)
-    return out
-
-
-def score_text(s):
-    """A score in words: "12 points: 3 wins, 1 draw, 2 losses, 1 resigned"."""
-    def n(k, one, many):
-        return "%d %s" % (s[k], one if s[k] == 1 else many)
-    return "%s: %s, %s, %s, %d resigned" % (n("points", "point", "points"), n("wins", "win", "wins"),
-                                            n("draws", "draw", "draws"), n("losses", "loss", "losses"),
-                                            s["resigns"])
-
+# ---- the program and the machine in words (TRX, CLIENT; docs/protocol.md, Clients and machines) ------------
 
 # Programs whose names read with "the" before them ("with the Outland Gateway"), and machine names that
 # are systems rather than machines, which take no article ("on macOS", but "on a Macintosh").
@@ -837,21 +715,6 @@ def turn_time(at):
 
 # ---- what each player plays with (CLIENT; docs/protocol.md, Clients and machines) -----------------------
 
-def parse_client(text):
-    """'CLIENT seat text' (an EVT payload, or a line of VUE C or LST clients) -> (seat, text), text being
-    what the seat's player plays with in words ("with GameMaster 1.0.0 on a Macintosh Plus"); None for any
-    other line, and for a CLIENT with nothing to say (a private table's, for someone who may not see it)."""
-    p = text.split(" ", 2)
-    if len(p) == 3 and p[0] == "CLIENT" and p[1].isdigit() and p[2].strip():
-        return int(p[1]), p[2].strip()
-    return None
-
-
-def parse_clients(lines):
-    """The CLIENT lines of a view (VUE C) -> {seat: text}."""
-    return dict(c for c in (parse_client(l) for l in lines) if c)
-
-
 def fit(text, width):
     """text cut at a word to at most width characters (cut inside a word only when one word is too long)."""
     if len(text) <= width:
@@ -882,18 +745,6 @@ def client_sentence(name, say, verb="sat down", width=0):
 def client_change_sentence(name, say, width=0):
     """A seat's program changed mid-game: 'ann now plays with RSCARDS 5.02 on an IBM PC.'"""
     return client_sentence(name, say, "now plays", width)
-
-
-def pending_invites(events):
-    """EVT payloads in order -> names invited and not yet seated or withdrawn."""
-    out = []
-    for text in events:
-        p = text.split()
-        if len(p) >= 3 and p[0] == "INVITE" and p[2] not in out:
-            out.append(p[2])
-        elif len(p) >= 3 and p[0] in ("UNINVITE", "JOIN") and p[2] in out:
-            out.remove(p[2])
-    return out
 
 
 # The view parsers and event texts of each game live with the rest of its frontend code in adapters/games/

@@ -410,8 +410,40 @@ def op_say(req):
     return {"say": other}
 
 
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+
+INFO["typed"] = True
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. Steps, as /11-15,
+    /15x22 or /15x22x31, move a piece. /end and /undo end the turn or take back a step, and /draw offers
+    a draw. A draw offer is answered in its dialog, so /accept, /reject and /decline are refused."""
+    st, seat = req["state"], req.get("seat", -1)
+    words = [w.lower() for w in req.get("words") or []]
+    if not words:
+        return {}
+    if len(words) == 1 and words[0] in ("accept", "reject", "decline"):
+        if st["phase"] == "draw" and seat == st["turn"]:
+            return {"error": "A draw offer is answered in its dialog, not from the command line."}
+        return {"error": "There is no offer for you to answer."}
+    if words == ["draw"]:
+        return {"move": ["draw"], "what": "offer a draw"}     # an offer has its own rules for whose turn it is
+    if words == ["end"]:
+        reply = {"step": "end", "what": "end your turn"}
+    elif words == ["undo"]:
+        reply = {"step": "undo", "what": "undo a step"}
+    elif all(STEP_RE.match(w) for w in words):
+        reply = {"move": words}
+    else:
+        return {}
+    if seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    return reply
+
+
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply, "result": op_result,
-       "say": op_say}
+       "say": op_say, "typed": op_typed}
 
 
 def main():

@@ -17,6 +17,7 @@ match=n a table plays a match to n points: several games, the score, and the
 Crawford rule (no doubling in the game after a player first reaches n-1).
 """
 import json
+import re
 import random
 import sys
 
@@ -552,7 +553,54 @@ def op_say(req):
     return {"say": "; ".join(out)}
 
 
-OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply, "say": op_say}
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+
+INFO["typed"] = True
+TYPED_STEP_RE = re.compile(r"^(bar|b|[0-9]{1,2})[-/](off|o|[0-9]{1,2})\Z")
+TYPED_COMMANDS = {"roll": ({"move": ["roll"]}, "roll"), "double": ({"move": ["double"]}, "double"),
+                  "end": ({"step": "end"}, "end your turn"), "undo": ({"step": "undo"}, "undo a step")}
+OFFER_ANSWERS = ("take", "drop", "accept", "reject", "decline")
+
+
+def offer_answer_refused(st, seat):
+    """Why an offer is not answered from the command line, as a sentence."""
+    if st["phase"] == "take" and seat == st["turn"]:
+        return "A double is answered in its dialog, not from the command line."
+    if st["phase"] == "resign" and seat == st["turn"]:
+        return "An offer to resign is answered in its dialog, not from the command line."
+    return "There is no offer for you to answer."
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. A step, as /13-9,
+    /bar-22, /b-22, /6-off or /6-o, moves a checker. /roll and /double start a turn, and /end and /undo
+    end the turn or take back a step. Offers are answered in their dialogs, so /take, /drop, /accept,
+    /reject and /decline are refused."""
+    st, seat = req["state"], req.get("seat", -1)
+    words = [w.lower() for w in req.get("words") or []]
+    if not words:
+        return {}
+    if len(words) == 1 and words[0] in OFFER_ANSWERS:
+        return {"error": offer_answer_refused(st, seat)}
+    if len(words) == 1 and words[0] in TYPED_COMMANDS:
+        reply, what = TYPED_COMMANDS[words[0]]
+        reply = dict(reply, what=what)
+    elif all(TYPED_STEP_RE.match(w) for w in words):
+        if len(words) > 1:
+            return {"error": "Type one step at a time, as in /13-9."}
+        a, b = TYPED_STEP_RE.match(words[0]).groups()
+        reply = {"move": ["%s-%s" % ("bar" if a == "b" else a, "off" if b == "o" else b)]}
+    else:
+        return {}
+    if seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    if "move" in reply:
+        reply["move"] = list(reply["move"])
+    return reply
+
+
+OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply, "say": op_say,
+       "typed": op_typed}
 
 
 def main():

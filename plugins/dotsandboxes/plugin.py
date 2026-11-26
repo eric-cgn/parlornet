@@ -306,8 +306,31 @@ def op_say(req):
     return {"say": ""}
 
 
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+
+INFO["typed"] = True
+TYPED_LINE_RE = re.compile(r"^[a-z][0-9]{1,2}-?[a-z][0-9]{1,2}\Z")
+TYPED_DOT_RE = re.compile(r"^[a-z][0-9]{1,2}\Z")
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. A line is its two
+    dots, as /a1-b1, /a1b1 or /a1 b1."""
+    st, seat = req["state"], req.get("seat", -1)
+    words = [w.lower() for w in req.get("words") or []]
+    if len(words) == 1 and TYPED_LINE_RE.match(words[0]):
+        token = words[0]
+    elif len(words) == 2 and all(TYPED_DOT_RE.match(w) for w in words):
+        token = words[0] + "-" + words[1]
+    else:
+        return {}
+    if seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    return {"move": [token], "what": "draw %s" % token}
+
+
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply,
-       "result": op_result, "drop": op_drop, "say": op_say}
+       "result": op_result, "drop": op_drop, "say": op_say, "typed": op_typed}
 
 
 def main():
