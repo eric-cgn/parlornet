@@ -826,5 +826,43 @@ class Frontends(unittest.TestCase):
         self.assertIn("Waiting for an opponent", plain_screen(self, G, ["V rummytile/1 1"], 0))
 
 
+class TelnetTileColors(unittest.TestCase):
+    """The telnet tiles: bright white (107) with a dark gold yellow (38;5;136) in utf8, for xterm-class
+    terminals; light grey (47) in pc and ansi, where a yellow tile is bright yellow on black. The cursor's
+    cyan (46) and a picked tile's yellow (43) still stand out, and a yellow tile's number is black on them."""
+
+    def test_the_attributes_in_each_mode(self):
+        want = {"utf8": {"R7": "0;31;107", "B7": "0;34;107", "K7": "0;30;107", "J": "0;35;107",
+                         "Y7": "0;38;5;136;107"},
+                "pc": {"R7": "0;31;47", "B7": "0;34;47", "K7": "0;30;47", "J": "0;35;47", "Y7": "0;1;33;40"}}
+        want["ansi"] = want["pc"]
+        for mode, tiles in want.items():
+            for t, attr in tiles.items():
+                self.assertEqual(G.tile_attr(t, mode=mode), attr, (mode, t))
+                self.assertEqual(G.tile_attr(t, "46", mode), "0;%s;46" % ("30" if t[0] == "Y" else attr.split(";")[1]))
+                self.assertEqual(G.tile_attr(t, "43", mode), "0;%s;43" % ("30" if t[0] == "Y" else attr.split(";")[1]))
+
+    def test_the_terminal_shows_them(self):
+        """Every cell as a terminal shows it after the painter's changes, the tiles' 256 and bright codes
+        included, matches what was composed, and the tiles on the screen have their mode's colors."""
+        from game_checks import AttrScreen, FakeIO, ScreenCore, session
+        lines = view_lines(midgame(), 0)
+        for mode in ("pc", "utf8", "ansi"):
+            io = FakeIO(mode)
+            s = session(io, ScreenCore(G.KEY, lines), mode)
+            g = G.AnsiScreen(s, "3", G.KEY, 0)
+            g.names, g.turn_secs, g.v, g.log = ["ann", "bob"], 300, g.parse(lines), []
+            g.snap()
+            term = AttrScreen()
+            for k in [None, "RIGHT", "DOWN", "DOWN", "LEFT", "UP"]:
+                if k:
+                    g.on_arrow(k)
+                cv, pos = g.screen()
+                term.feed(s.painter.frame(cv, pos))
+                self.assertEqual(term.wrong_cells(cv), [], (mode, k))
+            backs = {c[4] for row in term.cells for c in row if c[0] in "RBKY" and c[4] in ("47", "107", "40")}
+            self.assertEqual(backs, {"107"} if mode == "utf8" else {"47", "40"}, mode)
+
+
 if __name__ == "__main__":
     unittest.main()

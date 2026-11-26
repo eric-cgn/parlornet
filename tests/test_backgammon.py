@@ -313,5 +313,131 @@ class OverProtocol(unittest.IsolatedAsyncioTestCase):
         self.assertIn("NOSTAGE", (await reversi.req("UND 2"))[0])
 
 
+class TelnetCountdowns(unittest.TestCase):
+    """Telnet rolls for you 5 seconds into your turn and sends a finished move 5 seconds after the last
+    checker, with a countdown on the screen. Any key stops a countdown, and Esc (Enter in plain mode) only
+    stops it. A fake clock stands in for the seconds."""
+
+    def screen(self, mode, phase, me=0, turn=0):
+        from test_adapters import BgFakeCore, BG_TABS, FakeIO, LONG, bg_lines
+        from adapters import telnet as T
+        from adapters.games import backgammon as G
+        core = BgFakeCore(BG_TABS, bg_lines(phase, turn))
+        io = FakeIO(mode)
+        if mode == "plain":
+            out = []
+            io.write = out.append
+            io.out = out
+        s = T.Session(io, core, mode, LONG)
+        g = (G.AnsiScreen if mode != "plain" else G.PlainScreen)(s, "3", G.KEY, me)
+        g.names, g.turn_secs, g.v = [LONG, LONG[::-1]], 300, g.parse(core.lines)
+        g.s.bghome = "right"
+        if mode != "plain":
+            g.snap()
+        self.t = [100.0]
+        g.now = lambda: self.t[0]
+        return g, core
+
+    def line(self, g):
+        return g.screen()[0].lines()[ROWS_HINT]
+
+    def test_the_roll_comes_after_five_seconds(self):
+        for mode in ("pc", "utf8", "ansi"):
+            g, core = self.screen(mode, "roll")
+            asyncio.run(g.tick())
+            self.assertEqual(self.line(g).strip(), "Rolling in 5 seconds. Press Esc to double or wait.")
+            self.t[0] += 2.5
+            asyncio.run(g.tick())
+            self.assertEqual(self.line(g).strip(), "Rolling in 3 seconds. Press Esc to double or wait.")
+            self.assertLessEqual(g.tick_in(), 0.5)          # the loop wakes when the number changes
+            self.assertNotIn("MOV 3 roll", core.reqs)
+            self.t[0] += 2.5
+            asyncio.run(g.tick())
+            self.assertIn("MOV 3 roll", core.reqs, mode)
+            self.t[0] += 10                                 # the same view comes back: no second roll
+            asyncio.run(g.tick())
+            asyncio.run(g.tick())
+            self.assertEqual(core.reqs.count("MOV 3 roll"), 1)
+
+    def test_esc_stops_it_and_the_turn_waits(self):
+        g, core = self.screen("pc", "roll")
+        asyncio.run(g.tick())
+        self.assertTrue(asyncio.run(g.key_seen("ESC")), "Esc only stops the countdown: no menu")
+        self.t[0] += 60
+        asyncio.run(g.tick())
+        self.assertNotIn("MOV 3 roll", core.reqs)
+        self.assertIn("The dice wait for you. Press Enter when you want to roll.", self.line(g))
+        asyncio.run(g.on_key("d"))                          # then the player can double
+        self.assertIn("MOV 3 double", core.reqs)
+
+    def test_any_other_key_stops_it_too(self):
+        g, core = self.screen("pc", "roll")
+        asyncio.run(g.tick())
+        self.assertFalse(asyncio.run(g.key_seen("?")), "the key does what it does")
+        self.assertIsNone(g.auto)
+        self.t[0] += 60
+        asyncio.run(g.tick())
+        self.assertNotIn("MOV 3 roll", core.reqs)
+
+    def test_not_on_the_opponents_turn_nor_while_typing(self):
+        g, core = self.screen("pc", "roll", me=1)
+        asyncio.run(g.tick())
+        self.assertIsNone(g.auto)
+        g, core = self.screen("pc", "roll")
+        g.buf = "say hel"
+        asyncio.run(g.tick())
+        self.assertIsNone(g.auto)
+
+    def test_the_move_is_sent_after_the_last_checker(self):
+        for mode in ("pc", "utf8", "ansi"):
+            g, core = self.screen(mode, "done")             # the dice are spent: nothing left to play
+            asyncio.run(g.tick())
+            self.assertEqual(self.line(g).strip(), "Sending your move in 5 seconds. Press Esc to change it.")
+            self.t[0] += 4.9
+            asyncio.run(g.tick())
+            self.assertNotIn("END 3", core.reqs)
+            self.t[0] += 0.2
+            asyncio.run(g.tick())
+            self.assertIn("END 3", core.reqs, mode)
+
+    def test_esc_leaves_the_move_unsent(self):
+        g, core = self.screen("pc", "done")
+        asyncio.run(g.tick())
+        self.assertTrue(asyncio.run(g.key_seen("ESC")))
+        self.t[0] += 60
+        asyncio.run(g.tick())
+        self.assertNotIn("END 3", core.reqs)
+        self.assertIn("Your move waits. Press E to send it, or U to take a step back.", self.line(g))
+        g, core = self.screen("pc", "done")                 # undoing a step stops it as well
+        asyncio.run(g.tick())
+        self.assertFalse(asyncio.run(g.key_seen("u")))
+        self.t[0] += 60
+        asyncio.run(g.tick())
+        self.assertNotIn("END 3", core.reqs)
+
+    def test_plain_prints_one_line(self):
+        g, core = self.screen("plain", "roll")
+        asyncio.run(g.tick())
+        self.t[0] += 1.5
+        asyncio.run(g.tick())
+        said = "".join(g.io.out)
+        self.assertEqual(said.count("Rolling in"), 1, said)
+        self.assertIn(" Rolling in 5 seconds. Type double, or press Enter to wait.\n", said)
+        self.t[0] += 4
+        asyncio.run(g.tick())
+        self.assertIn("MOV 3 roll", core.reqs)
+        g, core = self.screen("plain", "done")
+        asyncio.run(g.tick())
+        self.assertIn(" Sending your move in 5 seconds. Press Enter to change it.\n", "".join(g.io.out))
+        self.assertTrue(asyncio.run(g.key_seen("ENTER")))
+        self.t[0] += 60
+        asyncio.run(g.tick())
+        self.assertNotIn("END 3", core.reqs)
+        self.assertIn("Type end to send your move", "".join(g.io.out))
+
+
+ROWS_HINT = 21      # the full screen's hint line (ROWS - 3)
+
+
 if __name__ == "__main__":
     unittest.main()

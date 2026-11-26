@@ -397,8 +397,23 @@ def tile_text(t):
     return t.ljust(3)
 
 
-def tile_attr(t, bg="47"):
-    return "0;%s;%s" % (FG.get(t[0], "30"), bg)
+def tile_attr(t, bg=None, mode="pc"):
+    """A tile's colors in a display mode, on its own background or on bg (the cursor's 46, a picked
+    tile's 43). In utf8, for xterm-class terminals, a tile is bright white (107) and a yellow tile's
+    number is dark gold from the 256 colors (38;5;136), since yellow does not read on white. The other
+    modes are for terminals with only the eight colors, where white is light grey (47), and no yellow
+    reads on it, so a yellow tile there is bright yellow on black. On the cursor or a picked tile a
+    yellow tile's number is black."""
+    own = "107" if mode == "utf8" else "47"
+    fg = FG.get(t[0], "30")
+    if t[0] == "Y":
+        if bg not in (None, own):
+            fg = "30"
+        elif mode == "utf8":
+            fg = "38;5;136"
+        else:
+            fg, own = "1;33", "40"
+    return "0;%s;%s" % (fg, bg or own)
 
 
 class RtBase(GameBase):
@@ -598,7 +613,7 @@ class AnsiRummy(RtBase, AnsiGame):
             (self.tpick[0] == "set" and key[0] == "tile" and key[1] == self.tpick[1])))
         cur = key == self.cur and self.me >= 0 and self.playing()
         cv.put(x, y, self.tg["pick"] if picked else " ", A_YELLOW)
-        cv.put(x + 1, y, tile_text(t), tile_attr(t, "46" if cur else "43" if picked else "47"))
+        cv.put(x + 1, y, tile_text(t), tile_attr(t, "46" if cur else "43" if picked else None, self.s.mode))
         cv.hot_area(x, y, 4, 1, ("it", key))
 
     def draw_table(self, cv):

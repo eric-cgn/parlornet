@@ -91,6 +91,67 @@ def ansi_screens(tc, module, lines, me=0, keys=(), names=(LONG, LONG.upper()), l
     return out
 
 
+class AttrScreen:
+    """An 80x24 terminal that keeps each cell's character and how it looks (bold, reverse video, foreground,
+    background), replaying what the Painter sends: SGR, cursor moves, clears and text."""
+
+    BLANK = (" ", False, False, None, None)
+
+    def __init__(self):
+        self.cells = [[self.BLANK] * 80 for _ in range(24)]
+        self.x = self.y = 0
+        self.look = [False, False, None, None]
+
+    def feed(self, text):
+        i = 0
+        while i < len(text):
+            c = text[i]
+            if c == "\x1b" and text[i + 1:i + 2] == "[":
+                j = i + 2
+                while not "@" <= text[j] <= "~":
+                    j += 1
+                params, final = text[i + 2:j], text[j]
+                nums = [int(n) if n.isdigit() else 0 for n in params.split(";")] if params else []
+                if final == "m":
+                    codes = params.split(";") if params else ["0"]
+                    if codes[0] in ("", "0"):
+                        self.look = [False, False, None, None]
+                    b, r, f, g = T.Painter._parts(params)
+                    self.look = [self.look[0] or b, self.look[1] or r, f or self.look[2], g or self.look[3]]
+                elif final == "H":
+                    self.y = (nums[0] if nums and nums[0] else 1) - 1
+                    self.x = (nums[1] if len(nums) > 1 and nums[1] else 1) - 1
+                elif final == "C":
+                    self.x += nums[0] if nums and nums[0] else 1
+                elif final == "J":
+                    self.cells = [[self.BLANK] * 80 for _ in range(24)]
+                i = j + 1
+                continue
+            if c == "\r":
+                self.x = 0
+            elif c == "\n":
+                self.y += 1
+            elif c >= " ":
+                self.cells[self.y][self.x] = (c,) + tuple(self.look)
+                self.x += 1
+            i += 1
+
+    @staticmethod
+    def look_of(attr):
+        """How a Canvas attribute ("0;7;30;47") looks: (bold, reverse, foreground, background)."""
+        return T.Painter._parts(attr)
+
+    def wrong_cells(self, cv):
+        """The cells that do not show what the canvas holds: [(x, y, wanted, shown)]."""
+        out = []
+        for y in range(24):
+            for x in range(80 if y < 23 else 79):
+                want = (cv.ch[y][x],) + self.look_of(cv.at[y][x])
+                if self.cells[y][x] != want:
+                    out.append((x, y, want, self.cells[y][x]))
+        return out
+
+
 def plain_screen(tc, module, lines, me=0, names=(LONG, LONG.upper()), prepare=None):
     """The module's plain screen with the view lines given: every line (and the prompt) at most 80
     columns and ASCII. Returns the text."""

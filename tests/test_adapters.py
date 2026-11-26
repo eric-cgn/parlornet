@@ -853,7 +853,7 @@ class PasswordEmail(MailCapture, Stack):
         self.assert_never_seen((b, e), (temp, "Pia's own 1"))
 
     def test_telnet(self):
-        a = Client(self.tel_port)
+        a = Client(self.tel_port, display="4")
         a.until("Login")
         a.send("tem\r\n")                                        # no account: said so, never a sign-up
         a.until("There is no account named tem here. To make one, type new")
@@ -875,8 +875,6 @@ class PasswordEmail(MailCapture, Stack):
         a.send("Tem pass 1\r\n")
         a.until("Type it again")
         a.send("Tem pass 1\r\n")
-        a.until("Choice [")
-        a.send("4\r\n")
         a.until("Press Enter")
         a.send("\r\n")
         a.until("Your tables")
@@ -888,7 +886,7 @@ class PasswordEmail(MailCapture, Stack):
         b.send("tem\r\n")
         b.until("Password (or press Enter")
         b.send("Tem pass 1\r\n")
-        b.until("Choice [")
+        b.until("Press Enter for the menu")
         b.close()
 
     def test_telnet_stopping_before_the_new_password(self):
@@ -918,7 +916,7 @@ class PasswordEmail(MailCapture, Stack):
         a.send("Tod's own 1\r\n")
         a.until("Type it again")
         a.send("Tod's own 1\r\n")
-        a.until("Choice [")
+        a.until("Press Enter for the menu")
         a.close()
 
 
@@ -1047,12 +1045,14 @@ class VT:
 
 
 class Client:
-    """A raw socket to the telnet adapter (no telnet negotiation, so the
-    adapter falls back to its default after the terminal-type wait). It
-    presses Enter at the title page, as a player does (title=False leaves
-    the page up)."""
+    """A raw socket to the telnet adapter (no telnet negotiation unless ttype is given). At the start it
+    presses Enter to open the display menu and picks display there: "1" (PC characters) by default, the
+    detected mode ("") with a terminal type, or None to press nothing and let the start run out. It
+    presses Enter at the title page, as a player does (title=False leaves the page up)."""
 
-    def __init__(self, port, enc="cp437", ttype=None, title=True):
+    START = T.START_TEXT.encode()
+
+    def __init__(self, port, enc="cp437", ttype=None, title=True, display="default"):
         self.s = socket.create_connection(("127.0.0.1", port), timeout=5)
         self.s.settimeout(0.2)
         self.s.sendall(bytes([255, 251, 1, 255, 253, 3]))  # IAC WILL ECHO, IAC DO SGA: must be ignored
@@ -1063,6 +1063,8 @@ class Client:
         self.vt = VT(enc)
         self.closed = False
         self.title = title          # Enter at the title page, once
+        self.display = ("" if ttype else "1") if display == "default" else display
+        self.started = display is None      # the start's menu answered (or not to be opened)
 
     def send(self, data):
         self.s.sendall(data.encode("latin-1") if isinstance(data, str) else data)
@@ -1077,7 +1079,14 @@ class Client:
             return
         self.raw += d
         self.vt.feed(d)
-        if self.title and b"Press Enter" in self.raw:
+        if not self.started and self.START in self.raw:
+            if b"Choice [" in self.raw:
+                self.started = True
+                self.send(self.display + "\r\n")
+            elif not getattr(self, "opened", False):
+                self.opened = True
+                self.send("\r\n")
+        if self.title and b"Press Enter" in self.raw.replace(self.START, b""):
             self.title = False
             self.send("\r\n")
 
@@ -1122,8 +1131,9 @@ class Client:
 
 class TelnetBase(Stack):
     def login(self, c, name, choice, new=True):
-        """Sign in (or, new=True, make a new account: "new", then the name) by
-        the server's steps; returns the output up to the menu."""
+        """Pick the display (choice, as typed in the start's menu), then sign in (or, new=True, make a new
+        account: "new", then the name) by the server's steps; returns the output up to the menu."""
+        c.display = choice
         c.until("Login")
         if new:
             c.send("new\r\n")
@@ -1136,11 +1146,9 @@ class TelnetBase(Stack):
             if new:
                 c.until("Type it again")
                 c.send(pw + "\r\n")
-        c.until("Choice [")
-        c.send(choice + "\r\n")
-        out = c.until("Press Enter")
+        out = c.until("Press Enter for the menu")
         c.send("\r\n")
-        c.until("Your tables", screen=choice != "4")
+        c.until("Your tables", screen=c.display != "4")
         return out
 
 
@@ -1151,7 +1159,7 @@ class Telnet(TelnetBase):
         self.login(a, "tess", "4")                       # plain text
         a.send("new reversi 5m\r\n")
         a.until("Waiting for an opponent")
-        self.login(b, "tom", "")                        # default: PC characters, full screen
+        self.login(b, "tom", "1")                       # PC characters, full screen
         b.send("join 1\r\n")
         b.until("\xbb")                                 # CP437 double-line corner
         self.assertIn("\x1b[", b.raw.decode("latin-1"))
@@ -1197,7 +1205,7 @@ class TelnetNone(TelnetBase):
 
     def test_name_alone(self):
         a = Client(self.tel_port)
-        out = self.login(a, "noel", "")
+        out = self.login(a, "noel", "1")
         a.send("?")
         a.until("this help", screen=True)
         self.assertNotIn("token", a.vt.text().lower())
@@ -1214,7 +1222,7 @@ class TelnetFullScreen(TelnetBase):
 
     def test_menu_and_board_by_keys(self):
         a, b = Client(self.tel_port), Client(self.tel_port, enc="utf-8")
-        self.login(a, "ann", "")                         # no terminal type: PC characters
+        self.login(a, "ann", "1")                        # PC characters
         a.until("Start a new Reversi table", screen=True)
         a.until("No other tables yet", screen=True)
         a.send("n")                                      # N: new table, time-per-turn picker
@@ -1304,7 +1312,7 @@ class TelnetBackgammon(TelnetBase):
 
     def test_backgammon_by_keys(self):
         a, b = Client(self.tel_port), Client(self.tel_port)
-        self.login(a, "bea", "")                          # PC characters
+        self.login(a, "bea", "1")                         # PC characters
         a.until("Start a new Backgammon table", screen=True)
         a.send(self.DOWN)                                 # from the Reversi row to the Backgammon row
         a.until("Enter starts a new Backgammon table", screen=True)
@@ -1329,21 +1337,23 @@ class TelnetBackgammon(TelnetBase):
         o.until("%s to move" % who, screen=True)
         steps = 0
         for _ in range(5):
-            if "Nothing left to play" in m.vt.text():
+            if "Sending your move in" in m.vt.text():
                 break
             m.send(" ")                                   # Space picks up a checker that can move
             m.until("Enter moves", screen=True)           # ... and the cursor is on its nearest target
             m.send("\r")                                  # Enter puts it down
             steps += 1
             m.mark = len(m.raw)
-            wait_any((m,), ["Enter picks up", "Nothing left to play"])
+            wait_any((m,), ["Enter picks up", "Sending your move in"])
         self.assertGreaterEqual(steps, 2)
         m.until("E end turn", screen=True)                # the status bar offers it now
+        m.send(self.ESC)                                  # Esc stops the countdown: the move waits
+        m.until("Your move waits. Press E to send it", screen=True)
         m.send("e")
         m.until("Waiting for", screen=True)
         o.until("%s moves" % who, screen=True)            # the other player sees the steps
-        o.until("Your turn: Enter rolls the dice", screen=True)
-        o.send("\r")                                      # Enter rolls
+        o.until("Rolling in", screen=True)                # the countdown to the roll
+        o.send("\r")                                      # Enter rolls now
         other = "bert" if m is a else "bea"
         o.until("%s rolls" % other, screen=True)
         m.until("%s rolls" % other, screen=True)
@@ -1379,7 +1389,7 @@ class TelnetMouse(TelnetBase):
         a.until("Waiting for an opponent", screen=True)
         a.until("Time per turn: 1 hour", screen=True)
 
-        self.login(b, "max", "")
+        self.login(b, "max", "1")
         b.until("open: Enter joins", screen=True)
         b.send(self.DOWN * new_rows())
         b.until("Table 1: mia (with telnet (xterm-256color)) waits. Enter sits down", screen=True)

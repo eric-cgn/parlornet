@@ -153,9 +153,19 @@ def described(move):
     return "a pass" if f[0] == "PASS" else move
 
 
+def exchange_refused(bag=None):
+    """Why an exchange can't be made with too few tiles in the bag, in plain words."""
+    if bag is None:
+        return "You can't exchange now because the bag holds fewer than seven tiles."
+    return "You can't exchange now. The bag holds %d tile%s, and an exchange needs at least seven." % (
+        bag, "" if bag == 1 else "s")
+
+
 def refusal(move, reason):
     """The core's reason for refusing a move -> what the player reads: 'Can't play HEX across from g4: ...'.
     The play is named as the board makes it, so the letters on the board that joined it show."""
+    if move.startswith("EXCH") and reason.startswith("exchanging needs"):
+        return exchange_refused()
     return "Can't play %s: %s." % (described(move), reason.rstrip("."))
 
 
@@ -742,22 +752,37 @@ def web_parts(v, tid, link, seat, names, sel):
 # ---- telnet --------------------------------------------------------------------------
 
 HELP = [
-    "Arrows    move to the next empty square",
-    "Enter     start a word here (again: down; off)",
-    "letters   your rack's letters, then Enter; the",
-    "          letters on the board join the word",
-    "          (_ then a letter plays a blank as it)",
-    "i4 a XY   play X and Y across from i4 (d: down)",
-    "check ... a play's score and words, not played",
-    "pass      pass the turn; exchange ABC: swap",
-    "say text  talk; resign  give up (asks first)",
-    "Esc       clear the start, or back to the menu",
-    "Mouse     click a square to start a word there",
-    "colors    the board's colors (kept for next time)",
-    "A word that is also a command (exit, pass ...):",
-    "type it with its square, like h8 a pass.",
-    "Leaving never resigns; your turn timer runs.",
+    "The arrow keys move to the next empty square. Click a square,",
+    "or press Enter on it, to start a word across from there.",
+    "Press Enter again to go down, and once more to clear the start.",
+    "Then type the letters from your rack and press Enter to play.",
+    "Letters already on the board join your word. Type _ and a",
+    "letter to play a blank as that letter.",
+    "You can also type a square and a word, like i4 a XY for",
+    "across or i4 d XY for down.",
+    "Type check and a play, like check i4 a XY, to see its score.",
+    "Type pass to skip your turn.",
+    "Type exchange and the letters, like exchange QXZ, to swap them",
+    "for new tiles. You can exchange only while the bag holds at",
+    "least seven tiles.",
+    "Type say and your text to talk, or resign to give up.",
+    "Type colors to change the board's colors.",
+    "A word like pass needs its square in front, like h8 a pass.",
+    "Esc clears the start or goes back to the menu. Leaving never resigns.",
 ]
+# On your turn, with no word started: how to pass or exchange (the hint line, and once a turn in plain mode).
+PASS_HINT = "Type pass to skip your turn, or type exchange and the letters to swap them."
+RACK = 7                    # tiles on a rack, and the fewest in the bag that an exchange needs
+
+
+def points_lines(til):
+    """The second page of help: every letter's points and the blank's, seven letters to a row."""
+    cells = ["%s %-2d" % (c, til[c][0]) for c in sorted(til) if c != "_"]
+    rows = ["   ".join(cells[i:i + 7]).rstrip() for i in range(0, len(cells), 7)]
+    blank = til.get("_", (0, 0))[0]
+    return (["Each letter is worth the points shown beside it.", ""] + rows +
+            ["", "A blank is worth %d point%s and can stand for any letter." % (blank, "" if blank == 1 else "s")])
+
 
 PLAY_WORDS = ("a", "across", "h", "d", "down", "v")
 
@@ -888,6 +913,9 @@ class GridBase(GameBase):
 
     async def move(self, word):
         """A play, exchange or pass; on a refusal, the reason in the player's own terms (not the command)."""
+        bag = (self.v or {}).get("bag")
+        if word.startswith("EXCH ") and isinstance(bag, int) and bag < RACK:
+            return exchange_refused(bag)
         _, final = await self.core.req("MOV %s %s" % (self.tid, word))
         if not final.startswith("OK"):
             return refusal(word, err_text(final))
@@ -930,8 +958,8 @@ class GridBase(GameBase):
         return {(x + dx * i, y + dy * i) for i in range(len(word))}
 
     def rack_text(self):
-        v = self.v
-        return " ".join("%s%d" % (c, v["til"].get(c.upper(), (0, 0))[0]) for c in v["rack"] or "")
+        """The rack's letters, without their points (help lists them)."""
+        return " ".join(self.v["rack"] or "")
 
     def turn_line(self):
         v = self.v
@@ -977,6 +1005,12 @@ class AnsiGrid(GridBase, AnsiGame):
         self.cur = (min(max(self.cur[0], 1), SIZE), min(max(self.cur[1], 1), SIZE))
         if mine and not self.was_my_turn and self.v and not self.v["tiles"]:
             self.cur = self.v["ctr"]
+        tiles = (self.v or {}).get("tiles") or {}
+        if self.cur in tiles and len(tiles) < SIZE * SIZE:     # a play covered it: on to the next empty square
+            x, y = self.cur
+            while (x, y) in tiles:
+                x, y = (x % SIZE) + 1, y if x < SIZE else y % SIZE + 1
+            self.cur = (x, y)
         self.was_my_turn = mine
 
     # ---- drawing ---------------------------------------------------------
@@ -1095,7 +1129,7 @@ class AnsiGrid(GridBase, AnsiGame):
             cv.put(x, by + SIZE + 2, text, attr)
             x += len(text)
         if self.start and self.me >= 0 and self.playing():
-            line = "Start %s %s: type the letters, Enter plays" % (sq_name(*self.start[:2]), dir_word(self.start[2]))
+            line = "Your word starts at %s and goes %s." % (sq_name(*self.start[:2]), dir_word(self.start[2]))
         else:
             line = self.last_line()
         cv.put(bx, by + SIZE + 3, line[:3 * SIZE + 2], A_TEXT)
@@ -1136,12 +1170,9 @@ class AnsiGrid(GridBase, AnsiGame):
             cv.put(px + 2, 9, ("Tiles in the bag: %d" % v["bag"])[:inner], A_TEXT)
         rule(cv, g, px, 10, pw, A_BORDER, "Your rack" if self.me >= 0 else "Racks", tattr=A_HEAD)
         if self.me >= 0 and started and v["rack"] is not None:
-            x = px + 2
-            for c in v["rack"]:
-                t = "%s%d" % (c, v["til"].get(c.upper(), (0, 0))[0])
-                cv.put(x, 11, t, self.attrs()["tile"])
-                x += len(t) + 1
-            cv.put(px + 2, 12, "_ is a blank: _E plays E"[:inner], A_DIM)
+            for i, c in enumerate(v["rack"][:RACK]):      # the letters as tiles; help lists their points
+                cv.put(px + 2 + 3 * i, 11, " %s " % c, self.attrs()["tile"])
+            cv.put(px + 2, 12, "Type _E for a blank E."[:inner], A_DIM)
         elif self.me < 0:
             cv.put(px + 2, 11, "Hidden from watchers."[:inner], A_DIM)
         rule(cv, g, px, 13, pw, A_BORDER, "Log", tattr=A_HEAD)
@@ -1154,14 +1185,30 @@ class AnsiGrid(GridBase, AnsiGame):
         if self.over:
             return "%s. Esc goes back to the menu." % self.over, A_YELLOW
         if self.me < 0:
-            return "Watching. Type say <text> to talk; Esc goes back to the menu.", A_DIM
+            return "You are watching. Type say and your text to talk, or press Esc for the menu.", A_DIM
         if self.my_turn():
             if self.start:
-                return ("Your move: type the letters from %s, Enter plays; check <letters> scores."
-                        % sq_name(*self.start[:2]), A_TEXT)
-            return ("Your move. Enter on a square starts a word (again: down), or type %sh8 a WORD."
-                    % (":" if self.move_of("h") else ""), A_TEXT)
+                return "Type your letters from %s and press Enter to play them." % sq_name(*self.start[:2]), A_TEXT
+            return "Your move. Press Enter on a square to start a word there.", A_TEXT
         return "Waiting for %s. Leaving or logging off never resigns." % self.name(v["turn"]), A_DIM
+
+    def input_line(self, cv):
+        """Line 23: what is being typed, or on your turn with no word started, how to pass or exchange."""
+        if self.buf:
+            return super().input_line(cv)
+        if self.my_turn() and not self.start and not self.msg:
+            cv.put(1, ROWS - 2, self.pass_hint()[:COLS - 2], A_DIM)
+
+    def pass_hint(self):
+        """PASS_HINT, with : before a word whose first letter moves the cursor (exchange under ESDF)."""
+        words = {w: (":" if self.move_of(w[0]) else "") + w for w in ("pass", "exchange")}
+        return PASS_HINT.replace("type pass", "type " + words["pass"]).replace(
+            "type exchange", "type " + words["exchange"])
+
+    async def help(self):
+        """Two pages: how to play, then every letter's points (the rack shows only the letters)."""
+        await self.help_box(self.TITLE, self.HELP, foot="Press any key to see the letter points.")
+        await self.message("Letter points", points_lines((self.v or {}).get("til") or STD_TIL))
 
     def cursor_at(self):
         if self.me >= 0 and self.playing():
@@ -1233,14 +1280,22 @@ class PlainGrid(GridBase, PlainGame):
     """Grid Words for plain terminals: the board printed line by line, plays typed at a prompt."""
 
     BOARD_KINDS = ("PLAY", "EXCH", "PASS", "JOIN", "LEAVE", "START", "END")
-    HELP_TEXT = (" i4 a X plays your X across from i4; i4 d X plays it down. Start on\n"
-                 " an empty square and type only your rack's letters: the letters\n"
-                 " already on the board join the word. _E plays a blank as E.\n"
-                 " check h8 a WORD shows the score without playing. pass passes;\n"
-                 " exchange ABC puts A, B and C back in the bag for new tiles.\n"
-                 " say <text> talks to the table, resign gives up (it asks first),\n"
-                 " menu goes back to the menu (the game goes on), redraw or Enter\n"
-                 " shows the board again.")
+    HELP = (" Type i4 a XY to play your X and Y across from i4, or i4 d XY for down.\n"
+            " Start on an empty square and type only your rack's letters. Letters already\n"
+            " on the board join the word. Type _E to play a blank as E.\n"
+            " Type check and a play, like check h8 a WORD, to see its score.\n"
+            " Type pass to skip your turn.\n"
+            " Type exchange and the letters, like exchange QXZ, to swap them for new tiles.\n"
+            " You can exchange only while the bag holds at least seven tiles.\n"
+            " Type say and your text to talk to the table, or resign to give up.\n"
+            " Type menu to go back to the menu. The game goes on while you are away.\n"
+            " Type redraw, or press Enter, to see the board again.")
+
+    @property
+    def HELP_TEXT(self):
+        """The help, then every letter's points (the rack shows only the letters)."""
+        return "\n".join([self.HELP, ""] + [" " + l if l else "" for l in
+                                            points_lines((self.v or {}).get("til") or STD_TIL)])
 
     def lines(self):
         v, me = self.v, self.me
@@ -1265,10 +1320,10 @@ class PlainGrid(GridBase, PlainGame):
         side[11] = "3W 2W: word x3 x2"
         side[12] = "3L 2L: letter x3 x2"
         if me >= 0 and not self.over:
-            side[13] = "Type h8 a WORD (d: down),"
-            side[14] = "check h8 a WORD, pass, help."
+            side[13] = "Type h8 a WORD to play."
+            side[14] = "Type help to learn more."
         else:
-            side[13] = "Type say <text>, menu, help."
+            side[13] = "Type help for the commands."
         out.append("     " + "".join(" %s " % LETTERS[i].lower() for i in range(SIZE)))
         out.append("    +" + "-" * (3 * SIZE) + "+")
         for y in range(1, SIZE + 1):
@@ -1276,6 +1331,8 @@ class PlainGrid(GridBase, PlainGame):
             out.append(("%3d |%s| %s" % (y, cells, side.get(y - 1, ""))).rstrip()[:80])
         out.append("    +" + "-" * (3 * SIZE) + "+")
         out.append(" " + (self.over or clock_text(v, self.names))[:78])
+        if self.my_turn():
+            out.append(" " + PASS_HINT)         # with the board, so once a turn
         for l in self.log[-4:]:
             out.append(" " + l[:78])
         return out

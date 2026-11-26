@@ -288,12 +288,10 @@ class TelnetFE:
     # -- the connection
     def connect(self, p):
         with self.login_lock:
-            c = Client(self.tc.tel_port, enc=ENC[self.mode], ttype="VT100")
+            c = Client(self.tc.tel_port, enc=ENC[self.mode], ttype="VT100", display=CHOICE[self.mode])
             c.s.settimeout(0.05)
             self.raw_until(c, "Login")                  # the name has an account (the oracle's HELO made it)
             c.send(p.name + "\r\n")
-            self.raw_until(c, "Choice [")
-            c.send(CHOICE[self.mode] + "\r\n")
             self.raw_until(c, "Press Enter")
             c.send("\r\n")
         self.see(c, "Your tables")
@@ -464,7 +462,7 @@ class TelnetFE:
         if self.full:
             self.select(c, "Table %s:" % tid, "watches")
             c.send("\r")
-            self.see(c, "Watching")
+            self.see(c, "watching")                     # the title bar says so on every game's screen
         else:
             self.mark(c)
             c.send("watch %s\r\n" % tid)
