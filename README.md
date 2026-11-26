@@ -1,38 +1,37 @@
 # ParlorNet
 
-Turn-based game server for any computer, old or new: network multiplayer games for any machine from an 8-bit micro up.
+ParlorNet is a server for turn-based games such as Reversi, Backgammon and Checkers. It speaks the protocols of old game servers, so you can play on it with the original game programs. These programs were first released about 25 to 50 years ago for the computers of their day. On a classic Mac, for example, you can play with Reversi The Eclipse, MacFIBS or GameMaster. If your computer has no such program, you can play in a web browser or a telnet program. ParlorNet Play lets you play in the browser of a current computer or phone.
 
-ParlorNet brings back the protocols of old game servers. Festivals, events and private groups can run one server for many games, and people can play on it with the original game programs. For the 2027 release, "retro" means game programs first released from 1977 to 2000, about 25 to 50 years back, and new native-client work targets that window; web browsers and telnet programs are the fallback for any computer (docs/clients.md). FIBS is still running at fibs.com (telnet fibs.com 4321).
+To find a program for your computer, open the Clients page at http://docs.parlornet.org/. It lists the programs that play each game on each kind of computer. Each program has its own page that tells you where to get it, how to set it up and how to sign in.
 
-Home: https://github.com/eric-cgn/parlornet, the source. To contribute, see CONTRIBUTING.md, including its notes on trademarks and other programs' terms.
+Anyone can run a ParlorNet server for a club, a festival, a group of friends or the open internet. A ParlorNet server is called a parlor, and one parlor plays every game. The [Run your own parlor](#run-your-own-parlor) section below starts one with a single `docker run`. For a server that stays up, [deploy/README.md](deploy/README.md) installs the same image with tighter limits. The docs site has both on one page, [Run a server](http://docs.parlornet.org/running.html).
 
-Anyone can run a ParlorNet server of their own. [Run your own parlor](#run-your-own-parlor), below, starts one with a single `docker run`. For a server that stays up, [deploy/README.md](deploy/README.md) installs the same image with tighter limits and shows ParlorNet Play behind an HTTPS proxy and the admin menus from another machine. The docs site has both on one page, [Run a server](http://docs.parlornet.org/running.html).
+ParlorNet is free software under the MIT license. Its source is at https://github.com/eric-cgn/parlornet. If you want to contribute, read [CONTRIBUTING.md](CONTRIBUTING.md) first. It also has notes on trademarks and on the terms of other programs.
 
-The docs site is http://docs.parlornet.org/. It lists the programs that play each game on each kind of computer, describes every protocol, and has these docs as web pages. `tools/build_docs.py` builds it.
+## Games
 
-- **Server** (Python): accounts, lobby, tables, turn handling. Deployable by anyone. Knows no game rules.
-- **Plugins**: each game runs out of the core's process: Python plugins together in one plugin host, others (any language) in a process of their own, each started when needed and stopped when idle. See docs/plugins.md; adding a game (plugin, type spec, web and telnet frontend module, tests): docs/games-howto.md.
-- **Protocol**: line-based ASCII, polling-friendly. See docs/protocol.md; for writing a frontend of your own, the guide with sample sessions for every game is docs/pnp.md.
-- **Server extensions**: separate programs beside the server, each speaking one protocol to players' frontends (web, ParlorNet Play, telnet, IOS, FIBS, Outland, DOoM, GameMaster, NetSprocket, batnav, Awale, Networdz, NetLuff and Worthy Opponent); in the code, the `adapters/` package. See docs/adapters.md.
-- **The bot**: a player for every game that anyone can invite to a table, a client of the core in `bot/`. See docs/bot.md.
-- **Frontends**: the programs players use: a browser, a telnet program, or a game program of its day speaking its own protocol (a native client). See docs/frontends.md and the docs site's Clients page.
-- **ParlorNet's own classic Mac software**: built and released in repositories of its own, each with its own build and release workflow. ParlorNet's rulebooks for GameMaster and their installer are in [eric-cgn/parlornet-gamemaster](https://github.com/eric-cgn/parlornet-gamemaster), and Eclipse 68k Fix, the patcher for Reversi The Eclipse on 68k Macs, is in [eric-cgn/parlornet-eclipse-fix](https://github.com/eric-cgn/parlornet-eclipse-fix). The docs site serves their release files over plain HTTP, each pinned by its SHA-256 in `docsite/downloads.json`. ParlorNet Play, the browser client, is part of the server (`adapters/play/`).
-- **Docs site**: `python3 tools/build_docs.py` builds it into `build/docs-site`. On every push to main, `.github/workflows/docs.yml` builds it and publishes it to GitHub Pages at http://docs.parlornet.org/. See docs/site.md.
+A parlor plays ten games: Reversi, Backgammon, Grid Words, Cannon Fire, Dots and Boxes, Five in a Row, Mancala, Checkers, Naval Combat and Rummy Tile Classic. Each one is ParlorNet's own implementation of public rules, under a generic or original name. The games were built in this order, and menus and the lobby list them the same way. Every parlor's web site describes them on its Games page, `/games.htm`.
+
+## How ParlorNet is built
+
+A parlor is a set of separate programs in one Docker container. Its daemon is `parlord`, and its protocol announces itself with the banner `PARLORNET/1`. [docs/architecture.md](docs/architecture.md) describes how the parts fit together, and [docs/auth-federation.md](docs/auth-federation.md) describes the design for federation between parlors.
+
+- **The core** is a Python server that keeps the accounts, the lobby and the tables, and handles turns. It knows no game rules.
+- **Each game is a plugin** that runs outside the core's process. The Python plugins share one plugin host, and a plugin in another language runs in a process of its own. Each one starts when a game needs it and stops when it is idle. [docs/plugins.md](docs/plugins.md) describes the interface. [docs/games-howto.md](docs/games-howto.md) explains how to add a game with its plugin, type spec, web and telnet module and tests. The type specs are in [docs/types/](docs/types/).
+- **The protocol**, PARLORNET/1, is line-based ASCII and suits clients that poll. [docs/protocol.md](docs/protocol.md) is the reference. If you want to write a client of your own, [docs/pnp.md](docs/pnp.md) is the guide, with sample sessions for every game.
+- **Server extensions** are separate programs that run beside the core. Each one speaks a single protocol to the players' programs and passes their moves on to the core. There is one each for the web site, ParlorNet Play, telnet, IOS, FIBS, Outland, DOoM, GameMaster, NetSprocket, batnav, Awale, Networdz, NetLuff, ICDS, Worthy Opponent and RSCARDS. They are in the `adapters/` package, and ParlorNet Play, the browser client, is in `adapters/play/`. Each extension tells the core which protocol it speaks, and the core lists them with `PRL`. [docs/adapters.md](docs/adapters.md) describes the extensions, and [docs/protocols.md](docs/protocols.md) describes each protocol and its port.
+- **The players' programs** run on the players' own computers. [docs/frontends.md](docs/frontends.md) and the docs site's Clients page describe them.
+- **The bot** can play every game, and anyone can invite it to a table. It is a client of the core, in `bot/`, and [docs/bot.md](docs/bot.md) describes it.
+- **ParlorNet's classic Mac software** is built and released in its own repositories. [eric-cgn/parlornet-gamemaster](https://github.com/eric-cgn/parlornet-gamemaster) has ParlorNet's rulebooks for GameMaster and their installer. [eric-cgn/parlornet-eclipse-fix](https://github.com/eric-cgn/parlornet-eclipse-fix) has Eclipse 68k Fix, the patcher for Reversi The Eclipse on 68k Macs. The docs site serves their release files over plain HTTP, and `docsite/downloads.json` pins each file by its SHA-256.
+- **The docs site** is built with `python3 tools/build_docs.py`, which writes it to `build/docs-site`. On every push to `main`, `.github/workflows/docs.yml` builds it and publishes it to GitHub Pages at http://docs.parlornet.org/. [docs/site.md](docs/site.md) describes it.
 
 ![A parlor: the players' programs, the reverse proxy for ParlorNet Play, and the processes in the container](static/img/diagram-parlor.gif)
 
-Games (original implementations of public rules, generic or original names; the web site's `/games.htm` describes each one):
-Reversi first: the simplest game, used to prove the server, plugin interface, typed views, the telnet extension (one telnet server for all games), custom clients and a game-network extension (the Othello-server protocol). Then Backgammon, Grid Words and Cannon Fire as the harder test cases (dice and staged turns; sparse boards, a hidden rack and a huge move space; terrain heightmap). Then Dots and Boxes, Five in a Row, Mancala, Checkers, Naval Combat, and last Rummy Tile Classic (the most complex).
-
-Supported protocols and their usual ports (6500 HTTP 1997/2027, 6501 native, 6502 telnet, 6503 IOS, 6505 FIBS, 6506 Outland, 6507 DOoM, 6508 GameMaster, 6512 NetBoxes over NetSprocket, 6513 ParlorNet Play behind an HTTPS proxy, 6514 batnav, 6515 Awale over IRC, 6516 Networdz, 6517 NetLuff, published as 1744 too, 6518 ICDS for xcheckers, 6519 Worthy Opponent by modem, 6520 RSCARDS by modem or serial line): docs/protocols.md; each server extension declares its protocol to the core, which lists what it speaks now (`PRL`); the server extensions that serve them: docs/adapters.md. Admin menus: port 6510 (docs/accounts.md). Container: Dockerfile; installing it on a Docker host: [deploy/README.md](deploy/README.md). Specs: docs/types/. License: MIT.
-
-Daemon: `parlord`. Wire banner: `PARLORNET/1`. Each deployment is "a parlor"; federated parlors make up ParlorNet.
-
 ## Run your own parlor
 
-ParlorNet is one Docker container. This section starts one with a single `docker run`, which is enough to try ParlorNet or to run a small parlor. For a server that stays up, [deploy/README.md](deploy/README.md) installs the same image with tighter limits: a memory limit, a read-only root file system, and the admin menus and ParlorNet Play on the host's loopback address only.
+A parlor runs in one Docker container. The `docker run` below is enough to try ParlorNet or to run a small parlor. For a server that stays up, [deploy/README.md](deploy/README.md) installs the same image with a memory limit and a read-only root file system, and it keeps the admin menus and ParlorNet Play on the host's loopback address.
 
-Get the source from https://github.com/eric-cgn/parlornet, build it from its top directory and start it:
+Get the source from https://github.com/eric-cgn/parlornet. Then build the image from its top directory and start it:
 
 ```sh
 docker build -t parlornet .
@@ -42,15 +41,51 @@ docker run -d --name parlornet --restart unless-stopped \
 docker logs parlornet
 ```
 
-On first launch the log says the parlor is not set up yet and gives a one-time setup password. Set it up from the same machine with `telnet 127.0.0.1 6510` (from elsewhere, through SSH: `ssh -L 6510:127.0.0.1:6510 you@host`, then `telnet 127.0.0.1 6510`). The admin menus ask for the setup password, then a permanent admin password, and then offer the server name, the welcome message, the sign-in method, email, games, server extensions, accounts and tables. Port 6510 is the admin port; publish it on the host's loopback as above, not to the world (it asks for the admin password either way).
+The first time the parlor starts, the log says that it is not set up yet and gives a one-time setup password. To set it up, open the admin menus with `telnet 127.0.0.1 6510` on the same machine. From another machine, open an SSH tunnel with `ssh -L 6510:127.0.0.1:6510 you@host` and then run the same telnet command. The admin menus ask for the setup password and then for a permanent admin password. After that you can set the server's name, the welcome message, the sign-in method, email, the games, the server extensions, the accounts and the tables.
 
-Players use 6500 (web), 6501 (native protocol), 6502 (telnet), 6503 (IOS Reversi clients), 6505 (FIBS clients), 6506 (the Outland Gateway; the container listens on 4000), 6507 (DOoM clients), 6508 (GameMaster), 6512 (NetBoxes), 6514 (the batnav clients), 6515 (Awale), 6516 (Networdz), 6517 (NetLuff, which always connects to 1744: publish 6517 under 1744 as well, as the lines above do), 6518 (xcheckers, over ICDS), 6519 (Worthy Opponent, dialed by modem) and 6520 (GEnie's RSCARDS front ends, through a WiFi modem or a serial bridge). ParlorNet Play, the client for today's browsers and phones, has its own port, 6513: add `-p 6513:6513` and open `http://` your host `:6513/play/`, or put it behind an HTTPS proxy as [deploy/README.md](deploy/README.md#parlornet-play-over-https) shows. Players, tables and settings are kept in the `/data` volume, with the keys the frontends use to reach the core (`/data/frontends`, made at first start). The container runs as one unprivileged user (uid 10042) and needs no capabilities (`--cap-drop ALL` works); [docs/security-design.md](docs/security-design.md#containment) (Containment) describes two opt-in ways to separate the frontends further.
+Port 6510 is the admin port. It always asks for the admin password, but publish it only on the host's loopback address, as the command above does.
 
-By default players sign up by choosing a password and sign in with it. Signing up is its own step: New account on the web, `new` at the telnet login, `guest` on FIBS clients, a free name in an IOS client's login window. The sign-in and sign-up methods are set in the admin menus (Sign-in); [docs/accounts.md](docs/accounts.md) explains them.
+### Ports
+
+Players connect to these ports:
+
+| Port | Used by |
+|---|---|
+| 6500 | web browsers |
+| 6501 | programs that speak ParlorNet's own protocol |
+| 6502 | telnet programs |
+| 6503 | IOS clients for Reversi |
+| 6505 | FIBS clients for Backgammon |
+| 6506 | the Outland Gateway (the container listens on 4000) |
+| 6507 | DOoM clients for Grid Words |
+| 6508 | GameMaster |
+| 6512 | NetBoxes, over NetSprocket |
+| 6513 | ParlorNet Play |
+| 6514 | the batnav clients |
+| 6515 | Awale, over IRC |
+| 6516 | Networdz |
+| 6517 | NetLuff, published as 1744 as well |
+| 6518 | xcheckers, over ICDS |
+| 6519 | Worthy Opponent, dialed by modem |
+| 6520 | GEnie's RSCARDS front ends, through a WiFi modem or a serial bridge |
+
+NetLuff always connects to port 1744, so publish 6517 as 1744 too, as the command above does.
+
+ParlorNet Play, the client for current browsers and phones, is not in the command above. To try it, add `-p 6513:6513` and open `http://` your host `:6513/play/`. For a server that stays up, put it behind an HTTPS proxy as [deploy/README.md](deploy/README.md#parlornet-play-over-https) shows.
+
+### Data and containment
+
+The `/data` volume keeps the players, the tables and the settings. It also keeps the keys that the server extensions use to reach the core, in `/data/frontends`, which the first start creates.
+
+The container runs as one unprivileged user (uid 10042) and needs no capabilities, so `--cap-drop ALL` works. The Containment part of [docs/security-design.md](docs/security-design.md#containment) describes two optional ways to separate the server extensions further.
+
+### Signing up and signing in
+
+By default, players sign up by choosing a password and then sign in with it. Signing up is a separate step. On the web site it is New account, at the telnet login it is `new`, on FIBS clients it is the name `guest`, and in an IOS client it is a new name in the login window. You choose the sign-in and sign-up methods in the admin menus, under Sign-in. [docs/accounts.md](docs/accounts.md) explains each method.
 
 ### A LAN, a club night or a festival
 
-Players sign in with a name alone (sign-in and sign-up `none`):
+With sign-in set to `none`, players sign in with their name alone:
 
 ```sh
 docker run -d --name parlornet --restart unless-stopped -e PARLOR_NAME=festival -e PARLOR_AUTH=none \
@@ -60,7 +95,9 @@ docker run -d --name parlornet --restart unless-stopped -e PARLOR_NAME=festival 
 
 ### The open internet
 
-Players sign in with a password, and sign-up checks their email address (sign-in `password`, sign-up `email`). Sign-up mails the player a temporary password that works for 24 hours; the first sign-in with it asks for a password of their own, and an account nobody signs into within a day is deleted. So the parlor needs an SMTP relay, any that offers plain SMTP with a send-only user. Set the relay in the admin menus (Sign-in), or keep its settings out of the database in a file that only the container's user may read (`chown 10042 settings.conf; chmod 400 settings.conf`):
+On the open internet, players sign in with a password, and signing up checks their email address. For this, sign-in is `password` and sign-up is `email`. When a player signs up, the parlor mails them a temporary password that works for 24 hours. Their first sign-in with it asks them to choose a password of their own. An account that nobody signs into within a day is deleted.
+
+The parlor therefore needs an SMTP relay. Any SMTP relay will do, as long as it gives the parlor an account that can send mail. You can set the relay in the admin menus, under Sign-in. You can also keep its settings out of the database, in a file that only the container's user can read (`chown 10042 settings.conf; chmod 400 settings.conf`):
 
 ```
 email.smtp_host=smtp.example.org
@@ -70,7 +107,7 @@ email.smtp_password=...
 email.from=ParlorNet <noreply@example.org>
 ```
 
-The relay is always reached over TLS (STARTTLS, or TLS on port 465) and its certificate is checked against `email.smtp_host`, so give its name, not its address.
+The parlor always reaches the relay over TLS, with STARTTLS or with TLS on port 465. It checks the relay's certificate against `email.smtp_host`, so give the relay's name there, not its address.
 
 ```sh
 docker run -d --name parlornet --restart unless-stopped -e PARLOR_NAME=games.example.org \
@@ -82,10 +119,32 @@ docker run -d --name parlornet --restart unless-stopped -e PARLOR_NAME=games.exa
 
 ### Settings in the environment
 
-`PARLOR_NAME`, `PARLOR_AUTH` (sign-in: `none` or `password`), `PARLOR_SIGNUP` (sign-up: `none`, `password`, or `email`, which mails a temporary password; by default `none` with sign-in `none` and `password` with sign-in `password`), `PARLOR_ADAPTERS` (for example `web,telnet,admin`), `PARLOR_MOTD_FILE`, `PARLOR_CONTRIBUTE_URL` (the address for the message of the day's `{contribute}`; by default this project's home; empty: that line is left out) and `PARLOR_DOCS_URL` (the docs site the web pages link to; by default http://docs.parlornet.org/; empty: no link) are defaults: once the admin menus set a value, the database's value is used. `PARLOR_ADMIN=1` starts the admin menus even if they were turned off. A forgotten admin password is cleared with `docker exec parlornet python -m parlord.admin --db /data/parlord.db --reset-password` and a restart, which prints a new setup password.
+These environment variables give a parlor its first settings. Once the admin menus set a value, the parlor uses the value in its database instead.
+
+- `PARLOR_NAME` is the server's name.
+- `PARLOR_AUTH` is the sign-in method, `none` or `password`.
+- `PARLOR_SIGNUP` is the sign-up method, `none`, `password` or `email`. With `email`, signing up mails the player a temporary password. By default, sign-up is `none` when sign-in is `none`, and `password` when sign-in is `password`.
+- `PARLOR_ADAPTERS` lists the server extensions to start, for example `web,telnet,admin`.
+- `PARLOR_MOTD_FILE` is a file with the message of the day.
+- `PARLOR_CONTRIBUTE_URL` is the address that `{contribute}` in the message of the day shows. By default it is this project's home. If it is empty, that line is left out.
+- `PARLOR_DOCS_URL` is the docs site that the web pages link to. By default it is http://docs.parlornet.org/. If it is empty, the pages have no link to it.
+
+`PARLOR_ADMIN=1` starts the admin menus even if they were turned off.
+
+If you forget the admin password, clear it with this command and restart the container. The log then shows a new setup password.
+
+```sh
+docker exec parlornet python -m parlord.admin --db /data/parlord.db --reset-password
+```
 
 ## Branches and releases
 
-The version is in `VERSION`. Changes go into `dev` by pull request, squashed; `main` takes only merges from `dev`, which is how a release is made. Every pull request and every push to `main` runs the fast tests (`PARLOR_TESTS=fast python3 -m unittest discover -s tests`, on Python 3.13) and builds the Docker image (`.github/workflows/ci.yml`), and a pull request into `main` fails unless it comes from `dev`. Every push to `dev` runs the same tests and build on the commit `dev` then has (`.github/workflows/dev.yml`). The slow tests, whole games through the extensions and the bot, real timers and the long matrices, run with the fast ones nightly and by hand on `dev` (`.github/workflows/slow.yml`) and before a release is tagged (`.github/workflows/release.yml`); `tests/speed.py` says which tests are slow and how they are marked. `python3 -m unittest discover -s tests` runs everything. There is no dev pre-release: the server ships as its source, so the `dev` branch is the dev build.
+The version number is in `VERSION`. Changes go into the `dev` branch by pull request, and each one is squashed. `main` takes only merges from `dev`, and that is how a release is made.
 
-A push to `main` whose version has no release yet runs the release (`.github/workflows/release.yml`). It runs the tests, builds the image, tags the commit `v<version>` and publishes a GitHub Release of the source. No image is published, since each parlor builds its own. Every push to `main` also rebuilds the docs site and publishes it at http://docs.parlornet.org/ (`.github/workflows/docs.yml`).
+Every pull request and every push to `main` runs the fast tests on Python 3.13 and builds the Docker image (`.github/workflows/ci.yml`). A pull request into `main` fails unless it comes from `dev`. Every push to `dev` runs the same tests and build on the new commit (`.github/workflows/dev.yml`).
+
+`PARLOR_TESTS=fast python3 -m unittest discover -s tests` runs the fast tests, and `python3 -m unittest discover -s tests` runs them all. The slow tests play whole games through the server extensions and the bot, use real timers and run the long matrices. They run together with the fast tests every night and by hand on `dev` (`.github/workflows/slow.yml`), and before a release is tagged (`.github/workflows/release.yml`). `tests/speed.py` says which tests are slow and how they are marked.
+
+There is no separate dev pre-release. The server ships as its source, so the `dev` branch is the dev build.
+
+A push to `main` whose version has no release yet runs the release workflow (`.github/workflows/release.yml`). It runs the tests, builds the image, tags the commit `v<version>` and publishes a GitHub Release of the source. No image is published, because each parlor builds its own.

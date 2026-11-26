@@ -82,16 +82,17 @@ def body(link_fixer):
         fix = fixer(md_dir)
         html.append(to_html(md, fix, clientpages.figure))
     return (h1(TITLE) +
-            p("Anyone can run a ParlorNet server, a parlor, for a club, an event or the open internet. ParlorNet "
-              "is free software under the MIT license, and its source is at %s. A parlor is one Docker "
-              "container built from that source." % a(PROJECT_URL, "github.com/eric-cgn/parlornet")) +
-            p("This page shows the repository's own instructions in two parts. The first, %s, starts a parlor "
-              "with one <tt>docker run</tt>, which is enough to try it or to run a small one. The second, %s, "
-              "installs one that stays up, with tighter limits, and covers %s and %s."
+            p("Anyone can run a ParlorNet server for a club, an event or the open internet. A ParlorNet server is "
+              "called a parlor, and it runs in one Docker container that you build from the source. ParlorNet is "
+              "free software under the MIT license, and its source is at %s."
+              % a(PROJECT_URL, "github.com/eric-cgn/parlornet")) +
+            p("This page has two parts, both taken from the instructions in the source. The first part, %s, starts "
+              "a parlor with one <tt>docker run</tt>. The second part, %s, installs a parlor that stays up. It "
+              "also covers %s and %s."
               % (a("#" + first[README], README_SECTION), a("#" + first[DEPLOY], "Installing on a Docker host"),
                  a("#parlornet-play-over-https", "ParlorNet Play over HTTPS"), a("#administration", "administration"))) +
             "\n".join(html) +
-            p("This page is made from %s and %s in the source, where the install scripts are too. The other "
-              "docs for operators are listed on the %s page." % (
+            p("This page is made from %s and %s in the source, where you also find the install scripts. The %s "
+              "page lists the other docs for operators." % (
                   a(GITHUB_BLOB + README + "#run-your-own-parlor", "README.md"), a(GITHUB_BLOB + DEPLOY, DEPLOY),
                   a("/docs.html", "Docs")), 2))

@@ -1,35 +1,41 @@
 # Installing on a Docker host
 
-This is how to install your own ParlorNet server on a Linux host with Docker. The main README's [Run your own parlor](../README.md#run-your-own-parlor) starts ParlorNet with a single `docker run`; the scripts here do the same job with tighter limits, for a server that stays up. Get the source from https://github.com/eric-cgn/parlornet, build the image (on the host, or elsewhere and load it on the host), copy the scripts across and run one of them as root.
+The scripts in `deploy/` install a ParlorNet server that stays up on a Linux host with Docker. They run the same image as the single `docker run` in the main README's [Run your own parlor](../README.md#run-your-own-parlor), with tighter limits.
+
+To install, get the source from https://github.com/eric-cgn/parlornet and build the image. You can build it on the host, or build it elsewhere and load it on the host. Then copy the scripts to the host and run one of them as root:
 
 ```sh
 docker build --platform linux/amd64 -t parlornet:1 .
 sudo PARLOR_NAME=games.example.org PARLOR_AUTH=password PARLOR_SIGNUP=email sh deploy/install.sh parlornet:1
 ```
 
-`install.sh` runs one container named `parlornet`. It runs as uid 10042 with every capability dropped, no new privileges, a read-only root file system, a 448 MB memory limit and its own Docker network. It publishes the players' ports (6500 to 6508, 6512, 6514 to 6517, which it also publishes as 1744, 6518, 6519 and 6520) and puts the admin menus and ParlorNet Play (6513) on the host's loopback address only. Players, tables and settings live in `/srv/parlornet` on the host, so a restart or an upgrade keeps them. Running the script again with a newer image replaces the container and keeps the data.
+`install.sh` runs one container named `parlornet`. The container runs as uid 10042 with every capability dropped, no new privileges, a read-only root file system, a 448 MB memory limit and a Docker network of its own. The script publishes the players' ports, which are 6500 to 6508, 6512 and 6514 to 6520, and it publishes 6517 as 1744 as well. It puts the admin menus (6510) and ParlorNet Play (6513) on the host's loopback address only.
+
+Players, tables and settings live in `/srv/parlornet` on the host, so a restart or an upgrade keeps them. If you run the script again with a newer image, it replaces the container and keeps the data.
 
 ![What install.sh runs: the players' programs, the reverse proxy for ParlorNet Play, and the processes in the container](../static/img/diagram-parlor.gif)
 
-The script reads `PARLOR_NAME`, `PARLOR_AUTH`, `PARLOR_SIGNUP`, `PARLOR_WEB_HOSTS`, `PARLOR_WEB_URL`, `PARLOR_WEB_PROXIES`, `PARLOR_PLAY_URL`, `PARLOR_PLAY_PROXIES` and `PARLOR_PLAY_OPEN` from its environment; the comments at the top of the script explain each one. Settings you would rather keep out of the environment, such as the SMTP relay's password, go in `/etc/parlornet/settings.conf`. Make that file readable only by uid 10042 (`chown 10042 settings.conf; chmod 400 settings.conf`). The script mounts it into the container when it exists.
+The script reads `PARLOR_NAME`, `PARLOR_AUTH`, `PARLOR_SIGNUP`, `PARLOR_WEB_HOSTS`, `PARLOR_WEB_URL`, `PARLOR_WEB_PROXIES`, `PARLOR_PLAY_URL`, `PARLOR_PLAY_PROXIES` and `PARLOR_PLAY_OPEN` from its environment. The comments at the top of the script explain each one. Settings you would rather keep out of the environment, such as the SMTP relay's password, go in `/etc/parlornet/settings.conf`. Make that file readable only by uid 10042 (`chown 10042 settings.conf; chmod 400 settings.conf`). If the file exists, the script mounts it into the container.
 
-With `PARLOR_SIGNUP=email`, sign-up mails each new player a temporary password, so the server needs an SMTP relay ([The open internet](../README.md#the-open-internet) in the main README). The first sign-in with that password confirms the account and asks the player to choose a password of their own; an account nobody signs into within 24 hours is deleted.
+With `PARLOR_SIGNUP=email`, signing up mails each new player a temporary password, so the server needs an SMTP relay. [The open internet](../README.md#the-open-internet) in the main README shows how to set one. The first sign-in with the temporary password confirms the account and asks the player to choose a password of their own. An account that nobody signs into within 24 hours is deleted.
 
-**Upgrading from a version before mailed passwords.** Accounts used to be kept in another format, and that database is not carried over. When the server starts and finds a database in the earlier format, it renames it to `parlord.db.old-<date and time>` in the same directory and starts a new, empty one: players, tables and games in progress are gone, and the admin menus ask to be set up again, with a new setup password in `docker logs parlornet`. Settings given in the environment or in `/etc/parlornet/settings.conf` still apply. Delete the old file once you no longer need it.
+Your host's firewall decides who can reach the ports. If you limit new connections per address, leave room for the web pages, since each one loads a board image and a few small images.
 
-Your host's firewall decides who can reach the ports. If you limit new connections per address, leave room for the web pages, which load a board image and a few small images each.
+## Upgrading from a version before mailed passwords
+
+Earlier versions kept accounts in another format, and that database is not carried over. When the server starts and finds a database in the earlier format, it renames it to `parlord.db.old-<date and time>` in the same directory and starts a new, empty one. The players, the tables and the games in progress are gone. The admin menus ask to be set up again, and `docker logs parlornet` shows a new setup password. Settings given in the environment or in `/etc/parlornet/settings.conf` still apply. Delete the old file once you no longer need it.
 
 ## ParlorNet Play over HTTPS
 
-ParlorNet Play, the client for today's browsers, is its own server extension on port 6513. It speaks plain HTTP and expects a reverse proxy on the host to terminate TLS, so `install.sh` publishes it on `127.0.0.1:6513` only. Give the container its public address and the proxy's address, as the container sees it. For a proxy on the host that is the gateway of `install.sh`'s network, 172.30.4.1:
+ParlorNet Play, the client for current browsers, is a server extension of its own on port 6513. It speaks plain HTTP and expects a reverse proxy on the host to handle TLS, so `install.sh` publishes it on `127.0.0.1:6513` only. Give the container its public address and the proxy's address as the container sees it. For a proxy on the host, that address is 172.30.4.1, the gateway of the network that `install.sh` creates:
 
 ```sh
 sudo PARLOR_PLAY_URL=https://games.example.org/play/ PARLOR_PLAY_PROXIES=172.30.4.1 sh deploy/install.sh parlornet:1
 ```
 
-The same two settings can go in `/etc/parlornet/settings.conf` as `play.public_url` and `play.proxies`. With them, the WebSocket accepts only pages from that address, the session cookie is `Secure`, the player's own address is taken from `X-Forwarded-For`, and the web pages' `/play` answers with a 301 there. Without a proxy, `PARLOR_PLAY_OPEN=1` publishes 6513 on every address and players open `http://` your host `:6513/play/`.
+The same two settings can go in `/etc/parlornet/settings.conf` as `play.public_url` and `play.proxies`. With them, the WebSocket accepts only pages from that address, and the session cookie is `Secure`. The player's own address is taken from `X-Forwarded-For`, and `/play` on the web site redirects there with a 301. If you have no proxy, `PARLOR_PLAY_OPEN=1` publishes 6513 on every address, and players open `http://` your host `:6513/play/`.
 
-An nginx server block for the proxy, with the certificate from Let's Encrypt (`certbot --nginx -d games.example.org` or `certbot certonly --webroot`), and port 80 sending `/play` to https:
+Here is an nginx configuration for the proxy. It uses a certificate from Let's Encrypt, which you can get with `certbot --nginx -d games.example.org` or `certbot certonly --webroot`. Port 80 sends `/play` to https:
 
 ```nginx
 server {
@@ -62,7 +68,7 @@ server {
 
 ## The web site on the usual ports
 
-The web site itself is on port 6500, which players can keep using. To serve it at your name's own address as well, `https://games.example.org/` and `http://games.example.org/`, let the same proxy pass everything else to 6500. Pass it, don't redirect: a redirect to another port is not a page, so search engines index nothing, and port 80 must not send period browsers to https, which they cannot speak. Add this `location` to both server blocks above:
+The web site itself is on port 6500, and players can keep using that port. To serve the site at your name's own address as well, at `https://games.example.org/` and `http://games.example.org/`, let the same proxy pass everything else to 6500. Pass the requests on rather than redirect them. A redirect to another port is not a page, so search engines would index nothing. Port 80 must also not send old browsers to https, because they cannot speak it. Add this `location` to both server blocks above:
 
 ```nginx
     location / {
@@ -79,9 +85,11 @@ Then tell the web extension about the proxy, the same way as for ParlorNet Play:
 sudo PARLOR_WEB_URL=https://games.example.org/ PARLOR_WEB_PROXIES=172.30.4.1 sh deploy/install.sh parlornet:1
 ```
 
-`PARLOR_WEB_PROXIES` (`web.proxies` in `/etc/parlornet/settings.conf`) lists the proxies' addresses or networks, separated by commas, as the container sees them. For a request from one of them, the web takes the visitor's own address from `X-Forwarded-For`, so the limits per address (sign-ups, wrong passwords, requests in progress) count each visitor and not the proxy, and it takes the scheme from `X-Forwarded-Proto`, so its redirects stay on https. A request from any other address is taken as it comes, and its forwarded headers are ignored. `PARLOR_WEB_URL` (`web.public_url`) is the site's own address. With it, every page answered without a query names its address there as canonical (a `Link: <...>; rel="canonical"` header), so the copies at port 6500, plain http and other names all count as one page. The site's address `/` is the welcome page itself, not a redirect to it.
+`PARLOR_WEB_PROXIES` lists the proxies' addresses or networks as the container sees them, separated by commas. In `/etc/parlornet/settings.conf` the same setting is `web.proxies`. For a request from one of these proxies, the web site takes the visitor's own address from `X-Forwarded-For`. That way the limits per address, on sign-ups, wrong passwords and requests in progress, count each visitor and not the proxy. The site also takes the scheme from `X-Forwarded-Proto`, so its redirects stay on https. A request from any other address is taken as it comes, and its forwarded headers are ignored.
 
-Do not add `Strict-Transport-Security` on this name. Browsers would apply it to every port, including the 1997 pages on 6500, which are plain HTTP for the computers they serve. Certbot renews the certificate on its own timer.
+`PARLOR_WEB_URL` (`web.public_url`) is the site's own address. With it set, every page answered without a query names its address there as canonical, in a `Link: <...>; rel="canonical"` header. The copies at port 6500, on plain http and under other names then all count as one page. The site's address `/` is the welcome page itself, not a redirect to it.
+
+Do not add `Strict-Transport-Security` on this name. Browsers would apply it to every port, including the 1997-style pages on 6500, which stay plain HTTP for the old computers they serve. Certbot renews the certificate on its own timer.
 
 ## Administration
 
@@ -96,8 +104,8 @@ Until you set an admin password, every start prints a one-time setup password in
 
 ## More separation
 
-`install-split.sh` is an opt-in alternative that runs each server process in its own container, each under its own uid and holding only its own key. It uses the same image and the same ports. docs/security-design.md (Containment) explains the trade-offs, and the comments at the top of the script describe its networks and options.
+`install-split.sh` is an optional alternative that runs each server process in a container of its own, under its own uid and with only its own key. It uses the same image and the same ports. The Containment part of [docs/security-design.md](../docs/security-design.md#containment) explains the trade-offs, and the comments at the top of the script describe its networks and options.
 
 ## Memory
 
-With sixteen server extensions, the core and the bot, the container uses about 245 MB at rest, and more with every game loaded; the limit is 448 MB. Each server process holds about 20 MB of its own (ParlorNet Play's as much as telnet's), and the plugin host that runs the games starts on the first game and stops after `plugins.idle` seconds (600 by default) once no game is being played. `docker stats parlornet` shows the current figure.
+With sixteen server extensions, the core and the bot, the container uses about 245 MB at rest, and more with every game loaded. The limit is 448 MB. Each server process holds about 20 MB of its own, and ParlorNet Play needs no more than telnet. The plugin host that runs the games starts with the first game. Once no game is being played, it stops after `plugins.idle` seconds, 600 by default. `docker stats parlornet` shows the current figure.

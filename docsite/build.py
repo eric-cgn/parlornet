@@ -67,49 +67,60 @@ NAV = [("/index.html", "Clients"), ("/protocols.html", "Protocols"), ("/browsers
 FOOT = ("These pages cover every ParlorNet server. | %s | ParlorNet is free software."
         % a(PROJECT_URL, "Source code"))
 
-# The docs index (docs.html): (heading, [(path, title, what it is)]), in reading order. Any doc not listed
-# here is listed after these by its file name, by folder, so a new doc is never left out.
+# The docs index (docs.html): (heading, [(path, title, what it does)]), in reading order. Each line reads as a
+# sentence, the title first ("Clients lists ..."). Any doc not listed here is listed after these by its file
+# name, by folder, so a new doc is never left out.
 DOC_GROUPS = [
     ("For players", [
-        ("/index.html", "Clients", "the programs that play each game, for each kind of computer, with their setup"),
-        ("/browsers.html", "Browsers", "what a browser needs, and setting each one up"),
-        ("/telnet.html", "Telnet programs", "what a telnet program needs, and setting each one up"),
-        ("/protocols.html", "Protocols", "every protocol a ParlorNet server can speak, by its key"),
-        ("/docs/protocols.html", "Supported protocols", "how to connect, sign up and sign in with each "
-         "protocol, and its history"),
-        ("/docs/accounts.html", "Accounts", "sign-in methods, sign-up and what a server can ask"),
-        ("/docs/modern-client.html", "ParlorNet Play", "the client for today's browsers, phones and tablets"),
-        ("/docs/play-notifications.html", "Play notifications", "turning ParlorNet Play's notifications on and off "
-         "in each browser, and what they say"),
-        ("/docs/apple2.html", "ParlorNet for the Apple IIe", "the player's guide to the Apple IIe and IIgs program"),
-        ("/docs/serial.html", "Serial connections", "reaching a parlor over a serial line: WiFi modems, a Unix "
-         "login, ATZ, tcpser and bridges, with the cable"),
-        ("/docs/chat-commands.html", "Chat commands", "the commands typed in the chat-style consoles"),
-        ("/docs/clients.html", "Frontend downloads", "where each period program comes from, with licenses"),
-        ("/eclipse-68k-fix.html", "Eclipse 68k Fix", "lets Reversi The Eclipse 1.2 connect from a 68k Mac"),
-        ("/parlornet-rulebook.html", "ParlorNet rulebook", "plays a parlor's games from GameMaster on a Mac"),
-        ("/gamemaster-rulebooks.html", "Game rulebooks", "ParlorNet's games for GameMaster, and their installer"),
+        ("/index.html", "Clients", "lists the programs that play each game on each kind of computer, and how to "
+         "set each one up."),
+        ("/browsers.html", "Browsers", "says what a browser needs and how to set each one up."),
+        ("/telnet.html", "Telnet programs", "says what a telnet program needs and how to set each one up."),
+        ("/protocols.html", "Protocols", "lists every protocol a ParlorNet server can speak, by its key."),
+        ("/docs/protocols.html", "Supported protocols", "explains how to connect, sign up and sign in with each "
+         "protocol, and gives its history."),
+        ("/docs/accounts.html", "Accounts", "covers the sign-in methods, signing up and what a server can ask."),
+        ("/docs/modern-client.html", "ParlorNet Play", "lets you play in a current browser on a computer, phone "
+         "or tablet."),
+        ("/docs/play-notifications.html", "Play notifications", "explains how to turn ParlorNet Play's "
+         "notifications on and off in each browser, and what they say."),
+        ("/docs/apple2.html", "ParlorNet for the Apple IIe", "is the player's guide to the program for the Apple "
+         "IIe and IIgs."),
+        ("/docs/serial.html", "Serial connections", "explains how to reach a parlor over a serial line with a "
+         "WiFi modem, a Unix login, ATZ, tcpser or a bridge, and which cable to use."),
+        ("/docs/chat-commands.html", "Chat commands", "lists the commands you can type in the chat-style "
+         "consoles."),
+        ("/docs/clients.html", "Program sources and licenses", "says where each program comes from and under "
+         "what license, and why some programs are left out."),
+        ("/eclipse-68k-fix.html", "Eclipse 68k Fix", "lets Reversi The Eclipse 1.2 connect from a 68k Mac."),
+        ("/parlornet-rulebook.html", "ParlorNet rulebook", "lets GameMaster on a Mac play a parlor's games."),
+        ("/gamemaster-rulebooks.html", "Game rulebooks", "add ParlorNet's games to GameMaster, with an "
+         "installer."),
     ]),
-    ("For frontend writers", [
-        ("/docs/pnp.html", "Protocol guide", "PARLORNET/1 for frontend writers, with signing in, tables, every "
-         "game and sample sessions"),
-        ("/docs/protocol.html", "Native protocol", "the reference"),
-        ("/docs/transports.html", "Transports", "serial lines, modems and bridges"),
-        ("/docs/bandwidth.html", "Bandwidth", "what a game costs on a slow line"),
-        ("/docs/design/trust.html", "Trust", "the rules for clients and server extensions, with the server deciding"),
+    ("For people writing a client", [
+        ("/docs/pnp.html", "Protocol guide", "explains PARLORNET/1 step by step, from signing in to tables and "
+         "every game, with sample sessions."),
+        ("/docs/protocol.html", "Native protocol", "is the reference for PARLORNET/1."),
+        ("/docs/transports.html", "Transports", "covers serial lines, modems and bridges."),
+        ("/docs/bandwidth.html", "Bandwidth", "shows what a game costs on a slow line."),
+        ("/docs/design/trust.html", "Trust", "sets the rules that clients and server extensions follow, so that "
+         "the server decides."),
     ]),
     ("For operators and developers", [
-        (running.PAGE, running.TITLE, "running a parlor of your own: the quick start, installing on a Docker "
-         "host, ParlorNet Play over HTTPS and the admin menus"),
-        (PROJECT_URL, "Source code", "the project's home, for running your own server or contributing"),
-        ("/docs/adapters.html", "Server extensions", "how they are built"),
-        ("/docs/architecture.html", "Architecture", "the core, the games and the extensions"),
-        ("/docs/games-howto.html", "Adding a game", "the plugin and its frontend module"),
-        ("/docs/plugins.html", "Game plugins", "the plugin interface"),
-        ("/docs/security-design.html", "Security design", "identity, sign-in, sessions and the extension channel"),
-        ("/docs/auth-federation.html", "Auth and federation", "deployment and federation"),
-        ("/docs/site.html", "Web sites", "the game server's pages, this docs site, and their page frame"),
-        ("/docs/backlog.html", "Backlog", "ideas recorded for later"),
+        (running.PAGE, running.TITLE, "shows how to run a parlor of your own, from the quick start to installing "
+         "on a Docker host, ParlorNet Play over HTTPS and the admin menus."),
+        (PROJECT_URL, "Source code", "is the project's home on GitHub."),
+        ("/docs/adapters.html", "Server extensions", "explains how the server extensions are built."),
+        ("/docs/architecture.html", "Architecture", "describes the core, the games and the server extensions."),
+        ("/docs/games-howto.html", "Adding a game", "explains how to write a game's plugin and its web and "
+         "telnet module."),
+        ("/docs/plugins.html", "Game plugins", "describes the plugin interface."),
+        ("/docs/security-design.html", "Security design", "covers identity, sign-in, sessions and the extension "
+         "channel."),
+        ("/docs/auth-federation.html", "Auth and federation", "covers deployment and federation."),
+        ("/docs/site.html", "Web sites", "describes the game server's pages, this docs site and their page "
+         "frame."),
+        ("/docs/backlog.html", "Backlog", "records ideas for later."),
     ]),
 ]
 FOLDERS = [("types", "Game type specs"), ("design", "Design notes"), ("", "Other docs")]
@@ -305,7 +316,7 @@ def docs_index(docs):
             if href.startswith("/docs/") and href.split("#")[0] not in docs:
                 continue
             listed.add(href)
-            lines.append("%s: %s" % (a(href, "<b>%s</b>" % esc(name)), esc(what)))
+            lines.append("%s %s" % (a(href, "<b>%s</b>" % esc(name)), esc(what)))
         out.append(h2(None, esc(title)) + ul(lines))
     rest = {}
     for path in docs:
@@ -316,8 +327,9 @@ def docs_index(docs):
         out.append(h2(folder or None, esc(dict(FOLDERS).get(folder, folder))) +
                    ul(a(x, esc(x[len("/docs/"):-len(".html")].rpartition("/")[2])) for x in rest[folder]))
     body = (h1("Docs") +
-            p("These docs cover how ParlorNet works and how to play, connect, write a frontend or run a server. "
-              "They are written in Markdown in the docs folder of the source.") +
+            p("These docs explain how ParlorNet works, how to play on a ParlorNet server, how to write a client "
+              "of your own and how to run a server. They are written in Markdown and kept in the docs folder of "
+              "the source.") +
             finder(False) + "".join(out))
     return frame("ParlorNet: docs", body, "/docs.html")
 
