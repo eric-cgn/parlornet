@@ -180,7 +180,7 @@ class Boards(unittest.TestCase):
         # the help box: the letters first, then the game's own help; on two pages when they do not fit
         for module in G.all_games():
             for moves in SETS:
-                g = board(module, moves, keys=["x", "x"])
+                g = board(module, moves, keys=["x", "x", "x"])     # Grid Words has a page of letter points
                 asyncio.run(g.help())
                 text = "\n".join("\n".join(scr) for scr in g.io.screens)
                 up, down, left, right = LETTERS[moves].upper()
@@ -237,7 +237,12 @@ class GridWords(unittest.TestCase):
         g = board(gridwords, "hjkl")
         press(g, "l")
         self.assertEqual(g.cur, (9, 8))
-        self.assertIn("type :h8 a WORD", g.hint()[0])
+        self.assertEqual(g.hint()[0], "Your move. Press Enter on a square to start a word there.")
+        self.assertEqual(g.pass_hint(), gridwords.PASS_HINT)
+        g.s.moves = "esdf"                                          # E moves up: exchange needs its :
+        self.assertEqual(g.pass_hint(), "Type pass to skip your turn, or type :exchange and the letters to swap them.")
+        self.assertIn(g.pass_hint(), g.screen()[0].lines()[22])
+        g.s.moves = "hjkl"
         press(g, "ENTER", "ESC")                                    # Esc clears the start: letters move again
         press(g, "h")
         self.assertEqual((g.cur, g.buf), ((8, 8), ""))
@@ -345,13 +350,11 @@ class Login(TelnetBase):
     auth = "none"
 
     def test_offered_without_a_terminal_type(self):
-        c = Client(self.tel_port)
+        c = Client(self.tel_port, display="1")
         c.until("Login")
         c.send("new\r\n")
         c.until("Name you want")
         c.send("nina\r\n")
-        c.until("Choice [")
-        c.send("1\r\n")
         out = c.until("Press Enter for the menu, or K and Enter to choose movement keys.")
         self.assertIn("Your terminal may not send arrow keys", out)
         c.send("k\r\n")
@@ -396,13 +399,11 @@ class Login(TelnetBase):
             c.pump()
 
     def test_not_offered_to_xterm(self):
-        c = Client(self.tel_port, enc="utf-8", ttype="xterm-256color")
+        c = Client(self.tel_port, enc="utf-8", ttype="xterm-256color", display="2")
         c.until("Login")
         c.send("new\r\n")
         c.until("Name you want")
         c.send("otto\r\n")
-        c.until("Choice [")
-        c.send("2\r\n")
         out = c.until("Press Enter for the menu.")
         self.assertNotIn("movement keys", out)
         c.send("\r\n")

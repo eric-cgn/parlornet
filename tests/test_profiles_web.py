@@ -195,9 +195,10 @@ class TelnetProfiles(Stack):
                 s.sendall(b"\xff\xfb\x18")   # IAC WILL TTYPE
             if b"\xff\xfa\x18\x01\xff\xf0" in buf:      # SB TTYPE SEND
                 s.sendall(b"\xff\xfa\x18\x00" + ttype.encode() + b"\xff\xf0")
-                s.sendall(b"\r\n")                     # Enter at the title page, typed ahead
-                buf = b""
+                s.sendall(b"\r\n")                     # Enter at the start: the display menu
                 break
+        self.menu_text = self.until(s, "Choice [")
+        s.sendall(b"4\r\n\r\n")                      # plain text, and Enter at the title page, typed ahead
         return s
 
     def until(self, s, want, secs=10):
@@ -214,9 +215,10 @@ class TelnetProfiles(Stack):
 
     def test_ttype_profile_and_machine(self):
         s = self.connect("VT100")
-        self.assertIn("Your terminal says it is VT100.", self.until(s, "Login"))
+        self.assertIn("Your terminal says it is VT100.", self.menu_text)    # in the display menu
+        self.until(s, "Login")
         for send, want in ((b"new", "Name you want"), (b"tess", "Choose a password"), (b"tess-Pass-word", "again"),
-                           (b"tess-Pass-word", "Choice"), (b"4", "Press Enter"), (b"", "Commands:")):
+                           (b"tess-Pass-word", "Press Enter"), (b"", "Commands:")):
             s.sendall(send + b"\r\n")
             self.assertIn(want, self.until(s, want))
         s.sendall(b"machine Atari Mega ST\r\n")

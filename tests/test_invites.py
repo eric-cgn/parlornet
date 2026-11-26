@@ -396,14 +396,12 @@ class Stack(WebPlayers, unittest.TestCase):
 
     # ---- telnet ---------------------------------------------------------------------------------
     def telnet(self, name):
-        c = Client(self.tel, enc="latin-1")
+        c = Client(self.tel, enc="latin-1", display="4")
         self.addCleanup(c.s.close)
         c.until("Login")
         c.send("new\r\n")                                     # a new account (sign-in none: the name alone)
         c.until("Name you want")
         c.send("%s\r\n" % name)
-        c.until("Choice [")
-        c.send("4\r\n")                                         # plain text
         c.until("Press Enter")
         c.send("\r\n")
         c.until("Your tables")

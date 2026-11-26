@@ -266,7 +266,7 @@ class F01Adapters(unittest.TestCase):
         titled = False
         while b"Login (" not in data and time.time() < end:
             data += t.recv(4096)
-            if b"Press Enter" in data and not titled:
+            if b"Press Enter" in data.replace(b"Press Enter to choose", b"") and not titled:
                 titled = True
                 t.sendall(b"\r\n")                  # the title page
         t.close()

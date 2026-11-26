@@ -14,7 +14,7 @@ Rummy Tile Classic is tile rummy for 2-4 players (`NEW rummytile standard player
 | `Y` | yellow |
 | `J` | joker |
 
-`R7`, `B12`, `K1`, `Y13`, `J`. The two copies of a tile are interchangeable, and so are the two jokers. The classic pages and telnet show the letter as well as the color; ParlorNet Play draws the number in its color and names the tile in words for screen readers (docs/design/rummytile-colours.md).
+`R7`, `B12`, `K1`, `Y13`, `J`. The two copies of a tile are interchangeable, and so are the two jokers. The classic pages and telnet show the letter as well as the color; ParlorNet Play draws the number in its color and names the tile in words for screen readers (docs/design/rummytile-colours.md). On telnet the tiles are bright white (SGR 107) in `utf8`, for xterm-class terminals, with yellow numbers in dark gold (38;5;136). In `pc` and `ansi`, for terminals with eight colors, they are light grey (47), and a yellow tile is bright yellow on black, since no yellow reads on grey.
 
 ## Rules (standard)
 

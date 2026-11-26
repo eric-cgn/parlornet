@@ -182,9 +182,9 @@ class Session(unittest.TestCase):
             seen["out"] = io.w.data
             return None
 
-        async def negotiate(wait=1.5):
-            return None
-        io.negotiate = negotiate
+        async def detect(secs=None):            # the start: no terminal type, and no Enter for the menu
+            return False
+        io.detect = detect
         saved = telnet.MOTD.get, telnet.sign_in
         telnet.MOTD.get, telnet.sign_in = motd, sign_in
         try:
@@ -208,9 +208,9 @@ class Session(unittest.TestCase):
             out["data"] = io.w.data
             return None
 
-        async def negotiate(wait=1.5):
-            return None
-        io.negotiate = negotiate
+        async def detect(secs=None):            # the start: no terminal type, and no Enter for the menu
+            return False
+        io.detect = detect
         saved = telnet.MOTD.get, telnet.sign_in
         telnet.MOTD.get, telnet.sign_in = motd, sign_in
         try:

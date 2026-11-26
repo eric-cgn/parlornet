@@ -398,14 +398,12 @@ class WithAServer(unittest.TestCase):
         self.assertRegex(body.replace("&amp;", "&"), r'who=bot1(&|")')     # the next seat: the next bot name
 
     def test_invited_from_telnet(self):
-        c = Client(self.tel_port, enc="latin-1")
+        c = Client(self.tel_port, enc="latin-1", display="4")
         try:
             c.until("Login")
             c.send("new\r\n")
             c.until("Name you want")
             c.send("telly\r\n")
-            c.until("Choice [")
-            c.send("4\r\n")                                 # plain text
             c.until("Press Enter")
             c.send("\r\n")
             c.until("Your tables")
@@ -433,14 +431,12 @@ class WithAServer(unittest.TestCase):
             c.close()
 
     def test_the_waiting_box_offers_it(self):
-        c = Client(self.tel_port)
+        c = Client(self.tel_port, display="1")
         try:
             c.until("Login")
             c.send("new\r\n")
             c.until("Name you want")
             c.send("fully\r\n")
-            c.until("Choice [")
-            c.send("\r\n")                                  # full screen
             c.until("Press Enter")
             c.send("\r\n")
             c.until("Your tables", screen=True)
