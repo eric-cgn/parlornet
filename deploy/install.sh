@@ -19,6 +19,10 @@
 #   PARLOR_SIGNUP     how they sign up: none, password, or email, which mails them a password
 #                     (default: the one PARLOR_AUTH goes with, none or password)
 #   PARLOR_WEB_HOSTS  the names the web answers to, comma-separated (default: any name)
+#   PARLOR_WEB_URL    the web site's own address when a proxy serves it on the usual ports, such as
+#                     https://games.example.org/; its pages name their address there as canonical
+#   PARLOR_WEB_PROXIES  the proxy's address as the container sees it, whose X-Forwarded-For the web
+#                     believes: 172.30.4.1 (this network's gateway) for a proxy on the host
 #   PARLOR_PLAY_URL   the address players open for ParlorNet Play, through the proxy, such as
 #                     https://games.example.org/play/; the web's /play answers 301 there
 #   PARLOR_PLAY_PROXIES  the proxy's address as the container sees it, whose X-Forwarded-For the Play
@@ -51,7 +55,8 @@ docker run -d --name parlornet --restart unless-stopped \
 	-p "$([ "${PARLOR_PLAY_OPEN:-}" = 1 ] || echo 127.0.0.1:)6513:6513" \
 	-p 127.0.0.1:6510:6510 \
 	-e PARLOR_MOTD_FILE=/app/deploy/motd.txt \
-	$(for v in PARLOR_NAME PARLOR_AUTH PARLOR_SIGNUP PARLOR_WEB_HOSTS PARLOR_PLAY_URL PARLOR_PLAY_PROXIES \
+	$(for v in PARLOR_NAME PARLOR_AUTH PARLOR_SIGNUP PARLOR_WEB_HOSTS PARLOR_WEB_URL PARLOR_WEB_PROXIES \
+		PARLOR_PLAY_URL PARLOR_PLAY_PROXIES \
 		PARLOR_PLAY_PUSH_CONTACT; do
 		eval "x=\${$v:-}"; [ -n "$x" ] && echo "-e $v=$x"; done) \
 	-v /srv/parlornet:/data \

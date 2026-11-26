@@ -11,6 +11,10 @@ There are four layers, and each talks only to the one below it through a narrow 
    - server extensions (docs/adapters.md): web, telnet and game-network extensions, each speaking one protocol to players' frontends; they run beside the server but are not part of it.
 4. **Notification layer**: human-readable reach-outs such as "it's your turn", via ActivityPub/Mastodon posts, email or anything else. It is optional, observes table events and is never part of game or federation traffic. The core offers server extensions a feed of notices for it (`NFY`, protocol.md, Notices); ParlorNet Play's push notifications are the first to use it (play-notifications.md).
 
+A move takes the path below. A period program speaks its own protocol to the server extension for it, which passes the move to the core; a program that speaks ParlorNet's own protocol reaches the core directly. The core hands the move to the game's plugin and sends the result back the same way.
+
+![A move's path: from the player's program through a server extension to the core and the game's plugin](../static/img/diagram-request-path.gif)
+
 ## Identity and the extension channel
 
 Who a connection is belongs to one component, the accounts component (`parlord/accounts.py`), which runs the operator's sign-in method (`parlord/auth.py`) and owns sessions. Neither the table host's game code nor any server extension checks a credential or keeps one. docs/security-design.md has the threat model. In short:
@@ -22,6 +26,10 @@ Who a connection is belongs to one component, the accounts component (`parlord/a
 
 - A **frontend** is the program a player uses: a web browser, a telnet program, a 1990s game client (Reversi The Eclipse, MacFIBS, FIBS/W, xfibs, the Outland Gateway), or a native ParlorNet client. It runs on the player's machine, outside the server.
 - A **server extension** is a transport-layer program that speaks one protocol to frontends and the native protocol to the table host: web (HTTP, 6500), telnet (6502), IOS (6503), FIBS (6505), Outland (6506), DOoM (6507), GameMaster (6508), NetSprocket for NetBoxes (6512), ParlorNet Play (6513), batnav (6514), IRC for Awale (6515), Networdz (6516), NetLuff (6517, published as 1744 too, NetLuff's own port), ICDS for xcheckers (6518), Worthy Opponent (6519, dialed by modem) and RSCARDS (6520, by modem or serial line). The native protocol (6501) is served by the table host itself. In the code, server extensions are the `adapters/` package. Each declares its protocol's key, port, name and description to the table host when it connects, and the table host lists what is connected (`PRL`). docs/protocols.md describes each protocol for players.
+
+In a running parlor these are separate processes in one container, as below. [Run a server](http://docs.parlornet.org/running.html) and [deploy/README.md](../deploy/README.md) show how to set one up.
+
+![A parlor: the players' programs, the reverse proxy for ParlorNet Play, and the processes in the container](../static/img/diagram-parlor.gif)
 
 ## Federation is not notification
 

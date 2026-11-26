@@ -25,7 +25,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 # game rulebooks page has a table of downloads for each game.
 BUDGETS = {"index.html": 60 * 1024, "browsers.html": 20 * 1024, "telnet.html": 18 * 1024,
            "protocols.html": 22 * 1024, "docs.html": 16 * 1024, "eclipse-68k-fix.html": 11 * 1024,
-           "parlornet-rulebook.html": 9 * 1024, "gamemaster-rulebooks.html": 22 * 1024}
+           "parlornet-rulebook.html": 9 * 1024, "gamemaster-rulebooks.html": 22 * 1024,
+           "running.html": 22 * 1024}
 CLIENT_BUDGET = 12 * 1024       # a client's page with its ratings (its screenshots come on top), an old setup address
 DOC_GROWTH = (1.5, 2048)        # a rendered doc: at most its Markdown times this, plus this
 
@@ -131,7 +132,9 @@ class SiteWide(Built):
                      "eclipse-68k-fix.html", "404.html", "img/parlor.gif",
                      "img/eclipse-68k-fix.gif", "download/eclipse-68k-fix-readme.txt", ".nojekyll",
                      "parlornet-rulebook.html", "download/parlornet-rulebook-readme.txt",
-                     "gamemaster-rulebooks.html", "download/gamemaster-rulebooks-readme.txt"):
+                     "gamemaster-rulebooks.html", "download/gamemaster-rulebooks-readme.txt", "running.html",
+                     "img/diagram-parlor.gif", "img/diagram-request-path.gif", "img/diagram-serial.gif",
+                     "img/diagram-networdz.gif"):
             self.assertIn(name, self.files)
         for name, data in self.fixture.data.items():    # every pinned download, as fetched
             self.assertEqual(self.files["download/" + name], data)
@@ -192,7 +195,7 @@ class SiteWide(Built):
             self.assertRegex(page[:1500], r">ParlorNet</font>", name)
             self.assertIn("These pages cover every ParlorNet server.", page[-900:], name)
             nav = plain(page)[:plain(page).index("</table>")]
-            for label in ("Clients", "Protocols", "Browsers", "Telnet programs", "Docs", "Source"):
+            for label in ("Clients", "Protocols", "Browsers", "Telnet programs", "Docs", "Run a server", "Source"):
                 self.assertTrue(">%s</a>" % label in nav or "<b>%s</b>" % label in nav, (name, label))
             self.assertNotIn("Server: <b>", page, name)              # no server's name: it serves them all
 
@@ -222,6 +225,147 @@ class SiteWide(Built):
             if name != "eclipse-68k-fix.html":            # its bug report shows what happens to a name
                 self.assertFalse("parlornet.org" in page, name)
         self.assertIn("<tt>telnet <i>host</i> 6502</tt>", self.pages["telnet.html"])
+
+
+class Diagrams(Built):
+    """The docs' diagrams: an SVG source in docs/diagrams/ and the GIF tools/diagrams.py draws from it, small and
+    web-safe, shown by at least one doc, and on the site with its size and caption."""
+
+    @staticmethod
+    def gif_colors(data):
+        """The colors of a GIF's global color table, as hex strings."""
+        flags = data[10]
+        if not flags & 0x80:
+            return []
+        n = 2 << (flags & 7)
+        table = data[13:13 + 3 * n]
+        return ["#%02X%02X%02X" % tuple(table[i:i + 3]) for i in range(0, len(table), 3)]
+
+    def markdown(self):
+        """{repository path: Markdown} of every file a diagram may be shown in."""
+        out = {}
+        for d, _, fs in os.walk(os.path.join(ROOT, "docs")):
+            for f in fs:
+                if f.endswith(".md"):
+                    full = os.path.join(d, f)
+                    with open(full, encoding="utf-8") as fh:
+                        out[os.path.relpath(full, ROOT).replace(os.sep, "/")] = fh.read()
+        for rel in ("README.md", "deploy/README.md"):
+            with open(os.path.join(ROOT, *rel.split("/")), encoding="utf-8") as fh:
+                out[rel] = fh.read()
+        return out
+
+    def test_sources_and_gifs(self):
+        import diagrams
+        names = diagrams.sources()
+        self.assertEqual(set(names), {"parlor", "request-path", "serial", "networdz"})
+        drawn = {f for f in os.listdir(os.path.join(ROOT, "static", "img")) if f.startswith("diagram-")}
+        self.assertEqual(drawn, {diagrams.gif_name(n) for n in names})          # no GIF without its source
+        for n in names:
+            svg = os.path.join(diagrams.SRC, n + ".svg")
+            with open(svg, encoding="utf-8") as f:
+                text = f.read()
+            self.assertRegex(text, r"<title>[^<]{20,}</title>", n)
+            with open(os.path.join(diagrams.OUT, diagrams.gif_name(n)), "rb") as f:
+                data = f.read()
+            self.assertIn(data[:6], (b"GIF87a", b"GIF89a"), n)
+            from docsite import clientpages
+            self.assertEqual(clientpages.gif_size(data), diagrams.svg_size(svg), n)   # drawn from this source
+            self.assertLessEqual(clientpages.gif_size(data)[0], diagrams.MAX_WIDTH, n)
+            self.assertLessEqual(len(data), 21 * 1024, n)
+            colors = self.gif_colors(data)
+            self.assertTrue(colors, n)
+            for c in colors:                    # web-safe: each part a multiple of 0x33
+                self.assertTrue(all(int(c[i:i + 2], 16) % 0x33 == 0 for i in (1, 3, 5)), (n, c))
+            self.assertTrue(set(colors) <= set(diagrams.PALETTE) | {"#000000"}, n)
+
+    def test_each_is_shown_with_its_size_and_caption(self):
+        import diagrams
+        from docsite import clientpages
+        md = self.markdown()
+        for n in diagrams.sources():
+            name = diagrams.gif_name(n)
+            shown = [rel for rel, text in md.items()
+                     if re.search(r"^!\[[^\]]+\]\((?:\.\./)*static/img/%s\)$" % re.escape(name), text, re.M)]
+            self.assertTrue(shown, n)
+            with open(os.path.join(diagrams.OUT, name), "rb") as f:
+                data = f.read()
+            self.assertEqual(self.files["img/" + name], data)
+            w, h = clientpages.gif_size(data)
+            pages = [pg for pg, html in self.pages.items() if "img/" + name in html]
+            self.assertTrue(pages, n)
+            for pg in pages:
+                self.assertRegex(self.pages[pg], r'<img src="(?:\.\./)*img/%s" width="%d" height="%d" alt="\[[^"\]]+\]">'
+                                 % (re.escape(name), w, h), (n, pg))
+        for page in ("docs/architecture.html", "docs/serial.html", "clients/networdz.html", "running.html"):
+            self.assertIn("img/diagram-", self.pages[page], page)
+
+    def test_pictures_in_markdown(self):
+        """A picture on a line of its own: drawn by the caller, or plainly; on the docs site only a GIF from
+        static/img/."""
+        from adapters.mdhtml import to_html
+        from docsite import clientpages
+        self.assertEqual(to_html("Text.\n![A cat](cat.gif)\nMore.", image=lambda c, u: "<%s|%s>" % (c, u)),
+                         "<p>Text.</p>\n<A cat|cat.gif>\n<p>More.</p>")
+        self.assertIn('<img src="cat.gif" alt="[A cat]">', to_html("![A cat](cat.gif)"))
+        self.assertIn('<img src="/img/diagram-serial.gif" width="480"',
+                      clientpages.figure("Serial", "../static/img/diagram-serial.gif"))
+        for bad in ("../static/img/x.png", "http://example.org/x.gif", "../docs/x.gif"):
+            with self.assertRaises(ValueError):
+                clientpages.figure("X", bad)
+
+
+class RunningPage(Built):
+    """running.html: running a server of your own, made from the README's "Run your own parlor" section and
+    deploy/README.md as they are, and easy to find: in the navigation, on the Clients page and the docs index,
+    and pointed to by the README."""
+
+    def test_made_from_the_repository(self):
+        from adapters.mdhtml import esc
+        from docsite import running
+        page = self.pages["running.html"]
+        body = plain(page)
+        for rel, _, md in running.sources():
+            for block in re.findall(r"```[a-z]*\n(.*?)```", md, re.S):     # every command and config, as it is
+                self.assertIn("<pre>%s</pre>" % esc(block.rstrip("\n")), body, rel)
+        self.assertEqual(len(re.findall(r"<pre>", page)),
+                         sum(len(re.findall(r"^```", md, re.M)) // 2 for _, _, md in running.sources()))
+        self.assertIn('<h2><a name="run-your-own-parlor">', body)
+        self.assertIn('<h2><a name="installing-on-a-docker-host">', body)
+        for name in ("a-lan-a-club-night-or-a-festival", "the-open-internet", "parlornet-play-over-https",
+                     "administration", "more-separation", "memory"):
+            self.assertIn('<h3><a name="%s">' % name, body)
+        self.assertIn('href="https://github.com/eric-cgn/parlornet"', page)
+        self.assertIn('href="https://github.com/eric-cgn/parlornet/blob/main/deploy/README.md"', page)
+
+    def test_links_between_the_two_stay_on_the_page(self):
+        page = self.pages["running.html"]
+        sources = {"https://github.com/eric-cgn/parlornet/blob/main/README.md#run-your-own-parlor",
+                   "https://github.com/eric-cgn/parlornet/blob/main/deploy/README.md"}     # the closing line
+        for u in re.findall(r'href="([^"]+)"', page):
+            if "README.md" in u:
+                self.assertIn(u, sources)
+        for anchor in ("#installing-on-a-docker-host", "#the-open-internet", "#run-your-own-parlor",
+                       "#parlornet-play-over-https"):
+            self.assertIn('href="%s"' % anchor, page)
+
+    def test_names_no_host_of_ours(self):
+        """Examples use example.org; the only parlornet.org name on the page is the docs site's."""
+        page = self.pages["running.html"]
+        self.assertEqual(set(re.findall(r"[\w.-]*parlornet\.org", page)), {"docs.parlornet.org"})
+        self.assertIn("games.example.org", page)
+
+    def test_easy_to_find(self):
+        from docsite import running
+        self.assertIn('href="running.html"', self.pages["docs.html"])
+        self.assertIn('<a name="server">', self.pages["index.html"])
+        self.assertIn('href="running.html">Run a server</a>', self.pages["index.html"])
+        self.assertIn('href="../running.html">Run a server</a>', self.pages["docs/architecture.html"])
+        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        self.assertIn("](deploy/README.md)", readme)
+        self.assertIn("](http://docs.parlornet.org%s)" % running.PAGE, readme)
+        self.assertIn("## " + running.README_SECTION + "\n", readme)
 
 
 class ClientsPage(Built):

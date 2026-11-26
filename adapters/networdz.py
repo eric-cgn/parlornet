@@ -428,6 +428,7 @@ class Tiles:
             self.bag[p] = n
         self.racks = {s: [EMPTY] * RACK for s in racks}
         self.board = {}             # (x, y) -> number
+        self.blanks = {}            # (x, y) -> the letter a blank on the board stands for, in lower case
         self.out = []               # numbers put back by an exchange, until its draw is over
 
     def bag_letters(self):
@@ -499,7 +500,10 @@ class Tiles:
         for i in range(RACK):
             out.append(recs.get(i, (OFF, OFF, rack[i], "")))
             if i in recs:
-                self.board[(recs[i][1] + 1, recs[i][0] + 1)] = rack[i]
+                xy = (recs[i][1] + 1, recs[i][0] + 1)
+                self.board[xy] = rack[i]
+                if recs[i][3]:
+                    self.blanks[xy] = recs[i][3].lower()
                 rack[i] = EMPTY
         return out
 
@@ -519,8 +523,10 @@ class Tiles:
         return placed
 
     def played(self, seat, placed):
-        for x, y, _, _, slot in placed:
+        for x, y, c, blank, slot in placed:
             self.board[(x, y)] = self.racks[seat][slot]
+            if blank:
+                self.blanks[(x, y)] = c.lower()
             self.racks[seat][slot] = EMPTY
 
     def put_back(self, seat, letters=None, slots_=None):
@@ -548,8 +554,8 @@ class Tiles:
         self.out = []
 
     def tiles(self):
-        """The board as {(x, y): letter}."""
-        return {xy: letter(n) for xy, n in self.board.items()}
+        """The board as {(x, y): letter}, a blank's letter in lower case, as the table's view has it."""
+        return {xy: self.blanks.get(xy) or letter(n) for xy, n in self.board.items()}
 
 
 # ---- one Networdz guest -----------------------------------------------------------------------------------

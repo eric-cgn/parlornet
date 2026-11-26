@@ -41,10 +41,11 @@ PUBLIC_NAV = ["Welcome", "Lobby", "Games", "Docs"]
 SIGNED_NAV = PUBLIC_NAV + ["Sign out"]
 
 # Byte budgets: the target modems run at 2400 to 14,400 bit/s. (page, most bytes of HTML)
-BUDGETS = {"/welcome.htm": 14 * 1024, "/games.htm": 9 * 1024}     # welcome: the forms and the guide by machine
+# welcome: the forms and the guide by machine, with each machine's picture; credits: the pictures' sources
+BUDGETS = {"/welcome.htm": 16 * 1024, "/games.htm": 9 * 1024, "/credits.htm": 6 * 1024}
 GAME_PAGE_BUDGET = 8 * 1024         # a game's page
 SMALL_BUDGET = 3 * 1024             # sign-in steps, notices, the resign question
-LOBBY_BUDGET = (11 * 1024, 600)     # the lobby: bytes, plus this for each table it lists
+LOBBY_BUDGET = (12 * 1024, 600)     # the lobby: bytes, plus this for each table it lists
 TABLE_FRAME_BUDGET = 3 * 1024       # a table page less the game's own parts
 PAGE_BUDGETS = {"/activity.htm": 9 * 1024, "/player.htm": 6 * 1024}     # the activity, a profile
 
@@ -139,7 +140,7 @@ class Site(Stack):
 
     def public_pages(self):
         from adapters import web as W
-        paths = ["/welcome.htm", "/games.htm"] + ["/games/%s.htm" % r["type"] for r in W.game_rows()]
+        paths = ["/welcome.htm", "/games.htm", "/credits.htm"] + ["/games/%s.htm" % r["type"] for r in W.game_rows()]
         out = {}
         for path in paths:
             st, _, ct, body = self.get(path)
@@ -323,17 +324,19 @@ class Site(Stack):
         row, then a row per machine of adapters/clients.py (PLAY_MACHINES) in order, then Any old computer and
         Any new computer. Each row names its clients as machine_clients gives them, best first, each linking to
         its page on the docs site, with its medal; then a browser and a telnet program. No ports, no protocols."""
-        from adapters import clients as C, web as W
+        from adapters import clients as C, siteimages as PIC, web as W
         from parlord import DOCS_URL
         page = plain(self.get("/welcome.htm")[3])
         sec = page[page.index('<a name="machines">'):page.rindex("<br>\n<table")]
         machines = [(m[0], m[1]) for m in C.PLAY_MACHINES] + [W.ANY_OLD[:2], W.ANY_NEW[:2]]
         jumps = re.findall(r'<a href="#([a-z0-9-]+)">([^<]+)</a>', sec)
         self.assertEqual(jumps, [(anchor, C.esc(name)) for anchor, name in machines])
-        rows = re.findall(r'<tr[^>]*><td><a name="([a-z0-9-]+)"></a>(.+?) ((?:\([^)]*\))?<br>.*?)</td></tr>', sec,
-                          re.S)
-        self.assertEqual([(r[0], r[1]) for r in rows], [(anchor, C.esc(name)) for anchor, name in machines])
-        cells = {r[0]: r[2] for r in rows}
+        rows = re.findall(r'<tr[^>]*><td align="center">(<img [^>]+>)</td><td><a name="([a-z0-9-]+)"></a>(.+?) '
+                          r'((?:\([^)]*\))?<br>.*?)</td></tr>', sec, re.S)
+        self.assertEqual([(r[1], r[2]) for r in rows], [(anchor, C.esc(name)) for anchor, name in machines])
+        for img, anchor, _, _ in rows:          # each row's picture first, with its size and ALT text
+            self.assertEqual(img, PIC.machine_img(anchor))
+        cells = {r[1]: r[3] for r in rows}
         for anchor, _, _, targets in C.PLAY_MACHINES:
             cell, at = cells[anchor], 0
             for c, groups in C.machine_clients(targets):         # best first, each linking to its page there
@@ -426,10 +429,57 @@ class Site(Stack):
         welcome = self.get("/welcome.htm")[3]
         self.assertEqual(welcome.count('<img src="/img/parlor.gif" width="33" height="33" alt="">'), 1)
         for src in set(re.findall(r'<img src="([^"]+)"', welcome)) - {"/img/parlor.gif"}:    # the rating marks
-            self.assertRegex(src, r"^/img/medal-(gold|silver|bronze)\.gif$")
+            self.assertRegex(src, r"^/img/(medal-(gold|silver|bronze)|m/[a-z0-9-]+)\.gif$")    # and the machines
             st, _, ct, body = self.get(src)
             self.assertEqual((st, ct), (200, "image/gif"), src)
             self.assertTrue(body.startswith("GIF89a"), src)
+
+    def test_pictures(self):
+        """Every machine's row on the welcome page and every game on the Games page, its own page and the lobby's
+        Start a table has its picture (adapters/siteimages.py), an <img> with its size and ALT text, served as
+        the same GIF; the welcome page links the credits page, which names each photo's source, author and
+        license."""
+        from adapters import clients as C, siteimages as PIC, web as W
+        tags = {}
+
+        def imgs(page):
+            found = re.findall(r'<img src="(/img/[mg]/[a-z0-9-]+\.gif)" width="(\d+)" height="(\d+)"'
+                               r'(?: align="middle")? alt="([^"]+)">', page)
+            for src, w, h, alt in found:
+                tags[src] = (int(w), int(h), alt)
+            return [f[0] for f in found]
+        welcome = self.get("/welcome.htm")[3]
+        anchors = [m[0] for m in C.PLAY_MACHINES] + [W.ANY_OLD[0], W.ANY_NEW[0]]
+        self.assertEqual(imgs(welcome), [PIC.MACHINE_URL % m for m in anchors])
+        self.assertIn('<a href="/credits.htm">picture credits</a>', welcome)
+        games = self.get("/games.htm")[3]
+        rows = W.game_rows()
+        self.assertEqual(imgs(games), [PIC.GAME_URL % r["type"] for r in rows])
+        for r in rows:
+            self.assertEqual(imgs(self.get("/games/%s.htm" % r["type"])[3]), [PIC.GAME_URL % r["type"]])
+        lobby = self.ann.get("/lobby.htm")[3]
+        start = lobby[lobby.index("Start a table"):]
+        keys = re.findall(r'<input type="hidden" name="g" value="([a-z0-9]+)/\d+">', start)
+        self.assertEqual(imgs(start), [PIC.GAME_URL % k for k in keys])
+        self.assertEqual(len(keys), len(rows))
+        for src, (w, h, alt) in tags.items():        # the same bytes as the file, at the size the tag gives
+            st, _, ct, body = self.get(src)
+            self.assertEqual((st, ct), (200, "image/gif"), src)
+            data = body.encode("latin-1")
+            self.assertEqual(data, PIC.IMAGES[src], src)
+            self.assertEqual(PIC.gif_size(data), (w, h), src)
+            self.assertTrue(alt.strip(), src)
+        st, _, ct, page = self.get("/credits.htm")
+        self.assertEqual((st, ct), (200, "text/html"))
+        self.assertIn("<h1>Picture credits</h1>", plain(page))
+        for c in PIC.credits():
+            anchor = c["picture"].split("/")[1][:-len(".gif")]
+            self.assertIn(PIC.machine_img(anchor), page)
+            self.assertIn('<a href="%s">%s</a>' % (C.esc(c["source"]), C.esc(c["shows"])), page)
+            self.assertIn(W.html_text(c["author"]), page)
+            self.assertIn('<a href="%s">%s</a>' % (c["license_url"], c["license"]) if c["license_url"]
+                          else c["license"], page)
+        self.assertIn("Milo&#353; Juri&#353;i&#263;", page)         # beyond ASCII: a character reference
 
 
 class Palette(unittest.TestCase):

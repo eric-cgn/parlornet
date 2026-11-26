@@ -110,6 +110,9 @@ class Passwords(Base):
         self.assertIn(self.adm.setup, PA.banner(self.adm.setup))
         self.assertIn("telnet <host> 6510", PA.banner(self.adm.setup))
         self.assertFalse((await self.req("get"))["ok"])                    # not signed in
+        for n in (1, 2):                                                    # two tries before any wait
+            r = await self.req("login", password="guess")
+            self.assertEqual((r["ok"], r["wait"]), (False, 0))
         r = await self.req("login", password="guess")
         self.assertEqual((r["ok"], r["wait"]), (False, 60))
         r = await self.req("login", password=self.adm.setup)              # right, but locked
@@ -117,7 +120,7 @@ class Passwords(Base):
         self.assertIn("Too many wrong passwords", r["error"])
         self.unlock()
         r = await self.req("login", password="guess again")
-        self.assertEqual(r["wait"], auth.lock_secs(2))
+        self.assertEqual(r["wait"], auth.lock_secs(4))
         self.unlock()
         self.assertEqual(await self.req("login", password=self.adm.setup.upper()), {"ok": True, "setup": True})
         self.assertEqual(self.adm.fails, {})                                # a right one clears the count
@@ -138,7 +141,7 @@ class Passwords(Base):
         self.assertTrue((await adm2.dispatch(c, {"op": "login", "password": "correct horse"}))["ok"])
         # wrong passwords follow the player schedule, for the address they come from only
         far = {"op": "login", "source": "203.0.113.9"}
-        for n in (1, 2, 3):
+        for n in (1, 2, 3, 4, 5):
             self.unlock()
             r = await adm2.dispatch(PA.AdminConn(), dict(far, password="nope"))
             self.assertEqual(r["wait"], auth.lock_secs(n))
@@ -253,7 +256,7 @@ class Requests(Base):
         self.assertTrue(ann.closing)
         ann = Session(FakeWriter(("127.0.0.1", 1)))
         await srv.dispatch(ann, "HELO ann")
-        self.assertEqual((await srv.dispatch(ann, "AUT password ann-Pass-word"))[-1][:10], "ERR LOCKED")
+        self.assertEqual((await srv.dispatch(ann, "AUT password ann-Pass-word"))[-1], "ERR WRONG Wrong password; try again")
         srv.player("ann").locked_until = 0
         await srv.dispatch(ann, "HELO ann")
         self.assertEqual((await srv.dispatch(ann, "AUT password " + r["code"]))[-1][:16], "ASK password New")
@@ -373,7 +376,7 @@ class Requests(Base):
         self.assertEqual(srv.store.db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0)
         g = Session(None)
         await srv.dispatch(g, "HELO dan")
-        self.assertTrue((await srv.dispatch(g, "AUT password Dan-own-word"))[-1].startswith("ERR LOCKED"))
+        self.assertTrue((await srv.dispatch(g, "AUT password Dan-own-word"))[-1].startswith("ERR WRONG"))
 
 
 class Catalog(unittest.TestCase):
@@ -457,7 +460,7 @@ class LiveTUI(unittest.TestCase):
             c.send("\r\n")                                  # pc: CP437, the default
             c.until("one-time setup password", screen=True)
             c.send("wrong-pass-word\r")
-            c.until("Wrong password; try again in 60 seconds", screen=True)
+            c.until("Wrong password; try again", screen=True)    # the first: no wait yet
             c.send("\r")
         finally:
             c.close()

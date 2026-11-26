@@ -368,6 +368,6 @@ A password is never sent to the server unless it asks for one, and never shows i
 | Worthy Opponent | on the web or by telnet first | in the Talk window (F6): `/signin password` for the name from the program's Name menu, or `/signin name password` (a mailed password: on the web or by telnet first) |
 | RSCARDS | yes, in the sign-in fields: a new name signs up | in two fields: name, then each answer the server asks for |
 
-After a wrong answer the name is locked for a minute, longer after repeated ones (at most 4 hours). While it is locked, `reset` still gets a new temporary password by email.
+After three wrong answers in a row the name is locked for a minute, and longer after more (at most 4 hours). While it is locked, `reset` still gets a new temporary password by email.
 
 Operators have their own console, separate from these protocols.

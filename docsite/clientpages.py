@@ -110,13 +110,23 @@ def files():
 
 
 def md_html(md, link_fix, host):
-    return to_html(md, link_fix).replace("{host}", host) + "\n"
+    return to_html(md, link_fix, figure).replace("{host}", host) + "\n"
 
 
 def shot_html(caption, rel, site):
     w, h = gif_size(read_file(rel))
     return '<p><img src="%s" width="%d" height="%d" alt="[%s]"><br>\n%s</p>\n' % (
         site, w, h, esc(caption), font(esc(caption), 2))
+
+
+def figure(caption, url):
+    """A picture on a line of its own in the Markdown (adapters/mdhtml.py), such as a diagram: a GIF in
+    static/img/, shown as a screenshot is, with its size, its caption as the ALT text and the caption under it.
+    The site's build copies every picture its pages show into img/ (docsite/build.py, files)."""
+    m = re.match(r"^(?:\.\./)*static/img/([a-z0-9-]+\.gif)$", url)
+    if not m:
+        raise ValueError("a picture in the docs is a GIF in static/img/: %s" % url)
+    return shot_html(caption, "static/img/" + m.group(1), "/img/" + m.group(1))
 
 
 def community_html(c, host):

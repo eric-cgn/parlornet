@@ -48,14 +48,14 @@ class N1WrongAnswerBudgets(CheapHashes, unittest.IsolatedAsyncioTestCase):
             await password_player(srv, "p%02d" % i, "p%02d@example.org" % i)
         for i in range(n):
             r = await guess(srv, "198.51.100.7", "p%02d" % i, WRONG)
-            self.assertTrue(r.startswith("ERR LOCKED wait=60 Wrong password"), r)
+            self.assertEqual(r, "ERR WRONG Wrong password; try again")        # each name's first wrong answer
         r = await guess(srv, "198.51.100.7", "p%02d" % n, WRONG)
         self.assertTrue(r.startswith("ERR LOCKED wait=") and "from your address" in r, r)
         self.assertEqual(srv.players["p%02d" % n].fails, 0)               # not even checked
         r = await guess(srv, "198.51.100.7", "p%02d" % (n + 1), SECRET)
         self.assertIn("from your address", r)                             # the right one is not checked either
         r = await guess(srv, "203.0.113.1", "p%02d" % n, WRONG)
-        self.assertTrue(r.startswith("ERR LOCKED wait=60 Wrong password"), r)  # another address is not held up
+        self.assertEqual(r, "ERR WRONG Wrong password; try again")            # another address is not held up
 
     async def test_server_budget_and_trusted_addresses(self):
         srv = server("password", "email")

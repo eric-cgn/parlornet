@@ -190,6 +190,49 @@ class Tiles(unittest.TestCase):
         with self.assertRaises(A.Desync):
             t.guest_play(1, [(7, 10, n + 1 if n + 1 != t.racks[1][0] else n + 2, "")])
 
+    def test_a_play_that_runs_into_a_blank(self):
+        """A blank on the board keeps the letter it stands for: the guest's tiles that run into it or past it
+        make one word with it, and the table takes that word."""
+        rack = "LTDIFNO"
+        t = A.Tiles({0: rack, 1: ""}, A.minus(A.TILESET, rack), random.Random(4))
+        t.draw(0, t.places_for(rack))
+        # the board of a game where the bot's JOY had a blank for its Y
+        board = [(8, 8, "J"), (9, 8, "O"), (10, 8, "y"), (8, 9, "A"), (8, 10, "R"), (9, 10, "I"), (10, 10, "P"),
+                 (12, 10, "B"), (13, 10, "A"), (14, 10, "D"), (10, 11, "I"), (11, 11, "C"), (12, 11, "E"),
+                 (9, 12, "A"), (10, 12, "T"), (12, 12, "D"), (13, 12, "E"), (14, 12, "N"), (9, 13, "W"),
+                 (9, 14, "E")]
+        for i in range(0, len(board), A.RACK):
+            part = board[i:i + A.RACK]
+            t.draw(1, t.places_for("".join("_" if c.islower() else c for _, _, c in part)))
+            t.play(1, part)
+        self.assertEqual(t.tiles(), {(x, y): c for x, y, c in board})
+
+        def j(*squares):        # the guest's J: these rack letters on these squares, the rest off the board
+            recs, used = [(A.OFF, A.OFF, n, "") for n in t.racks[0]], set()
+            for x, y, c in squares:
+                slot = next(s for s in range(A.RACK) if s not in used and A.letter(t.racks[0][s]) == c)
+                used.add(slot)
+                recs[slot] = (y - 1, x - 1, t.racks[0][slot], "")
+            return [p[:4] for p in t.guest_play(0, recs)]
+        # F and L above the blank: FLY down, as the table's best play had it
+        tokens = A.play_move(j((10, 6, "F"), (10, 7, "L")), t.tiles())
+        self.assertEqual(tokens, ["PLAY", "10", "6", "V", "FLY"])
+        cells = ["."] * 225
+        for x, y, c in board:
+            cells[(y - 1) * 15 + x - 1] = c
+        st = {"cells": "".join(cells), "racks": [rack]}
+        self.assertEqual(P.evaluate(st, 0, 10, 6, "V", "FLY", None)["placed"], [(10, 6, "F"), (10, 7, "L")])
+        # a tile past the blank: the word runs through it
+        self.assertEqual(A.play_move(j((11, 8, "T")), t.tiles()), ["PLAY", "8", "8", "H", "JOYT"])
+        # the guest's own blank, once the table has taken the play
+        t2 = A.Tiles({0: "_AT", 1: ""}, A.minus(A.TILESET, "_AT"), random.Random(5))
+        t2.draw(0, t2.places_for("_AT"))
+        placed = t2.guest_play(0, [(7, 7, t2.racks[0][0], "C"), (7, 8, t2.racks[0][1], ""),
+                                   (7, 9, t2.racks[0][2], "")])
+        self.assertEqual(A.play_move([p[:4] for p in placed], t2.tiles()), ["PLAY", "8", "8", "H", "_CAT"])
+        t2.played(0, placed)
+        self.assertEqual(t2.tiles(), {(8, 8): "c", (9, 8): "A", (10, 8): "T"})
+
     def test_the_racks_at_the_start(self):
         """A seat that played before Networdz heard of the start: its first rack held what it placed."""
         now = {0: "ABCDEFG", 1: "HIJKLMN"}
@@ -494,12 +537,18 @@ class Stack(unittest.TestCase):
                 and v["bag"] == sum(1 for n in g.bag[:100] if n != A.EMPTY) and v["turn"] == g.turn)
 
     def my_move(self, nat, tid, g, words=CORE_WORDS):
-        """My turn: the best play from the test list, or a pass."""
+        """My turn: the best play from the test list, or a pass. The table found the play legal, so the parlor
+        must take it as Networdz sends it."""
         g.wait(lambda: self.agree(nat, tid, g), "the table to agree with Networdz")
         found = best_play(nat.req("VUE %s" % tid), words)
         if found:
+            board, rack, n = sorted(g.board.items()), g.letters(), len(g.chats)
             g.play(found[1])
             g.wait(lambda: g.pending is None, "the verdict")
+            if g.verdicts[-1][0] != A.TAKEN:
+                g.wait(lambda: len(g.chats) > n, "the reason in the chat")
+            self.assertEqual(g.verdicts[-1][0], A.TAKEN, "%s refused; board %s; rack %s; chats %r" % (
+                " ".join(found[1]), " ".join("%d,%d %s" % (x, y, c) for (x, y), c in board), rack, g.chats[n:]))
             return "play"
         g.pass_turn()
         return "pass"

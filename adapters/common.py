@@ -3,6 +3,7 @@ over the frontend channel (docs/security-design.md), the sign-in helper for
 line-based game-network adapters, and the gate that counts an adapter's
 connections before and after sign-in."""
 import asyncio
+import ipaddress
 import os
 import re
 import socket
@@ -105,6 +106,50 @@ def keepalive(writer, idle=KEEPALIVE[0], interval=KEEPALIVE[1], count=KEEPALIVE[
         return True
     except OSError:
         return False
+
+
+def proxy_list(text, key="proxies"):
+    """A proxies setting (comma-separated addresses or networks) -> [ip_network]. ValueError if one is not."""
+    out = []
+    for x in (text or "").split(","):
+        if x.strip():
+            try:
+                out.append(ipaddress.ip_network(x.strip(), strict=False))
+            except ValueError:
+                raise ValueError("%s is a comma-separated list of addresses or networks: %r" % (key, x.strip()))
+    return out
+
+
+def as_ip(text):
+    """An address as an ip_address (an IPv4-mapped IPv6 one as IPv4), or None."""
+    try:
+        ip = ipaddress.ip_address(text.strip())
+    except ValueError:
+        return None
+    return ip.ipv4_mapped if ip.version == 6 and ip.ipv4_mapped else ip
+
+
+def trusted_proxy(ip, proxies):
+    return ip is not None and any(ip.version == n.version and ip in n for n in proxies)
+
+
+def forwarded_client(peer, headers, proxies):
+    """(the client's address, the scheme it came over or None) for a request from peer. From one of the
+    trusted proxies: the last address of X-Forwarded-For that is not a proxy (a malformed entry stops the
+    walk at the one after it), and X-Forwarded-Proto; from anywhere else, the peer and None."""
+    ip = as_ip(peer)
+    if not trusted_proxy(ip, proxies):
+        return peer, None
+    addr = str(ip)
+    for x in reversed(headers.get("x-forwarded-for", "").split(",")):
+        hop = as_ip(x)
+        if hop is None:
+            break
+        addr = str(hop)
+        if not trusted_proxy(hop, proxies):
+            break
+    proto = headers.get("x-forwarded-proto", "").split(",")[-1].strip().lower()
+    return addr, proto if proto in ("http", "https") else None
 
 
 def addr_key(addr):
