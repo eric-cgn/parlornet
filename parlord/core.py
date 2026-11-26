@@ -13,7 +13,7 @@ import secrets
 import sys
 import time
 
-from . import DOCS_URL, PROJECT_URL, bots, frontends, native
+from . import DOCS_URL, PROJECT_URL, bots, commands, frontends, native
 from .accounts import STEP_KINDS, Accounts, Player, source_key  # noqa: F401  (Player: for code that imports it from here)
 from .store import Store
 
@@ -49,7 +49,8 @@ UNINVITE_WHY = ("declined", "withdrawn", "expired", "started", "left")
 # Looking (LST, IVL, WHO, VUE, SIN, WAT, SEE, GAM, MOTD, TIM, PRF GET and LST) is what frontends also do on their
 # own, every few seconds, so it never counts; a frontend reports the commands a player types that need no
 # other request with ACT. Signing in counts as well.
-ACTIVE_VERBS = frozenset(("ACT", "NEW", "JON", "LVE", "INV", "UNV", "RES", "MOV", "CHK", "UND", "END", "CHT", "PWD"))
+ACTIVE_VERBS = frozenset(("ACT", "CMD", "NEW", "JON", "LVE", "INV", "UNV", "RES", "MOV", "CHK", "UND", "END", "CHT",
+                          "PWD"))
 
 
 class Limits:
@@ -73,6 +74,7 @@ class Limits:
     turn_max_days = 5        # the longest time per turn a table may set (turn=)
     list_max = 20            # LST lists at most this many tables besides the asker's own (then MORE n)
     idle_secs = 900          # silent connection
+    signin_secs = 300        # a public-port connection not signed in: from connecting or from signing out
     done_keep_secs = 24 * 3600    # finished tables stay listed this long
     turn_default = 24 * 3600      # per-turn time limit unless the creator sets one
     turn_min = 60
@@ -237,6 +239,10 @@ def wrap(lines, width=76):
                 cur = (cur + " " + w).strip()
         out.append(cur[:width])
     return out
+
+
+class Slow(Exception):
+    """A command (CMD) ran out of the connection's requests: its requests count against the rate limit."""
 
 
 def ok(*parts):
@@ -441,7 +447,9 @@ class Session:
         self.cursor = {}
         self.tokens = Limits.rate_burst
         self.stamp = time.time()
-        self.opened = time.monotonic()    # when the connection opened (TIM)
+        self.opened = time.monotonic()    # when the connection opened
+        self.signed_in = None             # when it signed in (TIM counts from here)
+        self.signed_out = self.opened     # when it was last not signed in (the sign-in limit counts from here)
         self.closing = False
 
     def allow(self):
@@ -1103,12 +1111,18 @@ class Server:
                 good = True
                 try:
                     if lines is not None:
-                        got = await lines.line(Limits.idle_secs)
+                        wait = Limits.idle_secs
+                        if not sess.player:     # nobody sits at the sign-in for long
+                            wait = min(wait, max(0.0, sess.signed_out + Limits.signin_secs - time.monotonic()))
+                        got = await lines.line(wait)
                         raw, good = got if got is not None else (b"", True)     # b"": the end of input
                     else:
                         raw = await asyncio.wait_for(reader.readline(), Limits.idle_secs)
                 except asyncio.TimeoutError:
-                    await self.send(sess, [err("IDLE", "closing")])
+                    if lines is not None and not sess.player:
+                        await self.send(sess, [err("IDLE", "closing: sign in within 5 minutes of connecting")])
+                    else:
+                        await self.send(sess, [err("IDLE", "closing")])
                     break
                 except (ValueError, asyncio.LimitOverrunError, native.TooLong):
                     await self.send(sess, [err("TOOLONG", "lines are 80 bytes at most")])
@@ -1180,6 +1194,9 @@ class Server:
             if sess.player:
                 sess.player.conns -= 1
             sess.player = player
+            sess.signed_in = time.monotonic() if player else None
+            if not player:
+                sess.signed_out = time.monotonic()
             if player:
                 player.conns += 1
         if ended:
@@ -1262,6 +1279,7 @@ class Server:
         if sess.player:
             sess.player.conns -= 1
             sess.player = None
+        sess.signed_in, sess.signed_out = None, time.monotonic()    # signing out ends the time signed in
         sess.cursor = {}
         return [err(r[1], r[2])] if r[0] == "err" else [ok(*r[2])]
 
@@ -1271,23 +1289,24 @@ class Server:
         return ["MOTD " + l if l else "MOTD" for l in self.motd_lines()] + [ok()]
 
     async def cmd_tim(self, sess, args, line):
-        """TIM: how long the player has been connected and the server's time, for a client with no clock of
+        """TIM: how long the player has been signed in and the server's time, for a client with no clock of
         its own: TIM secs now, then OK. No database, and not activity (dispatch, ACTIVE_VERBS)."""
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         return ["TIM %d %s" % (self.connected_secs(sess), now), ok()]
 
     @staticmethod
     def connected_secs(sess):
-        """TIM's secs, whole seconds. On the public port the sign-in lasts as long as the connection, so it
-        is the connection's age. On the extension channel a server extension may serve one player over many
-        connections (the web opens one for every page and resumes the session with SES), so a connection
-        signed in counts from the session's start: the sign-in on that server extension, which is where the
-        player's connection to it began as far as the core knows. Before signing in, the connection's age."""
+        """TIM's secs, whole seconds: how long the player has been signed in, and 0 before signing in. On
+        the public port that counts from this connection's sign-in. On the extension channel a server
+        extension may serve one player over many connections (the web opens one for every page and resumes
+        the session with SES), so it counts from the session's start, the sign-in on that server extension."""
+        if not sess.player:
+            return 0
         rec = sess.signin
         if sess.frontend and rec is not None and rec.hash is not None:
             start = rec.since
         else:
-            start = sess.opened
+            start = sess.signed_in or time.monotonic()
         return max(0, int(time.monotonic() - start))
 
     # ---- protocols: what each connected server extension serves (PRO, PRD, PRL) ------------------
@@ -1395,6 +1414,7 @@ class Server:
         if r[0] == "done":
             return [ok()]
         sess.player = r[1]
+        sess.signed_in = time.monotonic()
         sess.player.conns += 1
         if active:
             sess.player.active = time.time()    # signing in is activity
@@ -2165,6 +2185,67 @@ class Server:
             self.event(t, "CHT %s %s" % (seat if seat >= 0 else "-", text))
             t.cond.notify_all()
         return [ok()]
+
+    # ---- commands: a slash line run for any frontend (CMD; docs/protocol.md, Commands) ------------------
+    async def cmd_cmd(self, sess, args, line):
+        """CMD [table] [YES] /line: run a slash command line as the player typed it, at the table named or in the
+        lobby, with the shared commands (parlord/commands.py). The reply is INF lines to show, then OK. A command
+        that asks first answers DLG kind [table] with the dialog's words as the INF lines, and the dialog's Yes
+        sends the confirmed form, CMD [table] YES /kind. The command's own requests go through dispatch on this
+        connection, so each one is checked and counted as if the player had sent it, and the connection's event
+        cursors are left where they were: what the command did reaches the client as events."""
+        rest = line.split(None, 1)[1] if len(line.split(None, 1)) > 1 else ""
+        head, slash, tail = rest.partition("/")
+        words = head.split()
+        sure = bool(words) and words[-1].upper() == commands.CONFIRM
+        if sure:
+            words = words[:-1]
+        if not slash or len(words) > 1:
+            return [err("SYNTAX", "CMD [table] [YES] /command")]
+        t = at = None
+        if words:
+            t, e = self.table_for(words)
+            if e:
+                return e
+            name = sess.player.name
+            seat = t.seat_of(name)
+            if seat < 0 and name not in t.watchers:
+                return [err("NOTAT", "sit or watch first")]
+            at = commands.At(t.id, "%s/%d" % (t.type, t.ver), t.rules, t.status, seat, seat in t.gone)
+
+        async def req(text):
+            if not sess.allow():
+                raise Slow()
+            out = await self.dispatch(sess, text)
+            return out[:-1], out[-1]
+
+        async def typed(words):
+            """The game's own reading of a typed move (the plugin's typed request, docs/plugins.md)."""
+            if not t.plugin.info.get("typed"):
+                return {}
+            r = await t.plugin.call({"op": "typed", "rules": t.rules, "state": t.state, "seat": at.seat,
+                                     "words": words})
+            if not isinstance(r, dict) or str(r.get("error", "")).startswith("plugin:"):
+                return {}
+            return r
+
+        offered = self.offered()
+        games = [(key, p.info["name"], r) for key, p in self.plugins.items()     # in GAM's order, first ruleset
+                 for r in [next((r for r in p.info["rules"] if "%s:%s" % (key, r) in offered), None)] if r]
+        con = commands.CoreConsole(req, sess.player.name, games, at, sure, typed, width=MAXLINE - 6)
+        cursor = dict(sess.cursor)
+        try:
+            await con.handle("/" + tail)
+        except Slow:
+            return [err("RATE", "slow down")]
+        finally:
+            if sess.player is not None:
+                sess.cursor = cursor
+        out = []
+        if con.dialog:
+            kind, tid = con.dialog
+            out.append("DLG %s%s" % (kind, " %s" % tid if tid else ""))
+        return out + ["INF " + l if l else "INF" for l in wrap(con.lines, MAXLINE - 6)] + [ok()]
 
     # ---- a table's notes (NOTE) --------------------------------------------------------------------
     def may_see(self, sess, t):

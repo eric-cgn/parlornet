@@ -89,22 +89,49 @@ class Tim(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_port_before_and_after_signing_in(self):
         c = await self.public()
-        secs, now = await self.tim(c)               # before signing in
-        self.assertLessEqual(secs, 2)
-        self.assertLessEqual(abs(now - time.time()), 2)     # UTC: the same instant as the epoch clock
         self.newest().opened -= 100                 # the connection opened 100 seconds ago
-        secs, _ = await self.tim(c)
-        self.assertGreaterEqual(secs, 100)
+        secs, now = await self.tim(c)               # before signing in: nothing yet
+        self.assertEqual(secs, 0)
+        self.assertLessEqual(abs(now - time.time()), 2)     # UTC: the same instant as the epoch clock
         self.assertEqual((await c.req("HELO ann"))[1], "OK -")
-        after, _ = await self.tim(c)                # signing in does not start it again: the connection's age
-        self.assertGreaterEqual(after, secs)
+        secs, _ = await self.tim(c)                 # signed in just now
+        self.assertLessEqual(secs, 2)
+        self.newest().signed_in -= 100              # the sign-in was 100 seconds ago
+        after, _ = await self.tim(c)
+        self.assertGreaterEqual(after, 100)
         self.assertLess(after, 110)
+        self.assertEqual((await c.req("OUT"))[1], "OK 1")
+        secs, _ = await self.tim(c)                 # signing out ends the time signed in
+        self.assertEqual(secs, 0)
+
+    async def test_nobody_sits_at_the_sign_in(self):
+        """A public-port connection that hasn't signed in within Limits.signin_secs of connecting, or of
+        signing out, is closed, whatever it sends. Signed in, it stays."""
+        from parlord.core import Limits
+        old = Limits.signin_secs
+        Limits.signin_secs = 1.0
+        try:
+            c = await self.public()
+            await self.tim(c)                       # talking doesn't keep it open
+            await asyncio.sleep(1.3)
+            self.assertEqual((await c.r.readline()).decode().rstrip("\r\n"),
+                             "ERR IDLE closing: sign in within 5 minutes of connecting")
+            d = await self.public()
+            self.assertEqual((await d.req("HELO ann"))[1], "OK -")
+            await asyncio.sleep(1.3)
+            self.assertEqual((await d.req("TIM"))[1], "OK")     # signed in: it stays
+            self.assertEqual((await d.req("OUT"))[1], "OK 1")
+            await asyncio.sleep(1.3)                # signed out: the limit starts again
+            self.assertEqual((await d.r.readline()).decode().rstrip("\r\n"),
+                             "ERR IDLE closing: sign in within 5 minutes of connecting")
+        finally:
+            Limits.signin_secs = old
 
     async def test_extension_channel_counts_from_the_session(self):
         x = await self.ext()
         self.newest().opened -= 40
-        secs, _ = await self.tim(x)                 # before signing in: the connection's age
-        self.assertGreaterEqual(secs, 40)
+        secs, _ = await self.tim(x)                 # before signing in: nothing yet
+        self.assertEqual(secs, 0)
         _, final = await x.req("HELO ann")
         sid = final.split()[1]
         secs, _ = await self.tim(x)                 # signed in: since the sign-in, just now
@@ -116,11 +143,12 @@ class Tim(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(secs, 300)
         self.assertLess(secs, 310)
         self.assertEqual((await y.req("OUT"))[1], "OK 1")
-        secs, _ = await self.tim(y)                 # signed out: the connection's age again
-        self.assertLessEqual(secs, 2)
+        secs, _ = await self.tim(y)                 # signed out: nothing again
+        self.assertEqual(secs, 0)
 
     async def test_secs_never_run_backward(self):
         c = await self.public()
+        await c.req("HELO bob")
         x = await self.ext()
         await x.req("HELO ann")
         last = {c: -1, x: -1}
@@ -171,21 +199,23 @@ class TimeCommand(unittest.TestCase):
 
     def test_time(self):
         self.assertEqual(self.said((["TIM 754 2026-11-24T21:05:33Z"], "OK")),
-                         ["Connected 12:34. Server time 21:05 UTC."])
+                         ["Signed in 12:34. Server time 21:05 UTC."])
         self.assertEqual(self.said((["TIM 3725 2026-11-24T09:00:00Z"], "OK")),      # two lines on 40 columns
-                         ["Connected 1:02:05.", "Server time 09:00 UTC."])
+                         ["Signed in 1:02:05.", "Server time 09:00 UTC."])
         self.assertEqual(self.said((["TIM 5 2026-11-24T00:00:00Z"], "OK")),
-                         ["Connected 0:05. Server time 00:00 UTC."])
+                         ["Signed in 0:05. Server time 00:00 UTC."])
+        self.assertEqual(self.said((["TIM 0 2026-11-24T00:00:00Z"], "OK")),        # not signed in yet
+                         ["Server time 00:00 UTC."])
         self.assertEqual(self.said(([], "ERR UNKNOWN no such request")), ["This server does not tell the time."])
         self.assertEqual(self.said(([], "OK")), ["The server's time is not known."])
 
     def test_help_and_fits_a_40_column_screen(self):
-        self.assertIn("/time: time connected, server time", CC.help_lines(CC.NAMES))
+        self.assertIn("/time: time signed in, server time", CC.help_lines(CC.NAMES))
         for secs in (0, 3599, 3600, 86399, 999999):
             for line in CC.time_text(["TIM %d 2026-11-24T23:59:59Z" % secs], "OK"):
                 self.assertLessEqual(len(line), 40, line)
         self.assertEqual(CC.time_text(["TIM 3725 2026-11-24T09:00:00Z"], "OK", width=80),
-                         ["Connected 1:02:05. Server time 09:00 UTC."])
+                         ["Signed in 1:02:05. Server time 09:00 UTC."])
 
     def test_against_the_core(self):
         async def go():
@@ -196,14 +226,14 @@ class TimeCommand(unittest.TestCase):
             await r.readline()
             c = Public(r, w)
             await c.req("HELO ann")
-            max(srv.sessions, key=lambda s: s.opened).opened -= 754
+            max(srv.sessions, key=lambda s: s.opened).signed_in -= 754
             said = []
             await CC.Console(said.extend, c.req, "ann", ["time"]).handle("/time")
             c.close()
             pub.close()
             return said
         said = asyncio.run(go())
-        self.assertTrue(re.match(r"^Connected 12:3[45]\. Server time \d\d:\d\d UTC\.\Z", said[0]), said)
+        self.assertTrue(re.match(r"^Signed in 12:3[45]\. Server time \d\d:\d\d UTC\.\Z", said[0]), said)
 
 
 @slow
@@ -214,9 +244,10 @@ class TelnetTime(TelnetBase):
     def test_time_in_the_menu(self):
         a = Client(self.tel_port)
         self.login(a, "tess", "4")                  # plain text
+        time.sleep(1.2)                             # signed in a second ago: TIM says 1 or more
         a.send("time\r\n")
         out = a.until("UTC.")
-        self.assertTrue(re.search(r"Connected \d+:\d\d\. Server time \d\d:\d\d UTC\.", out), out)
+        self.assertTrue(re.search(r"Signed in \d+:\d\d\. Server time \d\d:\d\d UTC\.", out), out)
         a.send("help\r\n")
         self.assertIn("how long you have been connected", a.until("quit "))
         a.close()

@@ -1,6 +1,6 @@
 # Chat commands
 
-Some services give players a chat-style console: a box where they type lines to the server. On these consoles the same commands work the same way, with one meaning and one help text each.
+Some services give players a chat-style console: a box where they type lines to the server. On these consoles the same commands work the same way, with one meaning and one help text each. Any frontend can also send a command line to the core with the request `CMD`, which runs these commands too ([protocol.md](protocol.md), Commands).
 
 ## The commands
 
@@ -10,6 +10,7 @@ Some services give players a chat-style console: a box where they type lines to 
 | `/resume [table]` | brings a running game back, the first one when no table is given |
 | `/resign [table]` | resigns the game you are playing, or the table given. It asks first: type `/resign` again within 30 seconds to resign, or `/resign TABLE yes` to resign at once |
 | `/invite NAME` | invites a player to a game. The bot is a player too: `/invite bot` plays the bot |
+| `/uninvite NAME` | withdraws an invitation to the table you are at |
 | `/open` | opens a table anyone can join |
 | `/join TABLE` or `/join NAME` | sits you down at an open table, given its number from `/list` or the name of the player waiting there. No invitation is needed. If NAME has invited you, it takes that invitation, as `/accept NAME` does |
 | `/close` | closes your open table |
@@ -20,8 +21,9 @@ Some services give players a chat-style console: a box where they type lines to 
 | `/top` | shows the first five of the leaderboard with their points, and the note that any score is easy to get on a public server, since the leaderboard is meant for conferences, festivals and LAN parties |
 | `/score [NAME]` | shows your score, or NAME's: the points, the wins, draws, losses and resignations, and the rank on the leaderboard |
 | `/note [text]` | shows the notes of the game you are playing; with text, adds a note of up to 48 characters to it. Notes are kept with the table, and anyone who may see the table can read them |
+| `/say TEXT` | says a line at the table you are at. It is for a command line, since on a chat console every line without a slash is said anyway |
 | `/motd` | shows the message of the day |
-| `/time` | shows how long you have been connected and the server's time in UTC: "Connected 12:34. Server time 21:05 UTC." From an hour on, the time connected has hours too (1:02:05), and the two sentences then take a line each, so each fits a 40-column screen |
+| `/time` | shows how long you have been signed in and the server's time in UTC: "Signed in 12:34. Server time 21:05 UTC." From an hour on, the time signed in has hours too (1:02:05), and the two sentences then take a line each, so each fits a 40-column screen. Before signing in it shows the server's time alone |
 | `/signin NAME PASSWORD` | signs in, on a console that signs in through chat |
 | `/quit` | signs out; `/bye` does the same |
 | `/help` | lists the commands this console offers |
@@ -67,9 +69,13 @@ These services keep the commands their clients were written for, since the clien
 - DOoM (BobGrid, MUD clients): `invite`, `accept`, `decline`, `who`, as DOoM's help describes them. `invite bot` plays the bot.
 - IOS (Reversi The Eclipse): `match NAME`, `accept`, `decline`, `who`.
 - ICDS (xcheckers, telnet programs): `match NAME` (`match bot` plays the bot), `accept`, `decline`, `who`, `quit`, as on FICS. Lines that start with `/` take the shared commands as well: `/list`, `/resign`, `/invite`, `/open`, `/join`, `/close`, `/accept`, `/decline`, `/who`, `/top`, `/score`, `/note`, `/motd`, `/time`, `/quit` and `/help`.
-- The telnet menus: numbered menus and the keys they show. Typed `time` there shows the time connected and the server's time, as `/time` does.
+- The telnet menus: numbered menus and the keys they show. Typed `time` there shows the time signed in and the server's time, as `/time` does.
 - The web: buttons and forms.
+
+## The command request
+
+`CMD [table] /line` runs a command line for any frontend, as the player typed it ([protocol.md](protocol.md), Commands). It offers `/list`, `/resign`, `/invite`, `/uninvite`, `/open`, `/join`, `/close`, `/who`, `/tables`, `/top`, `/score`, `/note`, `/say`, `/motd`, `/time`, `/quit` and `/help`, and at a table where the player sits, a typed move such as `/d3`. At the open table where the player waits, `/invite NAME` invites NAME there. `/open` and `/invite` take a game after their other words, as in `/open reversi`. `/resign` and `/quit` answer with a dialog to open, and its Yes confirms them. `/accept` and `/decline` answer that an invitation is answered in its own dialog, since no command answers an offer ([design.md](design.md), the principles).
 
 ## For server extensions
 
-`adapters/chatcmd.py` holds the set: the parsing, the help lines and the commands that need only the core. A console gives it a way to show lines, a way to send requests to the core, the player's name and the commands it offers, and handles the commands that depend on its own client itself. The module's docstring describes the interface.
+`parlord/commands.py` holds the set: the parsing, the help lines and the commands that need only the core. The core runs it for `CMD`, and `adapters/chatcmd.py` gives it to the consoles, with the lines that tell a console's player what each player plays with. A console gives it a way to show lines, a way to send requests to the core, the player's name and the commands it offers, and handles the commands that depend on its own client itself. The module's docstring describes the interface.

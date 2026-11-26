@@ -10,6 +10,7 @@ State: {"n": size, "cells": n*n chars of '.', '0', '1' (row-major, row 1 first),
 Seat 0 moves first. Squares are a column letter and a row number: d3.
 """
 import json
+import re
 import sys
 
 DIRS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
@@ -172,7 +173,25 @@ def op_say(req):
     return {"say": ""}
 
 
-OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply, "say": op_say}
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+
+INFO["typed"] = True
+TYPED_SQUARE_RE = re.compile(r"^[a-z][0-9]{1,2}\Z")
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. A square, like /d3,
+    places a disc there."""
+    st, seat, words = req["state"], req.get("seat", -1), req.get("words") or []
+    if len(words) != 1 or not TYPED_SQUARE_RE.match(words[0].lower()):
+        return {}
+    if seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    return {"move": [words[0].lower()]}
+
+
+OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply, "say": op_say,
+       "typed": op_typed}
 
 
 def main():

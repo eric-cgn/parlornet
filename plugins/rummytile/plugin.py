@@ -600,8 +600,90 @@ def op_say(req):
     return {"say": out}
 
 
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+
+INFO["typed"] = True
+TYPED_TOKEN_RE = re.compile(r"^(?:%s{1,13}-(?:[0-9]{1,2}|n)|[0-9]{1,2}\.(?:[0-9]{1,2}|%s)-(?:[0-9]{1,2}|n|r)"
+                            r"|[0-9]{1,2}-[0-9]{1,2}|[0-9]{1,2}/[0-9]{1,2})\Z" % (TILE, TILE), re.I)
+
+
+def untouched(st):
+    """True when the player to move has changed nothing this turn: the table and the rack are as the turn
+    found them."""
+    return st["table"] == st["start"]["table"] and \
+        Counter(st["racks"][st["turn"]]) == Counter(st["start"]["rack"])
+
+
+def listed(items):
+    """['2', '4', '7'] -> '2, 4 and 7'."""
+    items = [str(i) for i in items]
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def turn_sentence(st):
+    """Whether ending the turn now would count it, as the player reads it."""
+    code, n, pts, bad = evaluate(st)
+    if code == "ok":
+        text = "Your turn would count. You have played %d tile%s." % (n, "" if n == 1 else "s")
+        if pts is not None:
+            text += " Your first meld is %d points." % pts
+        return text
+    then = "take a tile" if st["pool"] else "pass"
+    if untouched(st):
+        return "You have not played anything yet, so ending your turn now would %s." % then
+    if code == "sets":
+        why = ("Sets %s are not valid." if len(bad) > 1 else "Set %s is not valid.") % listed(bad)
+    elif code == "meld":
+        why = "Your first meld is %d points, and it needs at least %d." % (pts, MELD)
+    elif code == "joker":
+        why = "A joker taken from the table needs the tile it stood for from your rack."
+    else:
+        why = "You have not played a tile from your rack."
+    back = "the table goes back" if code == "none" else "your tiles go back"
+    return "Your turn would not count yet. %s If you end it now, %s and you %s." % (why, back, then)
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. Step tokens, as
+    /R7-3, /R7B7K7-n, /3.2-5, /3-5 or /3/4 (several make one step), play tiles. /reset starts the turn
+    over, /undo takes back a step and /end ends the turn, asking first when it would pass or not count.
+    /pass ends a turn with nothing played, and /check says whether the turn would count."""
+    st, seat = req["state"], req.get("seat", -1)
+    words = req.get("words") or []
+    low = [w.lower() for w in words]
+    if not low:
+        return {}
+    if low == ["end"]:
+        reply = {"step": "end", "what": "end your turn"}
+    elif low == ["undo"]:
+        reply = {"step": "undo", "what": "undo a step"}
+    elif low == ["reset"]:
+        reply = {"move": ["reset"], "what": "start your turn over"}
+    elif low in (["pass"], ["check"]):
+        reply = {}
+    elif all(TYPED_TOKEN_RE.match(w) for w in words):
+        reply = {"move": [w.upper() for w in words]}
+    else:
+        return {}
+    if seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    if low == ["check"]:
+        return {"say": turn_sentence(st)}
+    if low == ["pass"]:
+        if not untouched(st):
+            return {"error": "You have already played this turn. End your turn with /end, or take your steps "
+                             "back with /undo."}
+        return {"step": "end", "ask": "pass", "what": "pass"}
+    if low == ["end"]:
+        if untouched(st):
+            reply["ask"] = "pass"
+        elif evaluate(st)[0] != "ok":
+            reply["ask"] = "end"
+    return reply
+
+
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply,
-       "result": op_result, "drop": op_drop, "say": op_say}
+       "result": op_result, "drop": op_drop, "say": op_say, "typed": op_typed}
 
 
 def main():

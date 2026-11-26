@@ -532,8 +532,55 @@ def op_say(req):
     return {"say": ""}
 
 
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+
+INFO["typed"] = True
+DRIVE_WAYS = {"l": "L", "left": "L", "r": "R", "right": "R"}
+DRIVE_HINT = "Type /drive left or /drive right, and the columns to drive if you like, as in /drive left 5."
+FIRE_HINT = "Type /fire with an angle and a power, as in /fire 45 60."
+
+
+def short_number(word):
+    """True for a whole number of one to three digits."""
+    return word.isascii() and word.isdigit() and len(word) <= 3
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. /fire 45 60, or the
+    two numbers alone, fires at that angle and power. /drive left 5 or /drive right 5 drives that many
+    columns, /drive left alone as far as one move goes, and /move is the same as /drive."""
+    st, seat = req["state"], req.get("seat", -1)
+    words = [w.lower() for w in req.get("words") or []]
+    if not words:
+        return {}
+    if words[0] in ("drive", "move"):
+        rest = words[1:]
+        if len(rest) == 1 and rest[0][:1] in ("-", "+") and short_number(rest[0][1:]):
+            way = "L" if rest[0][0] == "-" else "R"
+            reply = {"move": ["MOVE", rest[0][0] + str(int(rest[0][1:]))]}
+        elif rest and rest[0] in DRIVE_WAYS and (len(rest) == 1 or (len(rest) == 2 and short_number(rest[1]))):
+            way = DRIVE_WAYS[rest[0]]
+            columns = int(rest[1]) if len(rest) == 2 else max(1, (budget(st) + 9) // 10)
+            reply = {"move": ["MOVE", way, str(columns)]}
+        else:
+            return {"error": DRIVE_HINT}
+        reply["what"] = "drive left" if way == "L" else "drive right"
+    else:
+        fire = words[0] == "fire"
+        rest = words[1:] if fire else words
+        if len(rest) == 2 and all(short_number(w) for w in rest):
+            reply = {"move": ["FIRE", str(int(rest[0])), str(int(rest[1]))], "what": "fire"}
+        elif fire:
+            return {"error": FIRE_HINT}
+        else:
+            return {}
+    if seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    return reply
+
+
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply,
-       "result": op_result, "drop": op_drop, "say": op_say}
+       "result": op_result, "drop": op_drop, "say": op_say, "typed": op_typed}
 
 
 def main():

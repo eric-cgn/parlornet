@@ -18,6 +18,7 @@ Squares are 1-based: x across from the left, y down from the top.
 """
 import collections.abc
 import json
+import re
 import os
 import random
 import sys
@@ -551,8 +552,175 @@ def op_say(req):
     return {"say": ""}
 
 
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+# A player types only the letters of their own rack, from an empty start square. The letters fill the empty
+# squares in order, and the tiles already on the board between, just before and just after them join the
+# word, so `i4 x` beside HE plays HEX. The move made (PLAY x y H|V letters) holds the whole word from its first
+# square, the board's letters included. This is the layout telnet uses for typed plays.
+
+INFO["typed"] = True
+TYPED_SQUARE_RE = re.compile(r"^[a-z][0-9]{1,2}\Z")
+TYPED_LETTERS_RE = re.compile(r"^[A-Za-z_]{1,30}\Z")
+TYPED_EXCHANGE_RE = re.compile(r"^[A-Za-z_]{1,7}\Z")
+ACROSS_WORDS = ("across", "a", "right", "h", "horizontal")
+DOWN_WORDS = ("down", "d", "v", "vertical")
+CHECK_HINT = "Type the word to check after /check, as in /check h8 across QUIZ."
+EXCHANGE_HINT = "Type the tiles to put back after /exchange, as in /exchange QXZ, with _ for a blank."
+
+
+class Refused(Exception):
+    """Typed letters that make no play. The reason is a sentence for the player."""
+
+
+def letter_tokens(typed):
+    """Typed letters -> one token per tile: 'A', or '_A' for a blank's letter."""
+    out, blank = [], False
+    for c in typed.upper():
+        if c == "_":
+            blank = True
+            continue
+        out.append(("_" if blank else "") + c)
+        blank = False
+    return out
+
+
+def lay_out(st, x, y, d, typed):
+    """Where a player's typed letters go from the empty start square x, y, across (H) or down (V).
+    -> (sx, sy, word), the whole word from its first square as PLAY takes it. Raises Refused when the start
+    square has a tile, no letter is typed, or the letters run off the board."""
+    cells = st["cells"]
+
+    def tile(cx, cy):
+        return inside(cx, cy) and at(cells, cx, cy) != "."
+
+    if tile(x, y):
+        raise Refused("There is already a tile on %s. Start your word on an empty square." % sq_name(x, y))
+    toks = letter_tokens(typed)
+    if not toks or typed.endswith("_"):
+        raise Refused("Type the letters from your rack, with _ before the letter a blank stands for.")
+    dx, dy = (1, 0) if d == "H" else (0, 1)
+    sx, sy = x, y
+    while tile(sx - dx, sy - dy):
+        sx, sy = sx - dx, sy - dy
+    word, cx, cy = [], sx, sy
+    while (cx, cy) != (x, y):
+        word.append(at(cells, cx, cy).upper())
+        cx, cy = cx + dx, cy + dy
+    i = 0
+    while i < len(toks):
+        if not inside(cx, cy):
+            raise Refused("From %s %s, those letters run off the board." % (
+                sq_name(x, y), "across" if d == "H" else "down"))
+        if tile(cx, cy):
+            word.append(at(cells, cx, cy).upper())
+        else:
+            word.append(toks[i])
+            i += 1
+        cx, cy = cx + dx, cy + dy
+    while tile(cx, cy):
+        word.append(at(cells, cx, cy).upper())
+        cx, cy = cx + dx, cy + dy
+    return sx, sy, "".join(word)
+
+
+def typed_play(st, words):
+    """The words of a typed play -> its move tokens ['PLAY', x, y, 'H' or 'V', letters], or None when the
+    words are not a play. The forms are `h8 QUIZ` (across), `h8 across QUIZ`, `h8 down QUIZ` and the
+    protocol's own `play 8 8 H QUIZ`. Raises Refused when the letters make no play."""
+    low = [w.lower() for w in words]
+    if len(words) == 5 and low[0] == "play" and words[1].isascii() and words[1].isdigit() \
+            and words[2].isascii() and words[2].isdigit() and low[3] in ("h", "v") \
+            and TYPED_LETTERS_RE.match(words[4]):
+        return ["PLAY", str(int(words[1])), str(int(words[2])), low[3].upper(), words[4].upper()]
+    if len(words) not in (2, 3) or not TYPED_SQUARE_RE.match(low[0]) or not TYPED_LETTERS_RE.match(words[-1]):
+        return None
+    if len(words) == 3 and low[1] not in ACROSS_WORDS + DOWN_WORDS:
+        return None
+    d = "V" if len(words) == 3 and low[1] in DOWN_WORDS else "H"
+    x, y = ord(low[0][0]) - ord("a") + 1, int(low[0][1:])
+    if not inside(x, y):
+        raise Refused("There is no square %s on the board." % low[0])
+    sx, sy, word = lay_out(st, x, y, d, words[-1])
+    return ["PLAY", str(sx), str(sy), d, word]
+
+
+def shown(play):
+    """A play's move tokens -> the play in the player's words: 'HEX across from g4'."""
+    return "%s %s from %s" % (play[4].replace("_", ""), "across" if play[3] == "H" else "down",
+                              sq_name(int(play[1]), int(play[2])))
+
+
+def listed(items):
+    """['QUIZ', 'QI', 'ZA'] -> 'QUIZ, QI and ZA'."""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def as_sentence(reason):
+    """A refusal from evaluate -> a sentence: 'your rack has no Q' -> 'Your rack has no Q.'"""
+    head = "not in the word list: "
+    if reason.startswith(head):
+        bad = reason[len(head):].split()
+        return "%s %s not in the word list." % (listed(bad), "is" if len(bad) == 1 else "are")
+    return reason[:1].upper() + reason[1:].rstrip(".") + "."
+
+
+def check_sentence(st, seat, play):
+    """What a play would score, or why it can't be played, worked out with the game's own rules."""
+    words = load_words()
+    if not words:
+        return "This server has no word list for Grid Words."
+    word = play[4].replace("_", "")
+    try:
+        r = evaluate(st, seat, int(play[1]), int(play[2]), play[3], play[4], words)
+    except Illegal as e:
+        return "%s can't be played there. %s" % (word, as_sentence(str(e)))
+    text = "%s would score %d" % (listed([w.upper() for w in r["words"]]), r["score"])
+    if r["full"]:
+        return text + ", with %d for using all seven tiles." % FULL_RACK_BONUS
+    return text + "."
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. /h8 across QUIZ (also
+    /h8 QUIZ and /h8 down QUIZ) plays the letters from h8, /play 8 8 H QUIZ plays as the protocol writes
+    it, /pass passes after asking, /exchange TILES puts those tiles back in the bag, and /check followed by
+    a play says what it would score, on any player's turn."""
+    st, seat = req["state"], req.get("seat", -1)
+    words = req.get("words") or []
+    low = [w.lower() for w in words]
+    if not low:
+        return {}
+    if low[0] == "check":
+        if len(words) == 1:
+            return {"error": CHECK_HINT}
+        try:
+            play = typed_play(st, words[1:])
+        except Refused as e:
+            return {"say": str(e)}
+        return {"say": check_sentence(st, seat, play)} if play else {"error": CHECK_HINT}
+    refused = None
+    if low == ["pass"]:
+        reply = {"move": ["PASS"], "ask": "pass", "what": "pass"}
+    elif low[0] in ("exchange", "exch", "swap"):
+        letters = "".join(words[1:])
+        if not TYPED_EXCHANGE_RE.match(letters):
+            return {"error": EXCHANGE_HINT}
+        reply = {"move": ["EXCH", letters.upper()], "what": "exchange those tiles"}
+    else:
+        try:
+            play = typed_play(st, words)
+        except Refused as e:
+            play, refused = None, str(e)
+        if not play and not refused:
+            return {}
+        reply = {"move": play, "what": "play " + shown(play)} if play else None
+    if seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    return {"error": refused} if refused else reply
+
+
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply,
-       "result": op_result, "say": op_say}
+       "result": op_result, "say": op_say, "typed": op_typed}
 
 
 def main():

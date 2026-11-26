@@ -13,6 +13,7 @@ Seat 0 moves first. Points are a column letter and a row number, rows counted
 from the top: h8 is the center of the 15 by 15 board.
 """
 import json
+import re
 import sys
 
 RULES = ["freestyle", "standard"]       # five or more wins; exactly five wins
@@ -184,8 +185,25 @@ def op_say(req):
     return {"say": ""}
 
 
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+
+INFO["typed"] = True
+TYPED_SQUARE_RE = re.compile(r"^[a-z][0-9]{1,2}\Z")
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. A square, like /h8,
+    places a stone there."""
+    st, seat, words = req["state"], req.get("seat", -1), req.get("words") or []
+    if len(words) != 1 or not TYPED_SQUARE_RE.match(words[0].lower()):
+        return {}
+    if seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    return {"move": [words[0].lower()]}
+
+
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply,
-       "result": op_result, "say": op_say}
+       "result": op_result, "say": op_say, "typed": op_typed}
 
 
 def main():
