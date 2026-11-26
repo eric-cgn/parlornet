@@ -144,15 +144,17 @@ def transport(settings):
 
 
 LOCK_MAX = 4 * 3600         # the longest wait after wrong answers
+FREE_TRIES = 2              # wrong answers a name may make before the first wait
 DECAY_SECS = 8 * 3600       # each such quiet stretch since the last wrong answer halves the count
 
 
 def lock_secs(fails):
-    """Wait after the nth wrong answer: 1 minute after one, 15 minutes after
-    three, growing by the same factor (sqrt 15) each time; at most 4 hours."""
-    if fails <= 0:
+    """Wait after the nth wrong answer: none after the first two, 1 minute after
+    the third, 15 minutes after the fifth, growing by the same factor (sqrt 15)
+    each time; at most 4 hours."""
+    if fails <= FREE_TRIES:
         return 0
-    return int(min(LOCK_MAX, 60 * 15 ** ((fails - 1) / 2.0)))
+    return int(min(LOCK_MAX, 60 * 15 ** ((fails - FREE_TRIES - 1) / 2.0)))
 
 
 def decay(fails, missed_at, now=None):
@@ -401,6 +403,8 @@ class Part:
 
     def missed(self, p, what, conn=None):
         secs = self.count_miss(p, conn)
+        if not secs:            # one of the first tries: no wait yet
+            return ("err", "WRONG", "Wrong %s; try again" % what)
         return ("err", "LOCKED", "wait=%d Wrong %s; try again in %s" % (secs, what, wait_text(secs)))
 
     def passed(self, p):

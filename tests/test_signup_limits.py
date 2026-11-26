@@ -86,7 +86,7 @@ class OneEmailPerAddress(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(srv.store.email_count(time.time() - 3600, addr="same@example.org")[0], 2)
         # nothing signs in to the held one, not even the password mailed for ann
         r = await say(srv, s, "AUT password " + pw)
-        self.assertTrue(r.startswith("ERR LOCKED") and "Wrong password" in r, r)
+        self.assertTrue(r.startswith("ERR WRONG") and "Wrong password" in r, r)
         bob = srv.accounts.player("bob")
         self.assertTrue(bob.pending and bob.temp and bob.email is None, "a pending account like any")
 
@@ -262,13 +262,18 @@ class PendingSignUps(unittest.IsolatedAsyncioTestCase):
         s, _ = await reach_password(srv, "ann", "ann@example.org")
         pw = mail_password(srv)
         self.assertEqual(await say(srv, s, "AUT password abcd-efgh-jkmn"),
-                         "ERR LOCKED wait=60 Wrong password; try again in 60 seconds")
+                         "ERR WRONG Wrong password; try again")
         p = srv.accounts.player("ann")
         self.assertEqual(p.fails, 1)
+        for want in ("ERR WRONG ", "ERR LOCKED wait=60 "):                  # the third locks it
+            c = public()
+            await say(srv, c, "USER ann")
+            self.assertTrue((await say(srv, c, "AUT password abcd-efgh-jkmq")).startswith(want))
+        self.assertEqual(p.fails, 3)
         c = public()
         await say(srv, c, "USER ann")
         self.assertTrue((await say(srv, c, "AUT password abcd-efgh-jkmp")).startswith("ERR LOCKED wait="))
-        self.assertEqual(p.fails, 1)                                        # refused while locked, not counted
+        self.assertEqual(p.fails, 3)                                        # refused while locked, not counted
         c = public()
         await say(srv, c, "USER ann")
         self.assertEqual(await first_sign_in(srv, c, pw), "OK -")

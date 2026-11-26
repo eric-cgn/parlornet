@@ -40,6 +40,7 @@ SETUP_DIR = "/setup/"                   # the old period setup pages, which now 
 ECLIPSE_FIX = "/eclipse-68k-fix.html"
 PROTOCOLS_DOC = "/docs/protocols.html"   # the guide to each protocol (docs/protocols.md)
 PROTOCOLS_PAGE = "/protocols.html"       # the protocols reference: an entry per key
+RUNNING_PAGE = "/running.html"           # running a server of your own (docsite/running.py)
 HOST = "<i>host</i>"                     # the server's name, in every setup step
 INFO_MAC = "http://ftp.funet.fi/pub/mac/info-mac/"   # funet's mirror: plain HTTP with no redirect, so period browsers can follow it
 DISCMASTER = "https://discmaster.textfiles.com/"
@@ -1237,6 +1238,10 @@ def frontends_body(games, finder=""):
                  "signing in, tables and every game, with sample sessions; the %s is the reference."
                  % (key_link("PARLORNET/1"), a("/docs/pnp.html", "protocol guide"),
                     a("/docs/protocol.html", "protocol"))))
+    out.append(h2("server", "Your own server") +
+               p("Anyone can run a parlor for a club, an event or the open internet. It is one Docker container "
+                 "built from the source, and %s shows how to start one and how to install one that stays up."
+                 % a(RUNNING_PAGE, "Run a server")))
     out.append(planned_section())
     out.append(unsupported_section())
     out.append(generic_section())

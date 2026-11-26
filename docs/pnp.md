@@ -147,7 +147,7 @@ The flags come in that order after the label: `secret`, `yn`, `cred`, `new`. `AU
 
 **Sign-in `none`** asks nothing: `HELO name` answers `OK -` at once, and a free name is claimed the same way (sign-up `none`). Anyone may use any name; it is for a LAN or a club night. The sample above shows it.
 
-**Sign-in `password`, sign-up `password`.** A new name chooses a password and types it again. A password is 8 to 64 printable ASCII characters (spaces are allowed inside) and uses at least three of four kinds of character: lowercase letters, capital letters, digits and symbols. A known name is asked for its password. `PWD` changes the password: the current one, a new one, the new one again; the player's other sessions end. A wrong password is refused with `ERR LOCKED` and locks the name for a minute (see Lockouts below).
+**Sign-in `password`, sign-up `password`.** A new name chooses a password and types it again. A password is 8 to 64 printable ASCII characters (spaces are allowed inside) and uses at least three of four kinds of character: lowercase letters, capital letters, digits and symbols. A known name is asked for its password. `PWD` changes the password: the current one, a new one, the new one again; the player's other sessions end. A wrong password is refused with `ERR WRONG`, and the third in a row locks the name for a minute with `ERR LOCKED` (see Lockouts below).
 
 ```pnp signup-password
 A> PARLORNET/1
@@ -196,10 +196,18 @@ B> AUT password two swordfish 1998
 B< OK -
 C> PARLORNET/1
 C< PARLORNET/1 parlornet AUTH=password SIGNUP=password
-# A wrong password locks the name for a minute.
+# Two wrong passwords are only refused; the third locks the name for a minute.
 C> HELO bo
 C< ASK password Password secret cred
 C> AUT password swordfish 1997
+C< ERR WRONG Wrong password; try again
+C> HELO bo
+C< ASK password Password secret cred
+C> AUT password swordfish 1996
+C< ERR WRONG Wrong password; try again
+C> HELO bo
+C< ASK password Password secret cred
+C> AUT password swordfish 1995
 C< ERR LOCKED wait=60 Wrong password; try again in 60 seconds
 # While it is locked (no address on file), nothing is checked.
 C> HELO bo
@@ -326,7 +334,7 @@ A pending account holds its name, so another sign-up for that name is `ERR NAMEI
 
 ### Lockouts
 
-Every wrong password counts against the name: it is locked for 1 minute after one, 15 minutes after three, growing to at most 4 hours. The refusal says how long, both for programs and for people:
+Every wrong password counts against the name. The first two are only refused (`ERR WRONG Wrong password; try again`). After the third the name is locked for 1 minute, after the fifth for 15 minutes, and the wait keeps growing to at most 4 hours. The refusal says how long, both for programs and for people:
 
     ERR LOCKED wait=60 Wrong password; try again in 60 seconds
 
@@ -995,6 +1003,7 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `TOOLONG` | A line over 80 bytes; the connection is closed. |
 | `UNKNOWN` | No such request. |
 | `VERSION` | The connection started with another version of the protocol (`PARLORNET/2`); the connection is closed. |
+| `WRONG` | A wrong password or code, refused without a wait: one of a name's first two wrong answers in a row (the third is `LOCKED`). |
 
 Some of them, from one session:
 

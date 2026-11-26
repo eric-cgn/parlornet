@@ -450,12 +450,17 @@ class F03EveryCodeCounts(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(re.search(r"Password:\s+[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}\n", body(srv)), "the form")
         pw = mailed_password(srv)
         self.assertEqual(await say(srv, s, "AUT password abcd-efgh-jkmn"),
-                         "ERR LOCKED wait=60 Wrong password; try again in 60 seconds")
+                         "ERR WRONG Wrong password; try again")
         self.assertEqual(p.fails, 1)
+        for want in ("ERR WRONG ", "ERR LOCKED wait=60 "):                  # the third wrong answer locks it
+            s = public()
+            await say(srv, s, "HELO dave")
+            self.assertTrue((await say(srv, s, "AUT password abcd-efgh-jkmp")).startswith(want))
+        self.assertEqual(p.fails, 3)
         s = public()
         await say(srv, s, "HELO dave")
         self.assertTrue((await say(srv, s, "AUT password " + SECRET)).startswith("ERR LOCKED"))  # not checked
-        self.assertEqual(p.fails, 1)
+        self.assertEqual(p.fails, 3)
         s = public()
         await say(srv, s, "HELO dave")
         self.assertEqual(await say(srv, s, "AUT password " + pw), "ASK password New_password secret new")
@@ -532,11 +537,11 @@ class F04LockoutDecayAndRecovery(unittest.IsolatedAsyncioTestCase):
         srv = server("password")
         p = srv.accounts.player("bo", create=True)
         p.cred = auth.hash_password("bo secret 1")
-        p.fails, p.missed_at, p.locked_until = 7, time.time() - 2 * auth.DECAY_SECS - 1, 0.0
+        p.fails, p.missed_at, p.locked_until = 11, time.time() - 2 * auth.DECAY_SECS - 1, 0.0
         s = public()
         await say(srv, s, "HELO bo")
         r = await say(srv, s, "AUT password wrong one")
-        self.assertEqual(p.fails, 7 // 4 + 1)                              # halved twice, then one more
+        self.assertEqual(p.fails, 11 // 4 + 1)                             # halved twice, then one more
         self.assertIn("wait=%d " % auth.lock_secs(p.fails), r)
 
     async def test_without_an_address_the_lock_stands(self):
@@ -583,7 +588,7 @@ class F05NoAddressOwner(unittest.IsolatedAsyncioTestCase):
             c = public()
             await say(srv, c, "USER probe1")
             r = await say(srv, c, "AUT password " + guess)
-            self.assertTrue(r.startswith("ERR LOCKED") and "Wrong password" in r, r)
+            self.assertTrue(r.startswith(("ERR WRONG ", "ERR LOCKED ")) and "Wrong password" in r, r)
         self.assertTrue(srv.players["probe1"].pending)
         srv.accounts.expire(time.time() + auth.PENDING_SECS + 1)
         self.assertIsNone(srv.accounts.player("probe1"))                 # and it goes in a day
@@ -628,6 +633,7 @@ class F06WebSignins(unittest.TestCase):
 class WebStack(unittest.TestCase):
     auth = "password"
     signup = None
+    web_args = ()
 
     @classmethod
     def setUpClass(cls):
@@ -635,7 +641,7 @@ class WebStack(unittest.TestCase):
         cls.keys = make_keys("web")
         extra = ["--signup", cls.signup] if cls.signup else []
         cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", cls.auth, *extra)]
-        cls.procs.append(spawn(*adapter_args("adapters.web", cls.port, cls.fe, cls.keys, "web")))
+        cls.procs.append(spawn(*adapter_args("adapters.web", cls.port, cls.fe, cls.keys, "web"), *cls.web_args))
 
     @classmethod
     def tearDownClass(cls):
@@ -837,7 +843,8 @@ class F08Containment(unittest.TestCase):
             r = subprocess.run([sys.executable, os.path.join(ROOT, "deploy", "start.py"), "--prepare"],
                                env=dict(os.environ, **env), capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(r.stdout.strip().splitlines()[-1]), {"names": ["web", "telnet"], "settings": None,
-                                                                          "web_hosts": "", "play_url": "",
+                                                                          "web_hosts": "", "web_url": "",
+                                                                          "web_proxies": "", "play_url": "",
                                                                           "play_proxies": "", "play_push_contact": "",
                                                                           "play_dir": os.path.join(d, "play"),
                                                                           "idle": {}})
@@ -890,10 +897,51 @@ class F09Web(WebStack):
         r = raw_http(self.port, "GET / HTTP/1.0\r\nHost: evil.example\nSet-Cookie: pn=AAAAAAAAAAAAAAAAAAAAAA\r\n\r\n")
         self.assertTrue(r.startswith("HTTP/1.0 400 "), r[:60])
         self.assertNotIn("Set-Cookie: pn=AAAA", r)
-        r = raw_http(self.port, "GET / HTTP/1.0\r\nHost: <script>\r\n\r\n")
-        self.assertIn("Location: http://parlornet.org/welcome.htm", r)
-        r = raw_http(self.port, "GET / HTTP/1.0\r\nHost: play.example:6500\r\n\r\n")
-        self.assertIn("Location: http://play.example:6500/welcome.htm", r)
+        cookie = "Cookie: pn=AAAAAAAAAAAAAAAAAAAAAA\r\n"    # the sign-in page sends a cookie's holder on
+        r = raw_http(self.port, "GET /login.htm HTTP/1.0\r\nHost: <script>\r\n%s\r\n" % cookie)
+        self.assertIn("Location: http://parlornet.org/lobby.htm", r)
+        r = raw_http(self.port, "GET /login.htm HTTP/1.0\r\nHost: play.example:6500\r\n%s\r\n" % cookie)
+        self.assertIn("Location: http://play.example:6500/lobby.htm", r)
+        # without web.proxies nobody's X-Forwarded-Proto is believed, and no page names a canonical address
+        r = raw_http(self.port, "GET /login.htm HTTP/1.0\r\nHost: play.example\r\nX-Forwarded-Proto: https\r\n"
+                                "%s\r\n" % cookie)
+        self.assertIn("Location: http://play.example/lobby.htm", r)
+        self.assertNotIn("rel=\"canonical\"", raw_http(self.port, "GET / HTTP/1.0\r\n\r\n"))
+
+
+class F09WebBehindAProxy(WebStack):
+    """web.proxies and web.public_url: a reverse proxy on the usual ports in front of the web's own port."""
+    web_args = ("--proxies", "127.0.0.1", "--public-url", "https://games.example.org/")
+
+    def head(self, path, extra=""):
+        r = raw_http(self.port, "GET %s HTTP/1.0\r\nHost: games.example.org\r\n%s\r\n" % (path, extra))
+        return r.partition("\r\n\r\n")[0]
+
+    def test_pages_name_their_address_under_the_public_url(self):
+        for path, want in (("/", "https://games.example.org/"), ("/welcome.htm", "https://games.example.org/"),
+                           ("/games.htm", "https://games.example.org/games.htm")):
+            h = self.head(path)
+            self.assertTrue(h.startswith("HTTP/1.0 200 "), (path, h[:40]))
+            self.assertIn('\r\nLink: <%s>; rel="canonical"' % want, h, path)
+        self.assertNotIn("canonical", self.head("/games.htm?g=reversi"))        # a query: none
+        self.assertNotIn("canonical", self.head("/img/parlor.gif"))             # not a page
+
+    def test_the_proxys_scheme_carries_into_redirects(self):
+        cookie = "Cookie: pn=AAAAAAAAAAAAAAAAAAAAAA\r\n"
+        h = self.head("/login.htm", cookie + "X-Forwarded-Proto: https\r\nX-Forwarded-For: 203.0.113.9\r\n")
+        self.assertIn("Location: https://games.example.org/lobby.htm", h)
+        h = self.head("/login.htm", cookie + "X-Forwarded-Proto: http\r\n")
+        self.assertIn("Location: http://games.example.org/lobby.htm", h)
+
+    def test_the_visitor_is_the_address_before_the_proxy(self):
+        from adapters.common import forwarded_client, proxy_list
+        proxies = proxy_list("172.30.4.1, 10.1.0.0/16")
+        hdr = {"x-forwarded-for": "198.51.100.7, 203.0.113.9, 10.1.2.3", "x-forwarded-proto": "https"}
+        self.assertEqual(forwarded_client("172.30.4.1", hdr, proxies), ("203.0.113.9", "https"))
+        self.assertEqual(forwarded_client("203.0.113.50", hdr, proxies), ("203.0.113.50", None))   # not a proxy
+        self.assertEqual(forwarded_client("172.30.4.1", {"x-forwarded-for": "junk"}, proxies), ("172.30.4.1", None))
+        with self.assertRaises(ValueError):
+            proxy_list("not-an-address", "web.proxies")
 
 
 # ---- 10: a rotated or removed key ends the sessions issued under it --------------------------------
@@ -1073,7 +1121,7 @@ class F15Informational(unittest.IsolatedAsyncioTestCase):
         await say(srv, s, "HELO dave")
         await say(srv, s, "AUT password reset")
         self.assertEqual(await say(srv, s, "AUT password 1234567\ufffd"),
-                         "ERR LOCKED wait=60 Wrong password; try again in 60 seconds")
+                         "ERR WRONG Wrong password; try again")
 
     async def test_lines_fit_80_bytes(self):
         srv = server("password")
@@ -1115,7 +1163,7 @@ class F15Informational(unittest.IsolatedAsyncioTestCase):
         s = public()
         await say(srv, s, "HELO bo")
         self.assertEqual(await say(srv, s, "AUT password " + code),
-                         "ERR LOCKED wait=60 Wrong password; try again in 60 seconds")    # past its time
+                         "ERR WRONG Wrong password; try again")    # past its time
         p.temp, p.locked_until = live, 0
         s = public()
         await say(srv, s, "HELO bo")

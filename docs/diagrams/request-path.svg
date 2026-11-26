@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Source of static/img/diagram-request-path.gif: python3 tools/diagrams.py request-path -->
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="356" viewBox="0 0 480 356"
+     font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#000000">
+  <title>A move's path: from the player's program through a server extension to the core and the game's plugin</title>
+  <defs>
+    <marker id="head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"
+            markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 z" fill="#000000"/>
+    </marker>
+  </defs>
+  <rect width="480" height="356" fill="#FFFFFF"/>
+
+  <g shape-rendering="crispEdges" stroke="#000000" stroke-width="1">
+    <rect x="10.5" y="10.5" width="280" height="52" fill="#FFFFFF"/>
+    <rect x="310.5" y="10.5" width="159" height="52" fill="#FFFFFF"/>
+    <rect x="10.5" y="104.5" width="280" height="52" fill="#FFFFCC"/>
+    <rect x="10.5" y="198.5" width="459" height="52" fill="#99CC99"/>
+    <rect x="10.5" y="282.5" width="280" height="64" fill="#FFFFCC"/>
+  </g>
+
+  <g stroke="#000000" stroke-width="1" marker-start="url(#head)" marker-end="url(#head)">
+    <line x1="150.5" y1="64" x2="150.5" y2="103"/>
+    <line x1="150.5" y1="158" x2="150.5" y2="197"/>
+    <line x1="350.5" y1="64" x2="350.5" y2="197"/>
+    <line x1="150.5" y1="252" x2="150.5" y2="281"/>
+  </g>
+
+  <text x="20" y="28" font-size="12" font-weight="bold">The player's program</text>
+  <text x="20" y="43">a browser, a telnet program, or a game</text>
+  <text x="20" y="56">program of its day, such as MacFIBS</text>
+
+  <text x="320" y="28" font-size="12" font-weight="bold">A native client</text>
+  <text x="320" y="43">a program that speaks</text>
+  <text x="320" y="56">ParlorNet's own protocol</text>
+
+  <text x="160" y="82">its own protocol, on its own port</text>
+  <text x="160" y="95">(for FIBS clients, 6505)</text>
+
+  <text x="20" y="122" font-size="12" font-weight="bold">A server extension</text>
+  <text x="20" y="137">one process for each protocol; it carries the</text>
+  <text x="20" y="150">moves and checks no password itself</text>
+
+  <text x="160" y="176">PARLORNET/1 in TLS 1.3, with the</text>
+  <text x="160" y="189">extension's key, to 127.0.0.1:6590</text>
+
+  <text x="358" y="112">PARLORNET/1</text>
+  <text x="358" y="125">on port 6501</text>
+
+  <text x="20" y="216" font-size="12" font-weight="bold">The core: parlord</text>
+  <text x="20" y="231">accounts, tables, seats and clocks; it runs every table</text>
+  <text x="20" y="244">and never learns how a player connected</text>
+
+  <text x="160" y="270">one JSON object a line, on stdin and stdout</text>
+
+  <text x="20" y="300" font-size="12" font-weight="bold">The game plugins</text>
+  <text x="20" y="315">in the plugin host, or in a process of their own;</text>
+  <text x="20" y="328">each game's rules, as pure functions of its state;</text>
+  <text x="20" y="341">a game knows a seat number, never a player</text>
+</svg>

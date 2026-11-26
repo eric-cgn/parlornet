@@ -2,6 +2,8 @@
 
 Many period computers have a serial port and no network card. They can still reach a parlor, as long as whatever sits at the other end of the serial line can make a TCP connection for them. This page describes the usual ways to do that, from a WiFi modem to a login on a Linux machine, says which port each kind of program should reach, and ends with notes on the cable.
 
+![Five ways from a period computer to a parlor: TCP straight from the computer, or a serial line to a WiFi modem, a Linux login with ATZ or nc, tcpser, or a direct bridge](../static/img/diagram-serial.gif)
+
 ## Which port to reach
 
 A parlor serves each kind of program on a port of its own, so the port depends on the program you run, not on how the serial line gets out.

@@ -392,7 +392,8 @@ class Admin:
                 self.fails = {k: v for k, v in self.fails.items() if v[2] > now}
             self.fails[source] = (fails, now, now + secs)
             print("admin: wrong admin password from %s (%d)" % (source or "?", fails), file=sys.stderr, flush=True)
-            return {"ok": False, "wait": secs, "error": "Wrong password; try again in %s" % auth.wait_text(secs)}
+            return {"ok": False, "wait": secs,
+                    "error": "Wrong password; try again" + (" in %s" % auth.wait_text(secs) if secs else "")}
         self.fails.pop(source, None)
         conn.state = state
         return {"ok": True, "setup": state == "setup"}

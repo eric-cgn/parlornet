@@ -14,6 +14,8 @@ The archive below is from Walnut Creek's Giga Games 5 CD of June 1997. It holds 
 
 In Answer mode Networdz waits for its host to connect, and a parlor never connects to players' machines. ParlorNet Link, a small program of ParlorNet's own (above), connects to both and passes everything between them.
 
+![Networdz with ParlorNet Link: the Link connects to Networdz in Answer mode and to the parlor's Networdz extension, which seats the player at a Grid Words table](../../static/img/diagram-networdz.gif)
+
 You will need Windows 3.1 or later with Winsock, ParlorNet Link, and an account, which you make on the web site or by telnet. Then:
 
 1. Save the text under `PARLOR.CFG` below in the Networdz folder: the standard board, the 100 standard tiles and their points, and racks of 7.

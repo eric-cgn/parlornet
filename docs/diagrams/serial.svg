@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Source of static/img/diagram-serial.gif: python3 tools/diagrams.py serial -->
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="316" viewBox="0 0 480 316"
+     font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#000000">
+  <title>Five ways from a period computer to a parlor: TCP straight from the computer, or a serial line to a WiFi modem, a Linux login with ATZ or nc, tcpser, or a direct bridge</title>
+  <defs>
+    <marker id="head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"
+            markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 z" fill="#000000"/>
+    </marker>
+  </defs>
+  <rect width="480" height="316" fill="#FFFFFF"/>
+
+  <text x="10" y="20" font-size="12" font-weight="bold">The computer</text>
+  <text x="146" y="20" font-size="12" font-weight="bold">Between them</text>
+  <text x="370" y="20" font-size="12" font-weight="bold">The parlor</text>
+
+  <g shape-rendering="crispEdges" stroke="#000000" stroke-width="1">
+    <rect x="10.5" y="32.5" width="84" height="40" fill="#FFFFFF"/>
+    <rect x="10.5" y="86.5" width="84" height="40" fill="#FFFFFF"/>
+    <rect x="10.5" y="140.5" width="84" height="40" fill="#FFFFFF"/>
+    <rect x="10.5" y="194.5" width="84" height="40" fill="#FFFFFF"/>
+    <rect x="10.5" y="248.5" width="84" height="40" fill="#FFFFFF"/>
+
+    <rect x="146.5" y="86.5" width="180" height="40" fill="#FFFFCC"/>
+    <rect x="146.5" y="140.5" width="180" height="40" fill="#FFFFCC"/>
+    <rect x="146.5" y="194.5" width="180" height="40" fill="#FFFFCC"/>
+    <rect x="146.5" y="248.5" width="180" height="40" fill="#FFFFCC"/>
+
+    <rect x="370.5" y="32.5" width="99" height="256" fill="#99CC99"/>
+  </g>
+
+  <g stroke="#000000" stroke-width="1" marker-start="url(#head)" marker-end="url(#head)">
+    <line x1="96" y1="52.5" x2="368" y2="52.5"/>
+    <line x1="96" y1="106.5" x2="144" y2="106.5"/>
+    <line x1="96" y1="160.5" x2="144" y2="160.5"/>
+    <line x1="96" y1="214.5" x2="144" y2="214.5"/>
+    <line x1="96" y1="268.5" x2="144" y2="268.5"/>
+    <line x1="328" y1="106.5" x2="368" y2="106.5"/>
+    <line x1="328" y1="160.5" x2="368" y2="160.5"/>
+    <line x1="328" y1="214.5" x2="368" y2="214.5"/>
+    <line x1="328" y1="268.5" x2="368" y2="268.5"/>
+  </g>
+
+  <g>
+    <text x="16" y="49">a network card</text>
+    <text x="16" y="63">or an adapter</text>
+    <text x="16" y="103">a serial port</text>
+    <text x="16" y="157">a serial port</text>
+    <text x="16" y="211">a serial port</text>
+    <text x="16" y="265">a serial port</text>
+  </g>
+
+  <text x="156" y="46">TCP, with nothing in between</text>
+
+  <g>
+    <text x="106" y="102">serial</text>
+    <text x="106" y="156">serial</text>
+    <text x="106" y="210">serial</text>
+    <text x="106" y="264">serial</text>
+    <text x="334" y="102">TCP</text>
+    <text x="334" y="156">TCP</text>
+    <text x="334" y="210">TCP</text>
+    <text x="334" y="264">TCP</text>
+  </g>
+
+  <text x="156" y="103" font-size="12" font-weight="bold">A WiFi modem</text>
+  <text x="156" y="118">it dials ATDT host:port</text>
+  <text x="156" y="157" font-size="12" font-weight="bold">A Linux machine</text>
+  <text x="156" y="172">a login, then ATZ or nc</text>
+  <text x="156" y="211" font-size="12" font-weight="bold">tcpser</text>
+  <text x="156" y="226">a whole Hayes modem, emulated</text>
+  <text x="156" y="265" font-size="12" font-weight="bold">A direct bridge</text>
+  <text x="156" y="280">socat or ser2net, no modem</text>
+
+  <text x="378" y="52" font-weight="bold">Its port goes</text>
+  <text x="378" y="66" font-weight="bold">by the program:</text>
+  <text x="378" y="86">6501 for</text>
+  <text x="378" y="100">PARLORNET/1</text>
+  <text x="378" y="120">6502 for a</text>
+  <text x="378" y="134">terminal</text>
+  <text x="378" y="154">6519 for</text>
+  <text x="378" y="168">Worthy</text>
+  <text x="378" y="182">Opponent</text>
+  <text x="378" y="202">6520 for</text>
+  <text x="378" y="216">RSCARDS</text>
+</svg>
