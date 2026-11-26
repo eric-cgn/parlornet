@@ -130,13 +130,6 @@ def original_html(orig, short=False):
             % (esc(orig.name), a(orig.url, esc(orig.host)), esc(orig.host), orig.port))
 
 
-def originals_html():
-    """The original servers still running, in a sentence, or "" when none is listed."""
-    if not ORIGINALS:
-        return ""
-    return " ".join(original_html(o, True) for o in ORIGINALS.values())
-
-
 # The server's sign-in methods (parlord.auth.SIGNIN), in this order on every client's page.
 SIGNIN_METHODS = [("none", "Name only"), ("password", "Password")]
 
@@ -215,8 +208,8 @@ def medals_legend():
     items = ["%s <b>%s</b>: %s." % (medal_img(m), w, esc(means)) for m, (w, _, means) in MEDALS.items()]
     items.append("<b>%s</b>: %s." % (NOT_RATED_WORD, NOT_RATED_MEANS))
     return (p('<a name="medals"></a>Each native client is rated for each platform and version it has been '
-              "tested on, and only from a real test with the program itself. Its page explains every rating. "
-              "%s has the rules." % a("/docs/clients.html#ratings", "Ratings"), 2) + ul(items))
+              "tested on, and only from a real test with the program itself. Its page explains every rating, and "
+              "the rules are under %s in the docs." % a("/docs/clients.html#ratings", "Ratings"), 2) + ul(items))
 
 
 class Client:
@@ -1177,7 +1170,7 @@ NO_NATIVE_HERE = "No native client for this platform yet."
 def web_or_telnet():
     """The link from a game's native clients to the browsers and telnet programs."""
     return p(a("%s#%s" % (FRONTENDS_PAGE, GENERIC), WEB_OR_TELNET) +
-             ": any browser or telnet program listed under %s plays this game too." % GENERIC_HEAD, 2)
+             ". Every browser and telnet program under %s plays this game too." % GENERIC_HEAD, 2)
 
 
 def game_table(gtype):
@@ -1197,7 +1190,7 @@ def generic_section():
                   a(BROWSERS_PAGE, "Browsers"), a(TELNET_PAGE, "Telnet programs"),
                   "" if any(c.medals() for c in BROWSERS + TELNETS) else
                   " None of them has been rated yet, since a rating needs a whole game played with the program "
-                  "itself; each one&#39;s page says what has been checked so far."), 2) +
+                  "itself. Each one&#39;s page says what has been checked so far."), 2) +
             plain_table(HEAD, client_rows(generic_for())))
 
 
@@ -1215,17 +1208,17 @@ def frontends_body(games, finder=""):
     and telnet). games: [(name, type)] in build order. Old anchors period, frontends and clients are on the
     list of games."""
     out = [h1("Clients"),
-           p("ParlorNet speaks the protocols of old game servers, so the original game programs can play on it. "
-             "Its native clients are game programs first released about 25 to 50 years ago, which for the 2027 "
-             "release means 1977 to 2000, and new native-client work goes to them. Each program connects with its own "
-             "protocol, described on the %s page. If your computer has no such program, you can play in a web "
-             "browser or a telnet program." % a(PROTOCOLS_PAGE, "Protocols")),
-           p(originals_html(), 2) if ORIGINALS else "",
-           p("Each game&#39;s table lists its native clients with the year of their first qualifying version and "
-             "the systems they run on. Browsers and telnet programs play every game, so they are listed once, "
-             "under %s at the bottom. Setup opens the program&#39;s own page, with its history, where to get it, "
-             "how to set it up and sign in, its rating and its known quirks. ParlorNet links to the authors&#39; "
-             "pages and to public archives and serves none of these files." % a("#" + GENERIC, GENERIC_HEAD), 2),
+           p("ParlorNet speaks the protocols of old game servers, so you can play on it with the original game "
+             "programs. This page calls them native clients. They were first released about 25 to 50 years ago, "
+             "and each one connects with its original protocol. The %s page describes each protocol. If your "
+             "computer has no native client, you can play in a web browser or a telnet program."
+             % a(PROTOCOLS_PAGE, "Protocols")),
+           p("Each game has a table of its native clients. The table gives the year of each program&#39;s first "
+             "qualifying version and the systems it runs on. Browsers and telnet programs play every game, so "
+             "they are listed once, at the bottom of the page under %s. The Setup link opens a program&#39;s own "
+             "page, which has its history, where to get it, how to set it up and sign in, its rating and its "
+             "known quirks. ParlorNet links to the authors&#39; pages and to public archives, and it serves none "
+             "of these files." % a("#" + GENERIC, GENERIC_HEAD), 2),
            medals_legend(),
            summary_grid(games),
            finder,
@@ -1235,13 +1228,13 @@ def frontends_body(games, finder=""):
         out.append(h2(gtype, esc(name)) + game_table(gtype))
     out.append(h2("native", "Your own program") +
                p("Programs written for ParlorNet speak its own protocol, %s, on port 6501. The %s covers "
-                 "signing in, tables and every game, with sample sessions; the %s is the reference."
+                 "signing in, tables and every game, with sample sessions. The %s is the reference."
                  % (key_link("PARLORNET/1"), a("/docs/pnp.html", "protocol guide"),
                     a("/docs/protocol.html", "protocol"))))
     out.append(h2("server", "Your own server") +
-               p("Anyone can run a parlor for a club, an event or the open internet. It is one Docker container "
-                 "built from the source, and %s shows how to start one and how to install one that stays up."
-                 % a(RUNNING_PAGE, "Run a server")))
+               p("Anyone can run a ParlorNet server for a club, an event or the open internet. It runs in one "
+                 "Docker container that you build from the source. The %s page shows how to start one and how "
+                 "to install one that stays up." % a(RUNNING_PAGE, "Run a server")))
     out.append(planned_section())
     out.append(unsupported_section())
     out.append(generic_section())
@@ -1265,7 +1258,7 @@ def planned_section():
     if not PLANNED:
         return ""
     return (h2("planned", "Planned") +
-            p("These programs have pages but no server extension yet, so they cannot play here today.", 2) +
+            p("These programs have pages, but they cannot play on a ParlorNet server yet.", 2) +
             ul("%s (%s): %s" % (a(c.href(), "<b>%s</b>" % esc(c.name)), esc(c.os), text(c.status_note))
                for c in PLANNED))
 
@@ -1283,134 +1276,125 @@ def getting_it(c, host):
 
 # What a mailed temporary password asks of a client that cannot prompt: its first use is on the web or by
 # telnet, where the new password is chosen.
-FIRST_ELSEWHERE = ("A password the server emailed you (a new account's, or one asked for with `reset`) is used "
-                   "once on the web or by telnet, where you choose your own; then sign in here with that.")
-EMAILED = ("If the server emails passwords, the first sign-in with the emailed one asks you to choose your own "
-           "password, typed twice.")
+FIRST_ELSEWHERE = ("If the server emailed you a password, for a new account or after `reset`, use it once on the "
+                   "web or by telnet to choose your own. Then sign in here with your own password.")
+# The same for a client whose prompts or window ask for the new password (where: "the prompts" and the like).
+EMAILED = "If the server emailed you a password, %s then ask you to choose your own and type it twice."
+# A new account where the program itself can sign up.
+NEW_ASKS = ("Some servers then ask you to type a password twice. Others ask for your email address and email "
+            "you a password, and your first sign-in with it asks you to choose your own.")
+# A new account where the program can only sign in.
+MAKE_FIRST = "Make your account first on the web site (New account) or by telnet (log in as `new`)."
+OR_ELSEWHERE = "You can also make it on the web site (New account) or by telnet (`new`)."
+NOT_USED = "The password is not used."
 
 SIGNIN = {
     "web": {
-        "none": "Sign in: type your name and press Sign in; there is no password.",
-        "password": "Sign in: your name and your password. " + EMAILED,
-        "new": "Choose New account in the navigation bar and type the name you want. Depending on the server, "
-               "that is all, or the next pages ask for a password typed twice, or for an email address: the "
-               "server emails you a password, and signing in with it asks you to choose your own.",
+        "none": "Type your name and press Sign in.",
+        "password": "Type your name and your password, and press Sign in. " + EMAILED % "the next pages",
+        "new": "Choose New account in the navigation bar and type the name you want. " + NEW_ASKS,
     },
     "telnet": {
-        "none": "At `Login`, type your name; nothing else is asked.",
-        "password": "At `Login`, your name, then your password (not shown as you type). " + EMAILED,
-        "new": "Type `new` at `Login`, then the name you want. Depending on the server, that is all, or the "
-               "prompts ask for a password typed twice, or for an email address: the server emails you a "
-               "password, and signing in with it asks you to choose your own.",
+        "none": "At `Login`, type your name.",
+        "password": "At `Login`, type your name and then your password. The password does not show as you type. " +
+                    EMAILED % "the prompts",
+        "new": "Type `new` at `Login`, then the name you want. " + NEW_ASKS,
     },
     "ios": {
-        "none": "Your name as the login name; the password is not asked for and not sent.",
-        "password": "Your name as the login name and your ParlorNet password as the password. With a password "
-                    "the server emailed you, the client's window then asks for a password of your own, typed "
-                    "twice.",
-        "new": "A free name signs up in the client's own window: the server's questions appear there as "
-               "prompts (`Sign up as tia? (y/n): `, a password, or `Email address: `) and what you type answers "
-               "them. Or make the account on the web site (New account) or by telnet (`new`) first.",
+        "none": "Use your name as the login name.",
+        "password": "Use your name as the login name and your ParlorNet password as the password. " +
+                    EMAILED % "the client's window will",
+        "new": "To sign up, log in with a name that has no account. The server's questions, such as "
+               "`Sign up as tia? (y/n): ` or `Email address: `, appear in the client's window, and you answer "
+               "them there. You can also make the account first on the web site (New account) or by telnet "
+               "(`new`).",
     },
     "doom": {
-        "none": "`connect name x`: your name; the password is not used.",
-        "password": "`connect name password`, with your ParlorNet password. With a password the server emailed "
-                    "you, the prompts then ask for a password of your own, typed twice.",
+        "none": "Type `connect name x` with your own name. " + NOT_USED,
+        "password": "Type `connect name password` with your name and your ParlorNet password. " +
+                    EMAILED % "the prompts",
         "new": "The `connect` line only signs in. To make an account, type `request name` with the name you "
-               "want and answer the prompts, or make it on the web site (New account) or by telnet (`new`).",
+               "want and answer the prompts. " + OR_ELSEWHERE,
     },
     "fibs": {
-        "none": "Your name; the password is not used.",
-        "password": "Your name and your ParlorNet password. With a password the server emailed you, the prompts "
-                    "then ask for a password of your own, typed twice.",
-        "new": "As on FIBS, the login only signs in. To make an account, log in as `guest` (the name `guest`, "
-               "no password), type `name` and the name you want, and answer the prompts. Or make it on the web "
-               "site (New account) or by telnet (`new`).",
+        "none": "Log in with your name. " + NOT_USED,
+        "password": "Log in with your name and your ParlorNet password. " + EMAILED % "the prompts",
+        "new": "As on FIBS, the login only signs in. To make an account, log in as `guest` with no password, "
+               "type `name` and the name you want, and answer the prompts. " + OR_ELSEWHERE,
     },
     "gamemaster": {
-        "none": "In the ParlorNet rulebook's window, type your name and click Sign in; nothing else is asked.",
-        "password": "In the ParlorNet rulebook's window, type your name and click Sign in, then type your "
-                    "password when the parlor asks and click OK. With a password the server emailed you, the "
-                    "window then asks for a password of your own, typed twice.",
-        "new": "Make your account on the web site (New account) or by telnet (log in as `new`) first. Sign out, "
-               "or closing the ParlorNet window, ends the sign-in.",
+        "none": "In the ParlorNet rulebook's window, type your name and click Sign in.",
+        "password": "In the ParlorNet rulebook's window, type your name and click Sign in. When the parlor asks "
+                    "for your password, type it and click OK. " + EMAILED % "the window will",
+        "new": MAKE_FIRST + " Signing out or closing the ParlorNet window ends your session.",
     },
     "networdz": {
-        "none": "Choose Options, Chat in Networdz and type `/signin name`; nothing else is asked.",
+        "none": "Choose Options, Chat in Networdz and type `/signin name`.",
         "password": "Choose Options, Chat in Networdz, type `/signin name password` and press Enter. " +
                     FIRST_ELSEWHERE,
-        "new": "Make your account on the web site (New account) or by telnet (log in as `new`) first. `/quit` "
-               "signs out.",
+        "new": MAKE_FIRST + " Type `/quit` to sign out.",
     },
     "awale": {
-        "none": "Your name in Internet > Network setup (Your name) signs you in when you connect; if it is not a "
-                "ParlorNet name, type `!signin name` in Write to group.",
+        "none": "Type your name under Your name in Internet > Network setup, and you are signed in when you "
+                "connect. If that is not a ParlorNet name, type `!signin name` in Write to group.",
         "password": "After connecting, type `!signin name password` in Write to group and press Send. " +
                     FIRST_ELSEWHERE,
-        "new": "Make your account on the web site (New account) or by telnet (log in as `new`) first. `!quit` "
-               "signs out.",
+        "new": MAKE_FIRST + " Type `!quit` to sign out.",
     },
     "netsprocket": {
-        "none": "In the game's Join dialog, your name as the player name; the password is not used.",
-        "password": "In the game's Join dialog, your name as the player name and your ParlorNet password as the "
-                    "password. " + FIRST_ELSEWHERE,
-        "new": "Make your account on the web site (New account) or by telnet (log in as `new`) first. A wrong "
-               "name or password: NetBoxes shows the reason in its chat window, then \"The game host has left!\"",
+        "none": "In the game's Join dialog, type your name as the player name. " + NOT_USED,
+        "password": "In the game's Join dialog, type your name as the player name and your ParlorNet password as "
+                    "the password. " + FIRST_ELSEWHERE,
+        "new": MAKE_FIRST + " If the name or password is wrong, NetBoxes shows the reason in its chat window and "
+               "then says \"The game host has left!\"",
     },
     "batnav": {
-        "none": "Your ParlorNet name as the client's player name (`-u name`, or Your name in Config); nothing else "
-                "is asked.",
-        "password": "Send the message `/signin name password` (in nbtclient, `\\signin name password`, since its "
-                    "message field takes the slash key as a backspace). " + FIRST_ELSEWHERE,
-        "new": "Make your account on the web site (New account) or by telnet (log in as `new`) first. The name "
-               "the client sends when it connects signs nobody in on a password server.",
+        "none": "Give your ParlorNet name as the client's player name, with `-u name` or under Your name in "
+                "Config.",
+        "password": "Send the message `/signin name password`. In nbtclient, send `\\signin name password` "
+                    "instead, because its message field takes the slash key as a backspace. " + FIRST_ELSEWHERE,
+        "new": MAKE_FIRST + " On a server with passwords, the name the client sends when it connects does not "
+               "sign you in.",
     },
     "rscards": {
-        "none": "In graphics mode, type your name in the first field and press RETURN; nothing else is asked.",
-        "password": "In graphics mode, type your name in the first field, then your ParlorNet password in the "
-                    "second (it does not show). With a password the server emailed you, the next fields ask for "
-                    "a password of your own, typed twice.",
-        "new": "Type a new name in the first field: the server asks whether to make the account and for its "
-               "password in the fields that follow.",
+        "none": "In graphics mode, type your name in the first field and press RETURN.",
+        "password": "In graphics mode, type your name in the first field and your ParlorNet password in the "
+                    "second. The password does not show. " + EMAILED % "the next fields",
+        "new": "Type a new name in the first field. The server asks whether to make the account, and the "
+               "fields that follow ask for its password.",
     },
     "netluff": {
-        "none": "In the chat box, type `/signin`: the name in NetLuff's name box signs in; nothing else is asked.",
-        "password": "In the chat box, type `/signin password` to sign in with the name in NetLuff's name box, or "
-                    "`/signin name password`. " + FIRST_ELSEWHERE,
-        "new": "Make your account on the web site (New account) or by telnet (log in as `new`) first. `/quit` "
-               "signs out.",
+        "none": "Type `/signin` in the chat box to sign in with the name in NetLuff's name box.",
+        "password": "To sign in with the name in NetLuff's name box, type `/signin password` in the chat box. "
+                    "To use another name, type `/signin name password`. " + FIRST_ELSEWHERE,
+        "new": MAKE_FIRST + " Type `/quit` to sign out.",
     },
     "icds": {
-        "none": "In the terminal you started xcheckers from, your name at `login:`; the password is not used.",
-        "password": "In the terminal you started xcheckers from, your name at `login:` and your ParlorNet password "
-                    "at `password:`. With a password the server emailed you, the prompts then ask for a password of "
-                    "your own, typed twice.",
+        "none": "In the terminal you started xcheckers from, type your name at `login:`. " + NOT_USED,
+        "password": "In the terminal you started xcheckers from, type your name at `login:` and your ParlorNet "
+                    "password at `password:`. " + EMAILED % "the prompts",
         "new": "The login only signs in. To make an account, type `guest` at `login:`, then the name you want, "
-               "and answer the prompts. Or make it on the web site (New account) or by telnet (`new`).",
+               "and answer the prompts. " + OR_ELSEWHERE,
     },
     "worthy": {
-        "none": "Open Talk (F6) and type `/signin`: the name from Worthy Opponent's Name menu signs in; nothing "
-                "else is asked.",
-        "password": "Open Talk (F6) and type `/signin password` to sign in with the name from Worthy Opponent's "
-                    "Name menu, or `/signin name password`. " + FIRST_ELSEWHERE,
-        "new": "Make your account on the web site (New account) or by telnet (log in as `new`) first. `/quit` "
-               "signs out and hangs up.",
+        "none": "Open Talk (F6) and type `/signin` to sign in with the name from Worthy Opponent's Name menu.",
+        "password": "Open Talk (F6). To sign in with the name from Worthy Opponent's Name menu, type "
+                    "`/signin password`. To use another name, type `/signin name password`. " + FIRST_ELSEWHERE,
+        "new": MAKE_FIRST + " Type `/quit` to sign out and hang up.",
     },
     "parlornet": {
-        "none": "At the sign-in screen, type your name; nothing else is asked.",
-        "password": "At the sign-in screen, type your name, then your password when the parlor asks for it. With a "
-                    "password the server emailed you, the program then asks for a password of your own, typed "
-                    "twice.",
-        "new": "Type `new` at the sign-in screen, then the name you want, and answer the parlor's questions: a "
-               "password typed twice, or an email address, depending on the server.",
+        "none": "At the sign-in screen, type your name.",
+        "password": "At the sign-in screen, type your name, then your password when the parlor asks for it. " +
+                    EMAILED % "the program will",
+        "new": "Type `new` at the sign-in screen, then the name you want, and answer the parlor's questions. "
+               "Some servers ask you to type a password twice, and others ask for your email address.",
     },
     "outland": {
-        "none": "Your name as the account name; the password is not used.",
-        "password": "Your name as the account name and your ParlorNet password as the password. " +
+        "none": "Use your name as the account name. " + NOT_USED,
+        "password": "Use your name as the account name and your ParlorNet password as the password. " +
                     FIRST_ELSEWHERE,
-        "new": "The Gateway only signs in, and its own account forms are not used. Make your account on the web "
-               "site (New account) or by telnet (log in as `new`) first. For a name with no account the Gateway "
-               "says where to make one, then hangs up.",
+        "new": "The Gateway can only sign in, and its own account forms do not work here. " + MAKE_FIRST +
+               " If a name has no account, the Gateway says where to make one and then hangs up.",
     },
 }
 
@@ -1435,7 +1419,7 @@ def facts(c, host):
         lines.append(("Version examined" if c.unsupported() else "Version to use", esc(c.version)))
     if c.kind == "telnet":
         lines.append(("Sends arrow keys", esc(c.has.get("arrows", "not known")) +
-                      ("" if c.has.get("arrows") == "yes" else "; if they do not move, choose %s"
+                      ("" if c.has.get("arrows") == "yes" else ". If they do not move, choose %s"
                        % a(TELNET_PAGE + "#keys", "movement keys"))))
         lines.append(("Color", esc(c.has.get("colour", "not known"))))
         lines.append(("Line characters", esc(c.has.get("glyphs", "not known"))))
@@ -1472,14 +1456,14 @@ def browsers_body(host=HOST, auth=None):
                 "click on.",
                 "Cookies, cell colors and JavaScript help but are optional."]) +
             h2("setup", "Setting up") +
-            ul([text("Open `http://{host}:6500/`. It goes to the welcome page; bookmark the lobby once you are "
-                     "in.", host),
+            ul([text("Open `http://{host}:6500/` to see the welcome page. Once you are signed in, bookmark the "
+                     "lobby.", host),
                 "Turn images on, since the boards are GIF pictures. With images off, a board&#39;s squares are "
                 "listed as links under it.",
-                "JavaScript is optional. Without it a table page reloads itself while you wait, at the rate you "
-                "pick on the page (off, 3 to 60 seconds; 5 is the default).",
-                "Cookies keep you signed in until you sign out or quit the browser. A browser that does not "
-                "return cookies gets the session in each link (<tt>s=</tt>): do not pass those links on."]) +
+                "JavaScript is optional. Without it, a table page reloads itself while you wait. You can set "
+                "the rate on the page to every 3 to 60 seconds, or turn it off. The default is every 5 seconds.",
+                "Cookies keep you signed in until you sign out or quit the browser. If a browser does not "
+                "return cookies, each link carries your session (<tt>s=</tt>), so do not pass those links on."]) +
             h2("signin", "Signing in") + signin_html("web", auth, host) +
             programs("programs", "The browsers", BROWSERS))
 
@@ -1499,8 +1483,8 @@ def telnet_body(host=HOST, auth=None):
                 "Arrow keys, ANSI color and IBM PC (CP437) or UTF-8 line characters are optional."]) +
             h2("setup", "Setting up") +
             ul([text("Connect to `{host}`, port `6502` (`telnet {host} 6502`).", host),
-                "Set the terminal type to ANSI or VT100 (the program reports it; xterm-class terminals get UTF-8 "
-                "and the mouse). A menu then shows a sample line in each display, <tt>pc</tt> (color and CP437 "
+                "Set the terminal type to ANSI or VT100. Your program reports it to the server, and xterm-class "
+                "terminals also get UTF-8 and the mouse. A menu then shows a sample line in each display, <tt>pc</tt> (color and CP437 "
                 "characters), <tt>utf8</tt>, <tt>ansi</tt> (color, ASCII only) and <tt>plain</tt>. Pick the one "
                 "that looks right.",
                 "Make the window 80 columns by 24 rows. A smaller window is asked to grow.",
@@ -1512,9 +1496,9 @@ def telnet_body(host=HOST, auth=None):
             p("If your telnet program sends no arrow keys, letters can move the cursor instead: IJKL, ESDF, WASD "
               "or HJKL (as in vi). Choose them with <tt>O</tt> in the menu, or with <tt>K</tt> at the login&#39;s "
               "last prompt (offered when your terminal type suggests no arrow keys). The arrows still work. Those "
-              "four letters then always move; to type a command or word that starts with one of them, press "
-              "<tt>:</tt> first (<tt>:join 3</tt>), and a key whose letter is one of them is <tt>:</tt> then the "
-              "letter (<tt>:d</tt>). The choice lasts until you log off. Each program&#39;s page says whether "
+              "four letters then always move. To type a command or word that starts with one of them, press "
+              "<tt>:</tt> first (<tt>:join 3</tt>). For a key whose letter is one of them, press <tt>:</tt> and "
+              "then the letter (<tt>:d</tt>). The choice lasts until you log off. Each program&#39;s page says whether "
               "it sends arrow keys.") +
             h2("signin", "Signing in") + signin_html("telnet", auth, host) +
             programs("programs", "The programs", TELNETS))

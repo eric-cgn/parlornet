@@ -385,19 +385,18 @@ class ClientsPage(Built):
                           r'<td>(.*?)</td></tr>', section)
 
     def test_the_retro_window(self):
-        """The home page states the retro window, about 25 to 50 years ago (1977 to 2000 for 2027), and the policy has its own part of
+        """The home page states the retro window, about 25 to 50 years ago, and the policy has its own part of
         docs/clients.md, which the frontends doc links to."""
         intro = self.content(self.pages["index.html"])
         intro = intro[:intro.index("<table")]
-        for words in ("first released about 25 to 50 years ago", "2027 release means 1977 to 2000",
-                      "new native-client work goes to them"):
-            self.assertIn(words, intro)
+        self.assertIn("first released about 25 to 50 years ago", intro)
+        for words in ("1977", "2027", "native-client work"):
+            self.assertNotIn(words, intro)
         self.assertNotIn("2010", intro)
         policy = self.pages["docs/clients.html"]
         self.assertIn('<a name="the-retro-window">', policy)
         part = policy[policy.index('<a name="the-retro-window">'):policy.index('<a name="native-clients">')]
-        for words in ("25 to 50 years ago", "1977 to 2000", "2027 release", "rule of thumb",
-                      "New native-client work targets it", "any computer gets in, old or new"):
+        for words in ("25 to 50 years ago", "rule of thumb", "any computer gets in, old or new"):
             self.assertIn(words, part)
         self.assertIn('clients.html#the-retro-window"', self.pages["docs/frontends.html"])
 

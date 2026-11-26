@@ -108,8 +108,8 @@ def protocols_body(games):
             for k, name, port, _, _, _, status, _, _ in PROTOCOLS]
     out = [h1("Protocols"),
            p("These are the protocols a ParlorNet server can speak. The ports are the usual ones, and %s "
-             "explains how to connect, sign up and sign in with each. %s"
-             % (a(C.PROTOCOLS_DOC, "Supported protocols"), C.originals_html())),
+             "explains how to connect, sign up and sign in with each one."
+             % a(C.PROTOCOLS_DOC, "Supported protocols")),
            data_table(["Key", "Usual port", "Protocol", "Status"], rows, "100%", (None, "right"))]
     for k, name, port, origin, years, served, status, guide, what in PROTOCOLS:
         facts = [("Key", esc(k)), ("Usual port", "%d" % port), ("Origin", esc(origin)), ("In use", esc(years)),
