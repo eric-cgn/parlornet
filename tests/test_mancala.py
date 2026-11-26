@@ -438,10 +438,10 @@ class Screens(unittest.TestCase):
             lines = OPEN if me != 1 else SEAT1
             for mode, (shown, reqs) in ansi_screens(self, M, lines, me, keys=["RIGHT", "ENTER"]).items():
                 self.assertIn("Mancala", shown)
-                self.assertIn("store rules", shown)
+                self.assertIn("Store rules", shown)
                 self.assertIn(LONG.upper(), shown)
                 if me < 0:
-                    self.assertIn("Watching", shown)
+                    self.assertIn("You are watching", shown)
                     self.assertFalse([r for r in reqs if r.startswith("MOV")])
                 else:
                     self.assertIn("bottom row, store right", shown)
@@ -458,8 +458,8 @@ class Screens(unittest.TestCase):
         self.assertIn("MOV 3 6", reqs)
         _, reqs = ansi_screens(self, M, OPEN, 0, keys=["4", "ENTER"])["pc"]
         self.assertIn("MOV 3 4", reqs)
-        _, reqs = ansi_screens(self, M, OPEN, 0, keys=list("pit 5") + ["ENTER"])["ansi"]
-        self.assertIn("MOV 3 5", reqs)
+        _, reqs = ansi_screens(self, M, OPEN, 0, keys=["/", "5", "ENTER"])["ansi"]
+        self.assertIn("CMD 3 /5", reqs)
         # seat 0's pit 4 is drawn at x 24-27, rows 9-11
         _, reqs = ansi_screens(self, M, OPEN, 0, keys=[("CLICK", 25, 10)])["pc"]
         self.assertIn("MOV 3 4", reqs)
@@ -472,7 +472,7 @@ class Screens(unittest.TestCase):
             self.assertIn("26", shown)
             self.assertIn("Store rules, 6 seeds a pit", shown)
             self.assertIn("MOV 3 2", reqs)                        # the cursor starts on the first legal pit
-        for mode, (shown, reqs) in ansi_screens(self, M, OWARE_FEED, 0, keys=["LEFT", "LEFT"]).items():
+        for mode, (shown, reqs) in ansi_screens(self, M, OWARE_FEED, 0, keys=["LEFT", "LEFT", "?", " ", "ESC"]).items():
             self.assertIn("Oware rules", shown)
             self.assertIn("feed", shown)
             self.assertIn("More than 24 seeds wins.", shown)
@@ -483,23 +483,23 @@ class Screens(unittest.TestCase):
     def test_plain(self):
         text = plain_screen(self, M, OPEN, 0)
         self.assertIn("|  4*|  4*|", text)
-        self.assertIn("Your move (a pit, like 1) >", text)
-        self.assertIn("bottom store  0", text)
+        self.assertIn("Your turn. Type a pit such as /1. >", text)
+        self.assertIn("(you)  0 in store", text)
         text = plain_screen(self, M, CROWDED, 0)
         self.assertIn("+ 30 |", text)
         self.assertIn(" 12*|", text)
         text = plain_screen(self, M, CROWDED, -1)
         self.assertNotIn("*", text)
-        self.assertIn("you are watching", text)
+        self.assertIn("You are watching.", text)
         text = plain_screen(self, M, OVER, 1)
         self.assertIn("Oware rules", text)
         self.assertTrue(text.rstrip().endswith(">"))
-        self.assertIn("Waiting for an opponent", plain_screen(self, M, WAITING, 0))
+        self.assertIn("Waiting for a second player", plain_screen(self, M, WAITING, 0))
 
     def test_typed_words(self):
         g = M.PlainScreen.__new__(M.PlainScreen)
         self.assertEqual(g.move_word("3", ["3"]), "3")
-        self.assertEqual(g.move_word("sow", ["sow", "6"]), "6")
+        self.assertIsNone(g.move_word("sow", ["sow", "6"]))
         self.assertIsNone(g.move_word("7", ["7"]))
         self.assertIsNone(g.move_word("d3", ["d3"]))
 

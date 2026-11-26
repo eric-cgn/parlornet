@@ -315,7 +315,7 @@ class ChatCommands(Helpers):
 
 
 TELNET_LOGIN = ((b"new", "Name you want"), (b"tess", "Choose a password"), (b"tess-Pass-word", "again"),
-                (b"tess-Pass-word", "Press Enter"), (b"", "Commands:"))
+                (b"tess-Pass-word", "Press Enter"), (b"", "or /help for the commands."))
 
 
 class WebAndTelnet(Stack):
@@ -359,16 +359,15 @@ class WebAndTelnet(Stack):
     def test_telnet_scores(self):
         from adapters.common import SCORES_NOTE
         s = telnet_session(self)
-        s.sendall(b"scores\r\n")
+        s.sendall(b"top\r\n")                          # the shared /top and /score, run on the server
         out = self.until(s, "parties.")
-        s.sendall(b"profile ann\r\n")
+        s.sendall(b"score ann\r\n")
         prof = self.until(s, "number 1")
         s.close()
         self.assertIn("Leaderboard:", out)
-        self.assertRegex(out, r"Rank Player +Points")
-        self.assertRegex(out, r"1 ann +4 +1 +0 +0 +0")
+        self.assertIn("Top: 1 ann 4, 2 bob 0.", out)
         self.assertIn(" ".join(SCORES_NOTE.split()[:6]), " ".join(out.split()))
-        self.assertIn("Score: 4 points: 1 win", prof)
+        self.assertIn("4 points: 1 win", prof)
 
     until = TPW.TelnetProfiles.until
 
@@ -406,10 +405,10 @@ class ScoresOff(Stack):
         self.assertNotIn("/leaderboard.htm", self.get("/games.htm")[3])
         self.assertNotIn("Score:", self.ann.get("/player.htm")[3])
         s = telnet_session(self)
-        s.sendall(b"scores\r\n")
-        out = self.until(s, "leaderboard.")
+        s.sendall(b"top\r\n")
+        out = self.until(s, "scores.")
         s.close()
-        self.assertIn("This server shows no leaderboard.", out)
+        self.assertIn("This server shows no scores.", out)
 
     until = TPW.TelnetProfiles.until
 

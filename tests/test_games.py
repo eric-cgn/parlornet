@@ -89,7 +89,7 @@ class AnsiScreen(DummyBase, AnsiGame):
 
 
 class PlainScreen(DummyBase, PlainGame):
-    HELP_TEXT = " poke pokes. say <text>, resign, menu."
+    HELP_COMMANDS = ["Press / to type one. /poke pokes."]
 
     def lines(self):
         return ["", "== %s, table %s ==" % (NAME, self.tid), "Waiting for an opponent." if not self.v["rows"]
@@ -145,8 +145,8 @@ class Registry(unittest.TestCase):
             self.assertFalse(m.parse_view(lines)["rows"], m.KEY)
             for me in (0, -1):
                 for mode, (shown, _) in ansi_screens(self, m, lines, me, keys=["?", "WAIT", "x", "ESC"]).items():
-                    self.assertIn("Waiting for an opponent", shown, (m.KEY, mode, me))
-                self.assertIn("Waiting for an opponent", plain_screen(self, m, lines, me))
+                    self.assertIn("Waiting for a second player", shown, (m.KEY, mode, me))
+                self.assertIn("Waiting for a second player", plain_screen(self, m, lines, me))
 
     def test_lookups_follow_the_registry(self):
         self.assertEqual(list(T.RENDERERS), [m.KEY for m in games.all_games()])
@@ -201,22 +201,22 @@ class DroppedModule(unittest.TestCase):
         self.assertIn("/img/testdummy/dot.gif", W.IMAGES)
         self.assertTrue(any(g.MOVE_RE.match("poke") for g in games.all_games()))
         self.assertEqual(W.describe("POKE 1", ["ann", "bob"], "testdummy/1"), "bob pokes")
-        # the telnet menu: a new-table entry, and its screens
-        io = FakeIO("pc")
+        # the telnet lobby: the game picker that N opens lists it, and its screens
+        io = FakeIO("pc", ["ESC"])
         s = session(io, ScreenCore("testdummy/1", ["V testdummy/1 1"]), "pc")
         menu = T.AnsiMenu(s)
         asyncio.run(menu.load())
-        new = [it[1]["key"] for it in menu.mine if it[0] == "new"]
-        self.assertEqual(new[:2], ["reversi/1", "backgammon/1"])
-        self.assertIn("testdummy/1", new)
-        menu.sel = next(i for i, it in enumerate(menu.items) if it[0] == "new" and it[1]["key"] == "testdummy/1")
-        self.assertIn("Start a new Test Dummy table", "\n".join(menu.compose().lines()))
+        listed = [g["key"] for g in s.games if g["key"] in T.RENDERERS]
+        self.assertEqual(listed[:2], ["reversi/1", "backgammon/1"])
+        self.assertIn("testdummy/1", listed)
+        asyncio.run(menu.new([]))
+        self.assertIn("Test Dummy", "\n".join("\n".join(x) for x in io.screens))
         self.assertEqual(T.RENDERERS["testdummy/1"], (m.AnsiScreen, m.PlainScreen))
         shown = ansi_screens(self, m, ["V testdummy/1 2", "W 0", "M poke"], 0, keys=["t", "WAIT", "x", "ESC"])
         self.assertIn("Test Dummy", shown["pc"][0])
         _, reqs = ansi_screens(self, m, ["V testdummy/1 2", "W 0", "M poke"], 0,
-                               keys=list("poke") + ["ENTER"])["ansi"]
-        self.assertIn("MOV 3 poke", reqs)
+                               keys=["/"] + list("poke") + ["ENTER"])["ansi"]
+        self.assertIn("CMD 3 /poke", reqs)
         # the games page and its own page: after the planned games
         plain = lambda h: re.sub(r"</?font[^>]*>", "", h)  # noqa: E731
         table = plain(W.games_page(self.hosted()).decode("ascii"))

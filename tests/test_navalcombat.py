@@ -674,40 +674,45 @@ class Screens(unittest.TestCase):
         lines = ["V navalcombat/1 1", "S Waiting for players"]
         for me in (0, 1, -1):
             for mode, (shown, _) in ansi_screens(self, G, lines, me).items():
-                self.assertIn("Waiting for an opponent", shown)
-            self.assertIn("Waiting for an opponent", plain_screen(self, G, lines, me))
+                self.assertIn("Waiting for a second player", shown)
+            self.assertIn("Waiting for a second player", plain_screen(self, G, lines, me))
 
     def test_placing_keys(self):
+        """Enter picks where the ship starts, Right or Down point it with a preview, and Enter places it. Esc
+        drops the pick. G places the rest at random, U takes back a ship and Z clears them all."""
         st = placing_view()                         # the 3-square ship next
-        for mode, (shown, reqs) in ansi_screens(self, G, vue(st, 0), 0, keys=["DOWN", "DOWN", "DOWN", "ENTER"]).items():
-            self.assertIn("MOV 3 a4-c4", reqs, mode)
-            self.assertIn("Ship 3 of 5: 3 squares, across", shown)
         for mode, (shown, reqs) in ansi_screens(self, G, vue(st, 0), 0,
-                                                keys=["d", "WAIT", "RIGHT", "RIGHT", "RIGHT", "RIGHT", "RIGHT",
+                                                keys=["DOWN", "DOWN", "DOWN", "ENTER", "ENTER"]).items():
+            self.assertIn("MOV 3 a4-c4", reqs, mode)
+            self.assertIn("Ship 3 of 5 is 3 squares long.", shown)
+            self.assertIn("Ship 3 starts at a4. Press Right or Down to point it, then Enter to place it.", shown)
+        for mode, (shown, reqs) in ansi_screens(self, G, vue(st, 0), 0,
+                                                keys=["RIGHT", "RIGHT", "RIGHT", "RIGHT", "RIGHT", "ENTER", "DOWN",
                                                       "ENTER"]).items():
             self.assertIn("MOV 3 f1-f3", reqs, mode)
-            self.assertIn("3 squares, down", shown)
-        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=["a", "WAIT"])["pc"]
+        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=["DOWN", "ENTER", "ESC", "ESC"])["pc"]
+        self.assertFalse([r for r in reqs if r.startswith("MOV")])          # Esc drops the pick
+        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=["g"])["pc"]
         self.assertIn("MOV 3 random", reqs)
-        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=["u", "WAIT", "c", "WAIT"])["ansi"]
+        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=["u", "z"])["ansi"]
         self.assertIn("MOV 3 undo", reqs)
         self.assertIn("MOV 3 clear", reqs)
-        shown, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=["ENTER"])["utf8"]   # a1 is taken
+        shown, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=["ENTER", "ENTER"])["utf8"]   # a1 is taken
         self.assertFalse([r for r in reqs if r.startswith("MOV")])
-        self.assertIn("does not fit", shown)
-        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=list("h8 down") + ["ENTER"])["pc"]
-        self.assertIn("MOV 3 h8-h10", reqs)
-        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=list("b9-d9") + ["ENTER"])["pc"]
-        self.assertIn("MOV 3 b9-d9", reqs)
-        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=[("CLICK", G.GX[0] + 2 * 4, G.GY + 6)])["pc"]
+        self.assertIn("doesn't fit", shown)
+        for typed in ("h8 down", "b9-d9", "reset"):           # typed, each runs on the server (CMD)
+            _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=["/"] + list(typed) + ["ENTER"])["pc"]
+            self.assertIn("CMD 3 /" + typed, reqs)
+        cell = (G.GX[0] + 2 * 4, G.GY + 6)
+        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=[("CLICK",) + cell, ("CLICK",) + cell])["pc"]
         self.assertIn("MOV 3 e7-g7", reqs)
-        # the preview of the ship at the cursor, in its own shape
-        shown, _ = ansi_screens(self, G, vue(st, 0), 0, keys=["DOWN", "DOWN", "DOWN"])["pc"]
+        # the preview of the ship picked, in its own shape
+        shown, _ = ansi_screens(self, G, vue(st, 0), 0, keys=["DOWN", "DOWN", "DOWN", "ENTER"])["pc"]
         self.assertIn("░░" * 3, screens(shown)[-1][G.GY + 3])
         st = place_all(new(), 0, CLASSIC_FLEET, ready=False)
         for mode, (shown, reqs) in ansi_screens(self, G, vue(st, 0), 0, keys=["ENTER"]).items():
             self.assertIn("MOV 3 ready", reqs)
-            self.assertIn("Fleet placed", shown)
+            self.assertIn("Your fleet is placed.", shown)
 
     def test_shooting_keys(self):
         st = late_game()
@@ -717,8 +722,8 @@ class Screens(unittest.TestCase):
             self.assertEqual(len(mov), 1)
             self.assertIn(mov[0].split()[2], free)
             self.assertIn("Your shot", shown)
-        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=list(free[-1]) + ["ENTER"])["ansi"]
-        self.assertIn("MOV 3 %s" % free[-1], reqs)
+        _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=["/"] + list(free[-1]) + ["ENTER"])["ansi"]
+        self.assertIn("CMD 3 /%s" % free[-1], reqs)
         x, y = G.xy(free[0])
         _, reqs = ansi_screens(self, G, vue(st, 0), 0, keys=[("CLICK", G.GX[1] + 2 * x + 1, G.GY + y)])["pc"]
         self.assertIn("MOV 3 %s" % free[0], reqs)
@@ -727,7 +732,7 @@ class Screens(unittest.TestCase):
         self.assertFalse([r for r in reqs if r.startswith("MOV")])
         shown, reqs = ansi_screens(self, G, vue(st, 1), 1, keys=["ENTER"])["pc"]
         self.assertFalse([r for r in reqs if r.startswith("MOV")])
-        self.assertIn("It is %s's shot." % LONG, shown)
+        self.assertIn("It is %s's turn." % LONG, shown)
 
     def test_hidden_on_screen(self):
         """The other fleet's ships never show: seat 1 and a watcher see no ship shape on seat 0's grid."""
@@ -754,7 +759,7 @@ class Screens(unittest.TestCase):
                 for mode, (shown, _) in ansi_screens(self, G, vue(st, me), me, keys=["?", "WAIT", "x"]).items():
                     self.assertIn(LONG[:12], shown)
                 text = plain_screen(self, G, vue(st, me), me)
-                self.assertIn("Key:", text)
+                self.assertIn("is sea,", text)
         st = finished()
         shown, _ = ansi_screens(self, G, vue(st, 1), 1, prepare=lambda g: setattr(g, "over", "Game over: x"))["pc"]
         self.assertIn("Game over", shown)
@@ -762,12 +767,11 @@ class Screens(unittest.TestCase):
     def test_plain(self):
         st = placing_view()
         text = plain_screen(self, G, vue(st, 0), 0)
-        self.assertIn("Place the 3-square ship (like a1 across, a1 down, random) > ", text)
-        self.assertIn("Next: the 3-square ship", text)
+        self.assertIn("Place your 3-square ship. Type /a1 across or /a1 down, or /random. > ", text)
         self.assertIn("[][][][][]", text)
         text = plain_screen(self, G, vue(late_game(), 0), 0)
-        self.assertIn("Your shot (like ", text)
-        self.assertIn("Enemy: " + LONG.upper(), text)
+        self.assertIn("Your shot. Type a square such as /", text)
+        self.assertIn("%s's fleet" % LONG.upper(), text)
         text = plain_screen(self, G, vue(late_game(), -1), -1)
         self.assertIn("%s's fleet" % LONG, text)
         self.assertNotIn("[]", text)

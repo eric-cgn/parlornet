@@ -69,21 +69,24 @@ class WebImage(unittest.TestCase):
             self.assertEqual(area[1][2] < c.w // 2, near, home)
             self.assertEqual(board.hit(c.areas, (area[1][0] + area[1][2]) // 2, area[1][1] + 3), area)
 
-    def test_tall_stacks_show_plus_the_rest(self):
-        """Five places on a point: 7 on point 6 is four checkers and +3; four on the bar is two and +2; five on
-        a point are all drawn. No stack shows its total."""
+    def test_tall_stacks_show_what_the_last_checker_stands_for(self):
+        """Five places on a point: 7 on point 6 is five checkers, the fifth showing 3; four on the bar is three,
+        the third showing 2; five on a point are all drawn with no number. No stack shows its total, +n or 1
+        (docs/design.md, Stacks of pieces)."""
         v = BG.parse_view(LINES)
         v["pts"][12] = 5
         v["bar"] = [4, 0]
         c = BG.board_image(v, 0, "")
         words = [w for w, _, _ in c.words]
-        self.assertIn("+3", words)
-        self.assertIn("+2", words)
         on_board = [w for w, _, y in c.words if BG.BG_LABEL < y < c.h - BG.BG_LABEL]
+        self.assertIn("3", on_board)                    # point 6
+        self.assertIn("2", on_board)                    # the bar
         self.assertNotIn("7", on_board)
         self.assertNotIn("4", on_board)
+        self.assertNotIn("1", on_board)
+        self.assertFalse([w for w in words if w.startswith("+")])
         checkers = [p for p, _, _ in c.used if p.startswith("/img/bg/") and p[10] in "wk"]
-        self.assertEqual(len(checkers), 2 + 4 + 3 + 5 + 5 + 3 + 4)    # points 1, 6 (7), 8, 12, 13, 17, 19
+        self.assertEqual(len(checkers), 2 + 5 + 3 + 5 + 5 + 3 + 4)    # points 1, 6 (7), 8, 12, 13, 17, 19
 
     def test_side_panel_links_the_switch(self):
         from game_checks import web_page
@@ -142,12 +145,12 @@ class Telnet(unittest.TestCase):
         self.assertEqual(g.tok_at(cv.hit(45, 15)[1:]), "off")
 
     def test_full_screen_plays_the_same_moves(self):
-        """Clicks on the bar then on 22 in the left layout send bar-22; a typed 13-7 is sent as typed; the
+        """Clicks on the bar then on 22 in the left layout send bar-22; a typed 13-7 runs on the server as typed; the
         arrows move the cursor the way they point."""
         def left(g):
             g.s.bghome = "left"
         for keys, sent in (([("CLICK", 26, 12), "WAIT", ("CLICK", 13, 5)], "MOV 3 bar-22"),
-                           (["1", "3", "-", "7", "ENTER"], "MOV 3 13-7")):
+                           (["/", "1", "3", "-", "7", "ENTER"], "CMD 3 /13-7")):
             out = ansi_screens(self, BG, LINES, 0, keys, prepare=left)
             for mode, (_, reqs) in out.items():
                 self.assertIn(sent, reqs, mode)

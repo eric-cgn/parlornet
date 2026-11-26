@@ -406,7 +406,7 @@ class Craters(Stack):
         tel.send("\r\n")
         tel.until("Your tables")
         tel.send("watch %s\r\n" % tid)
-        tel.until("you are watching ==")
+        tel.until("You are watching.")
         before_text = self.landscape(tel.until(" +" + "-" * 72 + "+\r\n", timeout=8) and tel.raw.decode("latin-1"))
 
         def heights():

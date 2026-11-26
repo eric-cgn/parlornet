@@ -7,10 +7,9 @@ everything here draws exactly what the view says and nothing more.
 """
 import re
 
-from ..telnet import (A_AXIS, A_AXIS_HI, A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_TEXT, A_YELLOW, COLS,
-                      ROWS, AnsiGame, Canvas, GameBase, PlainGame, clock_text, fmt_secs, rule, status_bar,
-                      title_bar, turn_text, wrap)
-from ..telnet import box, describe_event as describe_common
+from ..telnet import (A_AXIS, A_AXIS_HI, A_BORDER, A_DIM, A_HEAD, A_RED, A_TEXT, A_YELLOW, AnsiGame, COLS, Canvas,
+                      GameBase, PlainGame, ROWS, and_list, title_bar, wrap)
+from ..telnet import describe_event as describe_common
 from ..board import Canvas as Picture
 from ..web import a, board_html, esc, hidden_fields, make_gif
 
@@ -43,7 +42,7 @@ RULE_NAMES = {"classic": "Classic: five ships", "batnav": "Batnav: ten ships, no
 N = 10
 SQ_RE = re.compile(r"^[a-j](10|[1-9])\Z")
 PLACE_RE = re.compile(r"^[a-j](10|[1-9])-[a-j](10|[1-9])\Z")
-WORDS = ("random", "undo", "clear", "ready")
+WORDS = ("random", "undo", "reset", "ready")      # /reset sends the plugin's clear
 
 
 def sq(x, y):
@@ -286,12 +285,6 @@ def board_image(v, seat, sel):
     return c
 
 
-def shot_word(v):
-    """'Your shot', or under the salvo rules the shots left: 'Your salvo: 4 shots left'."""
-    n = v.get("salvo") or 0
-    return "Your salvo: %d shot%s left" % (n, "" if n == 1 else "s") if n else "Your shot"
-
-
 def web_parts(v, tid, link, seat, names, sel):
     """-> (board, side panel, hint after the status line, action links)."""
     left, right = sides(seat)
@@ -378,27 +371,38 @@ COLOURS = {".": ("36", "44"), "o": ("1;37", "44"), "x": ("1;37", "41"), "#": ("3
            "p": ("1;33", "44")}
 LEGEND = [(".", "sea"), ("o", "miss"), ("x", "hit"), ("#", "sunk"), ("s", "ship")]
 
-HELP = [
-    "Arrow keys   move the cursor",
-    "Enter/Space  place the ship there, or fire there",
-    "D            turn the ship: across or down",
-    "A            place the rest of the fleet at random",
-    "U  C         take back the last ship; clear all",
-    "Mouse        click a square to place or to fire",
-    "T  R         talk to the table; resign (asks)",
-    "Esc          back to the menu; the game goes on",
-    "",
-    "Typed: a1 across, a1 down, a1-e1, random, undo,",
-    "clear, ready; a square like e5 fires there.",
-    "Also say <text>, resign, redraw, menu, help.",
-    "Leaving or logging off never resigns.",
-]
 
 
 class NavalBase(GameBase):
     """What both Naval Combat screens share: the view, the events, typed moves."""
 
+    HELP_MOVING = ["While you place ships, the arrows move over your grid. Enter picks",
+                   "where a ship starts, Right or Down point it, and Enter places it.",
+                   "Once your fleet is placed, Enter says you are ready. Then the",
+                   "arrows move over the other grid, and Enter fires there."]
+    HELP_KEYS = ["G places the rest of your fleet at random.",
+                 "U takes back the last ship, and Z takes back every ship."]
+    HELP_COMMANDS = ["Press / to type one. /a1 across places a ship, and /e5 fires at e5.",
+                     "/random, /undo, /reset and /ready do what their keys do."]
+    HELP_REFERENCE = []
+
+    def reference(self):
+        v = self.v or {}
+        gl = nc_glyphs(self.s.mode)
+        out = []
+        if v.get("fleet"):
+            out += ["The fleet", "Your fleet has ships of %s squares." % and_list(str(n) for n in v["fleet"])]
+            out.append("")
+        return out + ["The marks", "%s is sea, %s is a miss, %s is a hit, %s is a sunk ship and %s is" % tuple(
+            gl[c].strip() for c in ".ox#s"), "one of your ships. The last square fired at shows in magenta."]
+
     parse = staticmethod(parse_view)
+    GAME = NAME
+    MOVE_EXAMPLE = "/e5"
+    COMMANDS = {"random": "/random places the rest of your fleet at random.",
+                "undo": "/undo takes back the last ship you placed.",
+                "reset": "/reset takes back every ship you placed.",
+                "ready": "/ready starts the battle once your fleet is placed."}
     across = True       # the direction of the ship being placed
 
     def describe(self, text):
@@ -407,9 +411,38 @@ class NavalBase(GameBase):
     def placing(self):
         return self.playing() and placing(self.v, self.me)
 
+    def view_last(self):
+        last = self.v.get("last") if self.v else None
+        if not last:
+            return ""
+        what = shot_result(self.v, last)
+        return "%s fired at %s and %s." % (self.actor(last[0]), last[1], "missed" if what == "miss" else
+                                          "sank a ship" if what == "sunk" else "hit")
+
+    def last_move(self, text):
+        p = text.split()
+        if p[0] == "SHOT" and len(p) >= 4 and p[1].isdigit():
+            seat, where, what = int(p[1]), p[2], p[3]
+            other = "your" if 1 - seat == self.me else "%s's" % self.who(self.name(1 - seat))
+            if what == "sunk" and len(p) >= 5:
+                return "%s sank %s %s-square ship." % (self.actor(seat), other, p[4])
+            if what == "hit":
+                return "%s fired at %s and hit." % (self.actor(seat), where)
+            return "%s fired at %s and missed." % (self.actor(seat), where)
+        return None
+
+    def turn_sentence(self):
+        if self.placing():
+            return "Place your fleet."
+        if self.v and self.v.get("rows") and self.v["phase"] == "place" and self.playing():
+            return "The fleets are being placed."
+        if self.my_turn():
+            return "Your shot."
+        return super().turn_sentence()
+
     def move_word(self, cmd, words=()):
         if cmd in WORDS:
-            return cmd
+            return "clear" if cmd == "reset" else cmd
         if PLACE_RE.match(cmd):
             return cmd
         if not SQ_RE.match(cmd) or not self.v:
@@ -421,9 +454,9 @@ class NavalBase(GameBase):
         across = self.across
         if len(words) > 1:
             d = words[1].lower()
-            if d in ("across", "a", "right", "h", "horizontal"):
+            if d in ("across", "a"):
                 across = True
-            elif d in ("down", "d", "v", "vertical"):
+            elif d in ("down", "d"):
                 across = False
             else:
                 return None
@@ -435,14 +468,14 @@ class AnsiNaval(NavalBase, AnsiGame):
     """Naval Combat, full screen: your grid on the left, the other's on the right (for watchers, seat 0's
     and seat 1's), the panel on the right; the cursor places ships on the left grid and fires on the right."""
 
-    HOTKEYS = "rt?dauc"
+    HOTKEYS = "rt?guz"
     LOG_TOP, LOG_ROWS = 11, 9
-    TITLE, HELP = "Naval Combat", HELP
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
         self.cur = (0, 0)
         self.across = True
+        self.pick = None            # where the ship being placed starts, once Enter has picked it
         self.nc = nc_glyphs(sess.mode)
 
     # ---- where things are ------------------------------------------------
@@ -460,10 +493,10 @@ class AnsiNaval(NavalBase, AnsiGame):
         return GX[side] + 2 * x, GY + y
 
     def preview(self):
-        """The squares of the ship being placed at the cursor, if it may go there; else []."""
-        if not self.placing() or not self.v["next"]:
+        """The squares of the ship being placed from the square picked, if it may go there; else []."""
+        if not self.placing() or not self.v["next"] or not self.pick:
             return []
-        t = token_at(self.cur[0], self.cur[1], self.across, self.v["next"], self.v["n"])
+        t = token_at(self.pick[0], self.pick[1], self.across, self.v["next"], self.v["n"])
         return squares(t) if t and t in self.v["moves"] else []
 
     def snap(self):
@@ -481,24 +514,26 @@ class AnsiNaval(NavalBase, AnsiGame):
     # ---- drawing ---------------------------------------------------------
     def compose(self):
         cv = Canvas()
-        right = "watching" if self.me < 0 else "your fleet is on the left"
-        title_bar(cv, self.g, "Naval Combat %s table %s" % (self.g["v"], self.tid), right)
+        title_bar(cv, self.g, self.title_text())
         self.draw_grids(cv)
         self.draw_panel(cv)
-        text, attr = (self.msg, self.msg_attr) if self.msg else self.hint()
+        text, attr = self.sentence(self.hint)
         cv.put(1, ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
-        if self.buf:
-            keys = [("Enter", "send"), ("Esc", "cancel"), ("Backspace", "erase")]
-        elif self.placing():
-            keys = [("Arrows", "move"), ("Enter", "place" if self.v["next"] else "ready"), ("D", "turn"),
-                    ("A", "random"), ("U", "undo"), ("C", "clear"), ("?", "help"), ("Esc", "menu")]
-        elif self.me >= 0 and self.playing():
-            keys = [("Arrows", "aim"), ("Enter", "fire"), ("T", "talk"), ("R", "resign"), ("?", "help"),
-                    ("Esc", "menu")]
+        if self.placing():
+            placed = bool(self.v["mine"])
+            undo = [("u", "undo", "undo"), ("z", "reset", "reset")] if placed else []
+            if not self.v["next"]:
+                keys = self.keys(None, "ready", undo)
+            elif self.pick:
+                keys = self.keys("point", "place", undo + [("g", "random", "random")], cancel=True)
+            else:
+                keys = self.keys("move", "pick", undo + [("g", "random", "random")])
+        elif self.my_turn():
+            keys = self.keys("aim", "fire")
         else:
-            keys = [("T", "talk"), ("?", "help"), ("Esc", "menu")]
-        status_bar(cv, keys)
+            keys = self.keys()
+        self.keys_line(cv, keys)
         return cv
 
     def draw_grids(self, cv):
@@ -565,84 +600,54 @@ class AnsiNaval(NavalBase, AnsiGame):
         v = self.v
         if v["next"]:
             k = len(v["mine"])
-            cv.put(1, 19, ("Ship %d of %d: %d square%s, %s" % (k + 1, len(v["fleet"]), v["next"],
-                                                              "" if v["next"] == 1 else "s",
-                                                              "across" if self.across else "down"))[:50], A_YELLOW)
-            cv.put(1, 20, "Enter place  %s turn  %s random  U undo  C clear" % (self.kn("D"), self.kn("A")), A_DIM)
+            line = "Ship %d of %d is %d square%s long." % (k + 1, len(v["fleet"]), v["next"],
+                                                          "" if v["next"] == 1 else "s")
+            if self.pick:
+                line += " The %s squares show where it goes." % self.nc["p"].strip()
+            cv.put(1, 20, line[:COLS - 2], A_YELLOW)
         else:
-            cv.put(1, 19, "Fleet placed.", A_YELLOW)
-            cv.put(1, 20, "Enter ready  U undo  C clear  %s a new fleet" % self.kn("A"), A_DIM)
+            cv.put(1, 20, "Your fleet is placed.", A_YELLOW)
 
     def draw_panel(self, cv):
-        g, v = self.g, self.v
-        inner = PW - 4
-        box(cv, g, PX, 1, PW, 20, A_BORDER, "Players", tattr=A_HEAD)
+        v = self.v
         started = bool(v and v["rows"])
+        players = []
         for i in (0, 1):
-            y = 2 + 2 * i
-            tomove = started and self.playing() and v["turn"] == i and v["phase"] != "over"
-            empty = i >= len(self.names) or self.names[i] == "-"
-            cv.put(PX + 2, y, g["ptr"] if tomove else " ", A_YELLOW)
-            label = ("(empty seat)" if empty else self.names[i]) + (" (you)" if i == self.me else "")
-            cv.put(PX + 4, y, label[:inner - 2], A_BRIGHT if tomove else A_DIM if empty else A_TEXT)
-            if started:
-                if v["phase"] == "place":
-                    state = "fleet ready" if v["ready"][i] else "placing ships"
-                else:
-                    state = "%d of %d afloat" % (len(afloat_sizes(v, i)), len(v["fleet"]))
-                cv.put(PX + 4, y + 1, state[:inner - 2], A_DIM)
-        rule(cv, g, PX, 6, PW, A_BORDER)
-        if not started:
-            turn, tattr = "Waiting for an opponent", A_YELLOW
-        elif self.over:
-            turn, tattr = self.over, A_YELLOW
-        elif self.placing():
-            turn, tattr = "Place your fleet", A_YELLOW
-        elif v["phase"] == "place":
-            turn, tattr = "Fleets being placed", A_TEXT
-        elif self.my_turn():
-            turn, tattr = shot_word(v), A_YELLOW
-        else:
-            turn, tattr = "%s to shoot" % self.name(v["turn"]), A_TEXT
-        cv.put(PX + 2, 7, turn[:inner], tattr)
-        c = self.clock()
-        if c:
-            seat, left, limit = c
-            urgent = seat == self.me and left < 60
-            cv.put(PX + 2, 8, ("Clock %s of %s" % (fmt_secs(left), turn_text(limit)))[:inner],
-                   A_RED if urgent else A_TEXT)
-        elif self.turn_secs and not self.over:
-            cv.put(PX + 2, 8, ("Per turn: %s" % turn_text(self.turn_secs))[:inner], A_DIM)
-        if started and v["last"]:
-            cv.put(PX + 2, 9, ("Last shot: %s %s" % (v["last"][1], shot_result(v, v["last"])))[:inner], A_TEXT)
-        rule(cv, g, PX, 10, PW, A_BORDER, "Log", tattr=A_HEAD)
-        self.draw_log(cv, PX + 2, inner)
+            if not started:
+                state = ""
+            elif v["phase"] == "place":
+                state = "ready" if v["ready"][i] else "placing"
+            else:
+                state = "%d afloat" % len(afloat_sizes(v, i))
+            players.append((i, None, state))
+        self.draw_panel_parts(cv, PX, 1, PW, players)
 
     def hint(self):
         v = self.v
         if not (v and v["rows"]):
-            return ("Table %s starts when someone joins: telnet or the web (port 6500)." % self.tid, A_DIM)
+            return self.waiting_hint()
         if self.over:
-            return "%s. Esc goes back to the menu." % self.over, A_YELLOW
+            return self.over_hint()
         if self.me < 0:
-            return "Watching. Ships show only once sunk. T talks, Esc goes back to the menu.", A_DIM
+            return self.watch_hint()
         if self.placing():
             if not v["next"]:
-                return ("Fleet placed. Enter: ready to fight (U undo, C clear, %s a new random fleet)."
-                        % self.kn("A"), A_TEXT)
-            where = "%s %s" % (sq(*self.cur), "across" if self.across else "down")
-            if self.preview():
-                return "%s: Enter places the %d-square ship here (%s turns it)." % (where, v["next"], self.kn("D")), \
-                    A_TEXT
-            return ("The %d-square ship does not fit at %s; %s turns it, %s places the rest." % (
-                v["next"], where, self.kn("D"), self.kn("A")), A_DIM)
+                return "Your fleet is placed. Press Enter when you are ready, or U to undo.", A_TEXT
+            if self.pick:
+                where = "Ship %d starts at %s." % (len(v["mine"]) + 1, sq(*self.pick))
+                if self.preview():
+                    return where + " Press Right or Down to point it, then Enter to place it.", A_TEXT
+                return where + " It doesn't fit %s, so press %s." % (
+                    "across" if self.across else "down", "Down" if self.across else "Right"), A_DIM
+            return "Place your %d-square ship. Press Enter where it starts, or G for random." % v["next"], A_TEXT
         if v["phase"] == "place":
-            return "Your fleet is ready. Waiting for %s's fleet." % self.name(1 - self.me), A_DIM
+            return "Your fleet is ready. Waiting for %s to place a fleet." % self.who(self.name(1 - self.me)), A_DIM
         if self.my_turn():
             if sq(*self.cur) in v["moves"]:
-                return "%s. %s: Enter fires here." % (shot_word(v), sq(*self.cur)), A_TEXT
-            return "%s. You have fired at %s already; pick another square." % (shot_word(v), sq(*self.cur)), A_DIM
-        return "Waiting for %s's shot. Leaving or logging off never resigns." % self.name(v["turn"]), A_DIM
+                return "Your shot. Pick a square on %s's grid and press Enter to fire." % self.who(
+                    self.name(1 - self.me)), A_TEXT
+            return "Your shot. You fired at %s already, so pick another square." % sq(*self.cur), A_DIM
+        return self.their_hint(v["turn"])
 
     def cursor_at(self):
         side = self.side()
@@ -653,14 +658,28 @@ class AnsiNaval(NavalBase, AnsiGame):
 
     # ---- keys --------------------------------------------------------------
     def on_arrow(self, k):
+        if self.pick and self.placing():        # a start is picked: Right and Down point the ship
+            if k in ("RIGHT", "DOWN"):
+                self.across = k == "RIGHT"
+            return None
         if self.v and self.v["rows"]:
             n = self.v["n"]
             dx, dy = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}[k]
             self.cur = ((self.cur[0] + dx) % n, (self.cur[1] + dy) % n)
+        return None
+
+    def on_escape(self):
+        if self.pick:
+            self.pick = None
+            return None
+        return "menu"
 
     async def on_click(self, value):
         if value[0] == "sq" and value[1] == self.side():
             self.cur = (value[2], value[3])
+            if self.placing() and self.pick and self.cur != self.pick:     # a click on the other end points it
+                if self.cur[1] == self.pick[1] or self.cur[0] == self.pick[0]:
+                    self.across = self.cur[1] == self.pick[1]
             return await self.act()
         return None
 
@@ -669,23 +688,27 @@ class AnsiNaval(NavalBase, AnsiGame):
 
     async def act(self):
         """Enter, Space or a click: place the ship, say ready, or fire."""
-        if self.me < 0:
-            return self.say("You are watching this table.")
-        if not self.playing():
-            return self.say(self.over or "The game has not started yet.")
+        if self.me < 0 or not self.playing():
+            return self.say(self.not_yours())
         v = self.v
         if self.placing():
             if not v["next"]:
                 return await self.play("ready")
-            t = token_at(self.cur[0], self.cur[1], self.across, v["next"], v["n"])
+            if not self.pick:
+                self.pick, self.across = self.cur, True
+                if not self.preview():
+                    self.across = False
+                return None
+            t = token_at(self.pick[0], self.pick[1], self.across, v["next"], v["n"])
             if not t or t not in v["moves"]:
-                return self.say("The %d-square ship does not fit there %s." % (
+                return self.say("The %d-square ship doesn't fit there %s." % (
                     v["next"], "across" if self.across else "down"), A_RED)
+            self.pick = None
             return await self.play(t)
         if v["phase"] == "place":
-            return self.say("Waiting for %s to place their fleet." % self.name(1 - self.me))
+            return self.say("Waiting for %s to place a fleet." % self.who(self.name(1 - self.me)))
         if not self.my_turn():
-            return self.say("It is %s's shot." % self.name(v["turn"]))
+            return self.say(self.not_yours())
         return await self.play(sq(*self.cur))
 
     async def play(self, token):
@@ -695,15 +718,13 @@ class AnsiNaval(NavalBase, AnsiGame):
         self.snap()
 
     async def hotkey(self, k):
-        if k in "dauc":
+        if k in "guz":
             if not self.placing():
-                return self.say("That key is for placing your fleet.")
-            if k == "d":
-                self.across = not self.across
-                return None
-            word = {"a": "random", "u": "undo", "c": "clear"}[k]
+                return self.say("%s works only while you place your fleet." % k.upper())
+            word = {"g": "random", "u": "undo", "z": "clear"}[k]
             if word not in self.v["moves"]:
-                return self.say("No ship placed yet.")
+                return self.say("You haven't placed a ship yet." if k != "g" else "Your fleet is placed already.")
+            self.pick = None
             return await self.play(word)
         return await super().hotkey(k)
 
@@ -712,78 +733,46 @@ class PlainNaval(NavalBase, PlainGame):
     """Naval Combat for plain terminals: the two grids printed side by side, typed moves at a prompt."""
 
     BOARD_KINDS = ("SHOT", "READY", "JOIN", "LEAVE", "START", "END")
-    HELP_TEXT = (" Placing: a1 across or a1 down puts the next ship there (a1-e1 works too);\n"
-                 " random places the rest, undo takes back the last ship, clear removes all,\n"
-                 " ready starts the battle once every ship is placed.\n"
-                 " Shooting: a square like e5 fires there. say <text> talks to the table.\n"
-                 " resign gives up (it asks first). menu goes back to the menu; the game\n"
-                 " goes on and leaving never resigns. redraw or Enter shows the grids again.")
 
     def lines(self):
         v, me = self.v, self.me
-        you = "you are watching" if me < 0 else "your fleet is on the left"
-        out = ["", "== Naval Combat, table %s: %s ==" % (self.tid, you)]
+        out = [""] + self.plain_header()
         if not v["rows"]:
-            return out + ["", "Waiting for an opponent.",
-                          "The game starts when someone joins table %s from telnet or the web" % self.tid,
-                          "(port 6500). Type menu to go back; the table stays open."]
+            return out + self.plain_waiting()
         gl = nc_glyphs("plain")
         n = v["n"]
         left, right = sides(me)
-        heads = []
-        for side, seat in ((0, left), (1, right)):
-            heads.append(("Your fleet" if side == 0 else "Enemy: %s" % self.name(seat)) if me >= 0
-                         else "%s's fleet" % self.name(seat))
-        side = {}
-        for i in (0, 1):
-            mark = ">" if self.playing() and v["turn"] == i else " "
-            side[2 * i] = "%s %s%s" % (mark, self.name(i), " (you)" if i == me else "")
-            if v["phase"] == "place":
-                side[2 * i + 1] = "  fleet ready" if v["ready"][i] else "  placing ships"
-            else:
-                side[2 * i + 1] = "  %d of %d afloat" % (len(afloat_sizes(v, i)), len(v["fleet"]))
-        if self.over:
-            side[5] = self.over
-        elif self.placing():
-            side[5] = ("Next: the %d-square ship" % v["next"]) if v["next"] else "Fleet placed: type ready"
-        elif v["phase"] == "place":
-            side[5] = "Fleets being placed."
-        elif self.my_turn():
-            side[5] = shot_word(v) + "."
-        else:
-            side[5] = "%s to shoot." % self.name(v["turn"])
-        if v["last"]:
-            side[6] = "Last shot: %s %s" % (v["last"][1], shot_result(v, v["last"]))
-        side[8] = "Type help for commands."
-        out.append("    %-22s    %s" % (heads[0][:22], heads[1][:22]))
+        heads = [("Your fleet" if side == 0 else "%s's fleet" % self.who(self.name(seat))) if me >= 0
+                 else "%s's fleet" % self.who(self.name(seat)) for side, seat in ((0, left), (1, right))]
+        board = ["    %-22s    %s" % (heads[0][:22], heads[1][:22])]
         letters = "    " + "".join(" %s" % chr(97 + i) for i in range(n)) + "  "
-        out.append(letters + "  " + letters.rstrip())
+        board.append(letters + "  " + letters.rstrip())
         frame = "   +" + "-" * (2 * n + 1) + "+"
-        out.append(frame + "  " + frame)
+        board.append(frame + "  " + frame)
         for y in range(n):
             cells = ["".join(gl.get(c, " .") for c in v["boards"][seat][y]) for seat in (left, right)]
-            line = "%2d |%s |  %2d |%s |" % (y + 1, cells[0], y + 1, cells[1])
-            out.append((line + "  " + side.get(y, "")[:24]).rstrip())
-        out.append(frame + "  " + frame)
+            board.append("%2d |%s |  %2d |%s |" % (y + 1, cells[0], y + 1, cells[1]))
+        board.append(frame + "  " + frame)
+        players = [(i, None, ("ready" if v["ready"][i] else "placing") if v["phase"] == "place" else
+                    "%d afloat" % len(afloat_sizes(v, i))) for i in (0, 1)]
+        out += self.beside(board, self.side_text(players, width=25), 54)
         stats = [shot_counts(v, seat) for seat in (left, right)]
-        out.append(("   Hits %-2d misses %-2d" % stats[0]).ljust(31) + "Hits %-2d misses %d" % stats[1])
-        afl = ["Afloat: " + (" ".join(str(s) for s in afloat_sizes(v, seat)) or "none") for seat in (left, right)]
-        out.append(("   " + afl[0]).ljust(31) + afl[1])
-        out.append(" Key: . sea  o miss  X hit  # sunk%s" % ("  [] your ship" if me >= 0 else ""))
-        if not self.over:
-            out.append(" " + clock_text(v, self.names)[:78])
-        for l in self.log[-4:]:
-            out.append(" " + l[:78])
-        return out
+        out.append(("   %d hits and %d misses." % stats[0]).ljust(31) + "%d hits and %d misses." % stats[1])
+        out.append(" %s is sea, %s a miss, %s a hit and %s a sunk ship.%s" % (
+            gl["."].strip(), gl["o"].strip(), gl["x"].strip(), gl["#"].strip(),
+            " %s is your ship." % gl["s"].strip() if me >= 0 else ""))
+        return out + self.plain_log()
+
+    def turn_prompt(self):
+        if self.placing():
+            if self.v["next"]:
+                return "Place your %d-square ship. Type /a1 across or /a1 down, or /random." % self.v["next"]
+            return "Your fleet is placed. Type /ready, or /undo."
+        return "Your shot. Type a square such as /%s." % next((m for m in self.v["moves"] if SQ_RE.match(m)), "e5")
 
     def prompt(self):
         if self.placing():
-            if self.v["next"]:
-                return "Place the %d-square ship (like a1 across, a1 down, random) > " % self.v["next"]
-            return "Type ready (or undo, clear, random) > "
-        if self.my_turn():
-            return "Your shot (like %s) > " % next((m for m in self.v["moves"] if SQ_RE.match(m)), "e5")
-        return "> "
-
+            return self.turn_prompt() + " > "
+        return super().prompt()
 
 AnsiScreen, PlainScreen = AnsiNaval, PlainNaval

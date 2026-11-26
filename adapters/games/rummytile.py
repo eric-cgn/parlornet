@@ -8,12 +8,12 @@ Colors are never the only difference: every tile shows its color letter
 (R red, B blue, K black, Y yellow) and number, and the joker shows J.
 """
 import re
+import textwrap
 
 from ..common import err_text
-from ..telnet import (A_AXIS, A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_SEL, A_TEXT, A_YELLOW, COLS, ROWS,
-                      AnsiGame, Canvas, GameBase, PlainGame, clock_text, fmt_secs, rule, status_bar, title_bar,
-                      turn_text, wrap)
-from ..telnet import box, describe_event as describe_common
+from ..telnet import (A_AXIS, A_BORDER, A_DIM, A_HEAD, A_RED, A_SEL, A_TEXT, A_YELLOW, AnsiGame, COLS, Canvas,
+                      GameBase, PlainGame, ROWS, and_list, err_text, or_list, rule, sentence, title_bar)
+from ..telnet import describe_event as describe_common
 from ..web import a, esc, hidden_fields
 
 # ---- what the game is ------------------------------------------------------------
@@ -365,23 +365,8 @@ TABLE_TOP, TABLE_ROWS = 2, 13
 RACK_TOP, RACK_ROWS, RACK_PER_ROW = 16, 4, 14
 PX, PW = 57, 22
 FG = {"R": "31", "B": "34", "K": "30", "Y": "33", "J": "35"}
-HELP = [
-    "Arrows  move over the table and your rack",
-    "Enter   on rack tiles: pick them (several);",
-    "        on a set: put what you picked there;",
-    "        on a table tile: pick it up to move it",
-    "N new set    S split before the cursor tile",
-    "D back to the rack (a tile played this turn)",
-    "U undo a step   Z start over   C check",
-    "E end the turn (nothing played: draw a tile)",
-    "O sort the rack by color or by number",
-    "Typed: R7-3, R7B7K7-n, 3.2-5, 3.R7-n, 3-5, 3/4,",
-    "3.2-r, undo, end, check, reset, say <text>.",
-    "Set marks: ':' valid, '*' changed, '!' not",
-    "valid. T talks, R resigns, Esc: menu.",
-]
-WORDS = {"undo": "undo", "und": "undo", "end": "end", "done": "end", "draw": "end", "pass": "end",
-         "check": "check", "chk": "check", "reset": "reset", "over": "reset"}
+# "draw" is not here: it means a drawn game. "pass" ends the turn only when nothing is played (the server asks).
+WORDS = {"undo": "undo", "end": "end", "pass": "pass", "check": "check", "reset": "reset"}
 TOKEN_RE = re.compile(r"^(?:%s{1,13}-(?:[0-9]{1,2}|n)|[0-9]{1,2}\.(?:[0-9]{1,2}|%s)-(?:[0-9]{1,2}|n|r)"
                       r"|[0-9]{1,2}-[0-9]{1,2}|[0-9]{1,2}/[0-9]{1,2})\Z" % (TILE, TILE), re.I)
 
@@ -419,7 +404,35 @@ def tile_attr(t, bg=None, mode="pc"):
 class RtBase(GameBase):
     """What both Rummy Tile Classic screens share: the view, the events, typed steps and words."""
 
+    HELP_MOVING = ["The arrows move over the sets and your rack. Enter picks rack tiles,",
+                   "and Enter on a set puts them there. Enter on a table tile picks it",
+                   "up, and Enter on your rack takes it back. Esc drops what you picked."]
+    HELP_KEYS = ["M makes a new set, and B splits a set before the cursor's tile.",
+                 "U takes back a step, Z starts the turn over and C checks the turn.",
+                 "E ends the turn, P passes with nothing played and O sorts the rack."]
+    HELP_COMMANDS = ["Press / to type one. /R7-3 puts R7 into set 3. /split, /undo,",
+                     "/reset, /check, /end, /pass and /sort do what their keys do."]
+    HELP_REFERENCE = ["Steps",
+                      "R7-3 puts R7 into set 3, and R7B7K7-n makes a new set. 3.2-5 moves",
+                      "tile 2 of set 3 to set 5, and 3-5 joins set 3 onto set 5. 3/4",
+                      "splits set 3 before its tile 4, and 3.2-r takes a tile back.",
+                      "",
+                      "The sets",
+                      "A : after a set's number means the set is sound, * means it changed",
+                      "this turn and ! means it isn't valid yet.",
+                      "",
+                      "The first meld",
+                      "Your first turn that counts must lay sets worth 30 points."]
+
     BACKLOG = 16
+    GAME = NAME
+    MOVE_EXAMPLE = "/R7-3"
+    COMMANDS = {"split": "/split breaks the set in two before the tile under the cursor.",
+                "undo": "/undo takes back your last step.", "reset": "/reset starts your turn over.",
+                "check": "/check tells you whether your turn would count as it stands.",
+                "end": "/end ends your turn, and with nothing played you take a tile.",
+                "pass": "/pass ends your turn without playing, and you take a tile.",
+                "sort": "/sort shows your rack by color or by number."}
     parse = staticmethod(parse_view)
 
     def __init__(self, sess, tid, key, me):
@@ -454,16 +467,12 @@ class RtBase(GameBase):
         """CHK the turn as it stands -> (text, ok?)."""
         _, final = await self.core.req("CHK %s !end" % self.tid)
         if final.startswith("OK"):
-            return "Ready: END plays this turn (%s)." % (final[3:].strip() or "ok"), True
-        return "END now would undo the turn and draw a tile: %s." % err_text(final), False
+            return "Your turn counts as it stands.", True
+        return "Your turn doesn't count yet. %s" % sentence(err_text(final)), False
 
     async def play_word(self, word):
-        if self.me < 0:
-            return "You are watching this table."
-        if not self.playing():
-            return self.over or "The game has not started yet."
         if not self.my_turn():
-            return "It is %s's turn." % self.name(self.v["turn"])
+            return self.not_yours()
         if word == "undo":
             return await self.staged("UND", "take that back")
         if word == "end":
@@ -472,28 +481,42 @@ class RtBase(GameBase):
             return (await self.check())[0]
         return await self.move(word)
 
-    def seat_label(self, i):
-        empty = i >= len(self.names) or self.names[i] == "-"
-        return "(empty seat)" if empty else self.names[i], empty
+    def last_move(self, text):
+        p = text.split()
+        k = p[0]
+        if k == "DONE" and len(p) == 3:
+            return "%s played %s tile%s." % (self.actor(p[1]), p[2], "" if p[2] == "1" else "s")
+        if k in ("DRAW", "UNDONE") and len(p) == 3 and (k == "DRAW" or p[2] != "none"):
+            return "%s ended the turn and took a tile." % self.actor(p[1])
+        if k == "PASS" and len(p) == 2:
+            return "%s passed, because the pool is empty." % self.actor(p[1])
+        return None
 
-    def state_text(self):
+    def info_words(self):
+        """Row 20 on your turn: what the turn would do if it ended now, as sentences (docs/design.md)."""
         v = self.v
-        if not v["rows"]:
-            return "Waiting for an opponent", A_YELLOW
-        if self.over or v["over"]:
-            return self.over or "Game over", A_YELLOW
-        if self.my_turn():
-            return "Your turn", A_YELLOW
-        return "%s to play" % self.name(v["turn"]), A_TEXT
-
+        if not v["played"]:
+            return "", False
+        n, pts, code = v["played"]
+        tiles = "You played %d tile%s" % (n, "" if n == 1 else "s")
+        meld = "" if pts is None else ", worth %d of the 30 points a first meld needs" % pts
+        if code == "ok":
+            return "%s%s, and the turn counts." % (tiles, meld), True
+        if code == "none":
+            return "You have played nothing yet. Ending the turn takes a tile.", False
+        if code == "sets":
+            bad = [str(i + 1) for i, s in enumerate(v["sets"]) if s["kind"] == "x"]
+            return "%s%s. Set %s is not valid yet." % (tiles, meld, or_list(bad[:4])), False
+        if code == "meld":
+            return "%s%s. The first meld needs 30 points." % (tiles, meld), False
+        return "%s. A joker you take needs its tile from your rack." % tiles, False
 
 class AnsiRummy(RtBase, AnsiGame):
     """Rummy Tile Classic, full screen: the table's sets and your rack on the left (a cursor over the
     tiles, picks marked), the players, pool, clock and log on the right."""
 
-    HOTKEYS = "nsduezcort?"
+    HOTKEYS = "mbuzcepoert?"
     LOG_TOP, LOG_ROWS = 11, 9
-    TITLE, HELP = "Rummy Tile Classic", HELP
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
@@ -583,27 +606,26 @@ class AnsiRummy(RtBase, AnsiGame):
     def compose(self):
         cv = Canvas()
         g, v = self.g, self.v
-        if self.me < 0:
-            right = "watching"
-        else:
-            right = "you: %s" % self.name(self.me)
-        title_bar(cv, g, "Rummy Tile Classic %s table %s" % (g["v"], self.tid), right)
+        title_bar(cv, g, self.title_text())
         self.draw_table(cv)
         self.draw_panel(cv)
-        text, attr = (self.msg, self.msg_attr) if self.msg else self.hint()
+        text, attr = self.sentence(self.hint)
         cv.put(1, ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
-        tail = [("T", "talk"), ("?", "help"), ("Esc", "menu")]
-        if self.buf:
-            keys = [("Enter", "send"), ("Esc", "cancel"), ("Backspace", "erase")]
-        elif self.my_turn():
-            keys = [("Enter", "pick/put"), ("N", "new set"), ("S", "split"), ("U", "undo"), ("E", "end"),
-                    ("C", "check")] + tail
+        if self.my_turn():
+            picked = bool(self.picks or self.tpick)
+            acts = [("e", "end turn", "end")]
+            acts += [("u", "undo", "undo"), ("z", "reset", "reset")] if self.code() != "none" else []
+            acts += [("m", "new set", "new set")] if picked else []
+            acts += [("b", "split", "split")] if self.cur[0] == "tile" else []
+            acts += [("c", "check", "check"), ("o", "sort", "sort")]
+            acts += [("p", "pass", "pass")] if self.code() == "none" else []
+            keys = self.keys("move", "put" if picked and self.cur[0] != "rack" else "pick", acts, cancel=picked)
         elif self.me >= 0 and self.playing():
-            keys = [("Arrows", "look"), ("O", "sort")] + tail
+            keys = self.keys("look", None, [("o", "sort", "sort")])
         else:
-            keys = tail
-        status_bar(cv, keys)
+            keys = self.keys()
+        self.keys_line(cv, keys)
         return cv
 
     def draw_tile(self, cv, x, y, t, key):
@@ -668,83 +690,70 @@ class AnsiRummy(RtBase, AnsiGame):
             rule(cv, g, 0, RACK_TOP - 1, LEFT_W + 2, A_BORDER, "Racks", tattr=A_HEAD)
             cv.put(2, RACK_TOP, "Watching: every rack is hidden.", A_DIM)
         info, ok = self.info_line()
-        cv.put(1, 20, info[:LEFT_W], A_YELLOW if ok else A_DIM)
+        cv.put(1, 20, info[:COLS - 2], A_YELLOW if ok else A_DIM)
 
     def info_line(self):
         v = self.v
         if self.over or v["over"]:
             return "", False
         if self.my_turn():
-            return turn_info(v)
+            return self.info_words()
         if v["played"] and v["played"][0]:
             n = v["played"][0]
-            return "%s has played %d tile%s so far this turn." % (self.name(v["turn"]), n, "" if n == 1 else "s"), False
+            return "%s has played %d tile%s so far this turn." % (self.who(self.name(v["turn"])), n,
+                                                                  "" if n == 1 else "s"), False
         return "", False
 
     def draw_panel(self, cv):
-        g, v = self.g, self.v
-        inner = PW - 4
-        box(cv, g, PX, 1, PW, 20, A_BORDER, "Players", tattr=A_HEAD)
+        v = self.v
         n = len(v["counts"]) if v["rows"] else max(2, len(self.names))
+        players = []
         for i in range(min(n, 4)):
-            y = 2 + i
-            tomove = self.playing() and v["turn"] == i
-            label, empty = self.seat_label(i)
-            cv.put(PX + 2, y, g["ptr"] if tomove else " ", A_YELLOW)
-            attr = A_BRIGHT if tomove or i == self.me else A_DIM if empty else A_TEXT
-            cv.put(PX + 3, y, label[:12], attr)
-            if v["rows"] and i < len(v["counts"]):
-                if v["over"]:
-                    cv.put(PX + 15, y, ("%+d" % v["scores"].get(i, 0)).rjust(5)[-5:], A_BRIGHT)
-                elif i < len(v["gone"]) and v["gone"][i]:
-                    cv.put(PX + 15, y, "left", A_DIM)
-                else:
-                    cv.put(PX + 16, y, "%2d" % v["counts"][i], attr)
-                    if i < len(v["melded"]) and v["melded"][i]:
-                        cv.put(PX + 18, y, self.tg["meld"], A_AXIS)
-        rule(cv, g, PX, 6, PW, A_BORDER)
-        if v["rows"]:
-            cv.put(PX + 2, 7, ("Pool: %d tile%s" % (v["pool"], "" if v["pool"] == 1 else "s"))[:inner], A_TEXT)
-        text, attr = self.state_text()
-        cv.put(PX + 2, 8, text[:inner], attr)
-        c = self.clock()
-        if c:
-            seat, left, limit = c
-            urgent = seat == self.me and left < 60
-            cv.put(PX + 2, 9, ("Clock: %s left" % fmt_secs(left))[:inner], A_RED if urgent else A_TEXT)
-        elif self.turn_secs and not self.over:
-            cv.put(PX + 2, 9, ("Turn: %s" % turn_text(self.turn_secs))[:inner], A_DIM)
-        rule(cv, g, PX, 10, PW, A_BORDER, "Log", tattr=A_HEAD)
-        self.draw_log(cv, PX + 2, inner)
+            if not v["rows"] or i >= len(v["counts"]):
+                score = ""
+            elif v["over"]:
+                score = "%+d" % v["scores"].get(i, 0)
+            elif i < len(v["gone"]) and v["gone"][i]:
+                score = "left"
+            else:
+                score = "%d%s" % (v["counts"][i], self.tg["meld"] if i < len(v["melded"]) and v["melded"][i] else " ")
+            players.append((i, None, score))
+        facts = ["The pool holds %d tile%s." % (v["pool"], "" if v["pool"] == 1 else "s")] if v["rows"] else []
+        self.draw_panel_parts(cv, PX, 1, PW, players, facts)
 
     def hint(self):
         v = self.v
         if not v["rows"]:
-            return ("Table %s starts when the seats are filled: telnet, the web (port 6500) or another client."
-                    % self.tid, A_DIM)
+            return self.waiting_hint()
         if self.over or v["over"]:
-            return "%s. Esc goes back to the menu." % (self.over or "Game over"), A_YELLOW
+            return self.over_hint()
         if self.me < 0:
-            return "Watching. T talks to the table, Esc goes back to the menu.", A_DIM
+            return self.watch_hint()
         if not self.my_turn():
-            return "Waiting for %s. You can look around; O sorts your rack." % self.name(v["turn"]), A_DIM
+            return self.their_hint(v["turn"])
         if self.picks:
-            tiles = " ".join(self.rack()[i] for i in self.picks)
-            return "Picked %s: Enter on a set puts them there, N makes a new set, Esc drops." % tiles, A_TEXT
+            tiles = and_list([self.rack()[i] for i in self.picks])
+            return "You picked %s. Press Enter on a set, or M to make a new set." % tiles, A_TEXT
         if self.tpick and self.tpick[0] == "tile":
             k, p = self.tpick[1], self.tpick[2]
-            return ("Picked tile %d of set %d: Enter on another set moves it, N new set, %s back."
-                    % (p, k, self.kn("D")), A_TEXT)
+            tile = v["sets"][k - 1]["tiles"][p - 1] if k <= len(v["sets"]) and p <= len(v["sets"][k - 1]["tiles"]) \
+                else "a tile"
+            return "You picked %s from set %d. Press Enter on another set, or on your rack to take it back." % (
+                tile, k), A_TEXT
         if self.tpick:
-            return "Picked set %d: Enter on another set joins it there. Esc drops it." % self.tpick[1], A_TEXT
+            return "You picked set %d. Press Enter on another set to join it there." % self.tpick[1], A_TEXT
         key = self.cur
+        if key[0] == "rack" and self.code() == "none":
+            return ("Your turn. Pick tiles with Enter, or %s to end your turn and take a tile."
+                    % self.kp("e", "end"), A_TEXT)
         if key[0] == "rack":
-            return "Enter picks this tile (pick several for a new set), then go to a set.", A_TEXT
+            return "Your turn. Press Enter to pick %s, or %s to end your turn." % (
+                self.rack()[key[1]], self.kn("e", "end")), A_TEXT
         if key[0] == "tile":
-            return "Enter picks up this tile; %s splits the set before it." % self.kn("S"), A_TEXT
+            return "Your turn. Press Enter to pick up this tile, or B to split the set before it.", A_TEXT
         if key[0] == "set":
-            return "Enter picks up the whole set, to join it onto another.", A_TEXT
-        return "Pick tiles first, then Enter here (or N) makes them a new set.", A_TEXT
+            return "Your turn. Press Enter to pick up set %d and join it to another." % key[1], A_TEXT
+        return "Pick tiles first, then press Enter here to make a new set.", A_TEXT
 
     def cursor_at(self):
         if not (self.me >= 0 and self.playing()):
@@ -794,15 +803,10 @@ class AnsiRummy(RtBase, AnsiGame):
         return await self.act()
 
     def ready(self):
-        if self.me < 0:
-            self.say("You are watching this table.")
-        elif not self.playing():
-            self.say(self.over or "The game has not started yet.")
-        elif not self.my_turn():
-            self.say("It is %s's turn. Arrows look around." % self.name(self.v["turn"]))
-        else:
-            return True
-        return False
+        if not self.my_turn():
+            self.say(self.not_yours())
+            return False
+        return True
 
     def target(self, k):
         """The step that puts what is picked into set k (0 for a new set), or None."""
@@ -824,6 +828,8 @@ class AnsiRummy(RtBase, AnsiGame):
         if not self.ready():
             return None
         key = self.cur
+        if key[0] == "rack" and self.tpick and self.tpick[0] == "tile":     # a table tile back to the rack
+            return await self.step("%d.%d-r" % self.tpick[1:])
         if key[0] == "rack":
             self.tpick = None
             if key[1] in self.picks:
@@ -847,8 +853,8 @@ class AnsiRummy(RtBase, AnsiGame):
         step = self.target(0)
         if not step:
             if self.tpick:
-                return self.say("A whole set is a set already: pick tiles to make a new one.")
-            return self.say("Pick tiles on your rack (or a table tile) first, then N or Enter on [new].")
+                return self.say("A whole set is a set already, so pick tiles to make a new one.")
+            return self.say("Pick tiles on your rack or a tile on the table first, then press M.")
         return await self.step(step)
 
     async def step(self, word):
@@ -858,11 +864,14 @@ class AnsiRummy(RtBase, AnsiGame):
             self.say(err, A_RED)
         self.snap()
 
-    async def typed_move(self, word):
+    def typed_reset(self):
         self.picks, self.tpick = [], None
-        if word == "check":
-            return await self.hotkey("c")
-        await self.step(word)
+
+    async def game_command(self, cmd, args):
+        if cmd in ("sort", "split") and not args:
+            await self.hotkey("o" if cmd == "sort" else "b")
+            return True
+        return False
 
     async def hotkey(self, k):
         if k in ("r", "t", "?"):
@@ -873,20 +882,18 @@ class AnsiRummy(RtBase, AnsiGame):
             return self.say("Your rack is shown by %s." % ("number" if self.by_number else "color"))
         if not self.ready():
             return None
-        if k == "n":
+        if k == "m":
             return await self.new_set()
-        if k == "s":
+        if k in ("p", "e"):                  # the server asks first where the turn would pass or not count
+            self.picks, self.tpick = [], None
+            return await self.shared("pass" if k == "p" else "end")
+        if k == "b":
             key = self.tpick if self.tpick and self.tpick[0] == "tile" else self.cur
             if key[0] != "tile":
-                return self.say("Put the cursor on a table tile: %s splits its set before it." % self.kn("S"))
+                return self.say("Put the cursor on a tile on the table, and B splits its set before it.")
             if key[2] < 2:
-                return self.say("That is the first tile of set %d: split before a later one." % key[1])
+                return self.say("That is the first tile of set %d, so split before a later one." % key[1])
             return await self.step("%d/%d" % (key[1], key[2]))
-        if k == "d":
-            key = self.tpick if self.tpick and self.tpick[0] == "tile" else self.cur
-            if key[0] != "tile":
-                return self.say("Put the cursor on a tile you played this turn: %s takes it back." % self.kn("D"))
-            return await self.step("%d.%d-r" % (key[1], key[2]))
         if k == "u":
             return await self.step("undo")
         if k == "z":
@@ -894,14 +901,6 @@ class AnsiRummy(RtBase, AnsiGame):
         if k == "c":
             text, ok = await self.check()
             return self.say(text, A_YELLOW if ok else A_RED)
-        if k == "e":
-            code = self.code()
-            if code not in ("ok", "none"):
-                if not await self.confirm("End the turn", ["The table is not ready (%s)." % REASON_TEXT[code][:30],
-                                                           "Ending now undoes the turn and you draw a",
-                                                           "tile. End anyway?"]):
-                    return None
-            return await self.step("end")
         return None
 
 
@@ -910,31 +909,23 @@ class PlainRummy(RtBase, PlainGame):
 
     BOARD_KINDS = ("PUT", "MOVE", "BACK", "MERGE", "SPLIT", "RESET", "UNDO", "UNDONE", "DONE", "DRAW", "PASS",
                    "TURN", "JOIN", "LEAVE", "START", "END")
-    HELP_TEXT = (" Steps (several on one line make one step):\n"
-                 "  R7-3 puts R7 from your rack into set 3; R7B7K7-n makes a new set.\n"
-                 "  3.2-5 moves tile 2 of set 3 to set 5 (3.R7-5 names it); 3.2-n a new set.\n"
-                 "  3-5 joins set 3 onto set 5; 3/4 splits set 3 before its tile 4.\n"
-                 "  3.2-r takes a tile you played this turn back to your rack.\n"
-                 " undo takes back a step, reset starts the turn over, check says whether\n"
-                 " end would play your turn; end finishes it (nothing played: you draw).\n"
-                 " Set marks: ':' valid, '*' changed this turn, '!' not valid.\n"
-                 " sort shows your rack by number or color. say <text>, resign, menu.")
 
-    async def command(self, line):
-        if line.strip().lower() == "sort":
+    async def game_command(self, cmd, args):
+        if cmd == "sort":
             self.by_number = not self.by_number
-            return await self.draw()
-        return await super().command(line)
+            await self.draw()
+            return True
+        if cmd == "split":
+            self.tell("Type a split as /3/4, which breaks set 3 before its tile 4.")
+            return True
+        return False
 
     def lines(self):
         v, me = self.v, self.me
-        you = "you are watching" if me < 0 else "you are %s" % self.name(me)
-        out = ["", "== Rummy Tile Classic, table %s: %s ==" % (self.tid, you)]
+        out = [""] + self.plain_header()
         if not v["rows"]:
-            return out + ["", "Waiting for an opponent.",
-                          "The game starts when the seats are filled from telnet, the web (port 6500)",
-                          "or another client. Type menu to go back; the table stays open."]
-        out.append("Table:" if v["sets"] else "Table: empty.")
+            return out + self.plain_waiting()
+        out.append("The table:" if v["sets"] else "The table is empty.")
         line = ""
         for i, s in enumerate(v["sets"]):
             mark = "!" if s["kind"] == "x" else "*" if s["new"] else ":"
@@ -947,41 +938,27 @@ class PlainRummy(RtBase, PlainGame):
             out.append(" " + line)
         if me >= 0:
             rack = self.rack()
-            out += [" " + l for l in wrap("Your rack (%d, by %s): %s" % (
-                len(rack), "number" if self.by_number else "color", " ".join(rack) or "empty"), 78)]
-        side = []
+            out += [" " + l for l in textwrap.wrap("Your rack has %d tile%s, by %s: %s." % (
+                len(rack), "" if len(rack) == 1 else "s", "number" if self.by_number else "color",
+                " ".join(rack) or "none"), 78)]
+        players = []
         for i, c in enumerate(v["counts"]):
-            label, _ = self.seat_label(i)
-            mark = ">" if self.playing() and v["turn"] == i else " "
             if v["over"]:
-                side.append("%s%-12s %+d" % (mark, label[:12], v["scores"].get(i, 0)))
+                score = "%+d" % v["scores"].get(i, 0)
             elif i < len(v["gone"]) and v["gone"][i]:
-                side.append("%s%-12s left" % (mark, label[:12]))
+                score = "left"
             else:
-                side.append("%s%-12s %2d%s" % (mark, label[:12], c, "+" if i < len(v["melded"]) and v["melded"][i]
-                                                else " "))
-        if not v["over"]:
-            side.append(" pool %d" % v["pool"])
-        for i in range(0, len(side), 3):            # three to a line: 4 seats and the pool fit in 80 columns
-            out.append(" " + "  ".join(side[i:i + 3]))
-        if not v["over"] and not self.over:
-            out.append(" " + ("+ = first meld made. " if any(v["melded"]) else "") + self.state_text()[0] + ".")
-            info = turn_info(v)[0] if self.my_turn() else ""
-            if info:
-                out.append(" " + info)
-            out.append(" " + clock_text(v, self.names))
-        else:
-            out.append(" " + (self.over or "Game over"))
+                score = "%d%s" % (c, "+" if i < len(v["melded"]) and v["melded"][i] else " ")
+            players.append((i, None, score))
+        facts = ["The pool holds %d tiles." % v["pool"]] if not v["over"] else []
+        if any(v["melded"]):
+            facts.append("A + marks a player who made the first meld.")
         if self.my_turn():
-            out.append(" Steps: R7-3, R7B7K7-n, 3.2-5, 3-5, 3/4, 3.2-r; undo, check, end; help.")
-        for l in self.log[-4:]:
-            out.append(" " + l[:78])
-        return [l[:80] for l in out]
+            facts.append(self.info_words()[0])
+        out += [" " + l for l in self.side_text(players, facts, 60)]
+        return out + self.plain_log()
 
-    def prompt(self):
-        if self.my_turn():
-            return "Your step (like %s-n), or end > " % (self.rack()[0] if self.v["rack"] else "R7")
-        return "> "
-
+    def turn_prompt(self):
+        return "Your turn. Type a step such as /%s-n, or /end." % (self.rack()[0] if self.v["rack"] else "R7")
 
 AnsiScreen, PlainScreen = AnsiRummy, PlainRummy

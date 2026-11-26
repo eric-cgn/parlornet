@@ -8,7 +8,7 @@ import re
 import unittest
 from collections import Counter
 
-from game_checks import LONG, ansi_screens, plain_screen, web_page
+from game_checks import LONG, ansi_screens, plain_screen, reads_typed, web_page
 from test_core import ROOT, Client
 
 from adapters.games import rummytile as G  # noqa: E402
@@ -693,7 +693,7 @@ class Frontends(unittest.TestCase):
         names = NAMES4[:3]
         self.assertEqual(G.parse_view(view_lines(st, 0))["gone"], [False, True, False])
         self.assertIn("left the game", web_page(self, G, view_lines(st, 0), 0, names=names))
-        self.assertIn(names[1] + " left", plain_screen(self, G, view_lines(st, 2), 2, names=names))
+        self.assertRegex(plain_screen(self, G, view_lines(st, 2), 2, names=names), names[1] + " +left")
         shown, _ = ansi_screens(self, G, view_lines(st, -1), -1, names=names)["ansi"]
         self.assertIn(" left", shown)
 
@@ -759,14 +759,15 @@ class Frontends(unittest.TestCase):
         self.assertNotIn("R7 B7", shown)
 
     def keys(self, keys, st=None, me=0):
-        return ansi_screens(self, G, view_lines(st or midgame(), me), me, keys=keys)
+        st = st or midgame()
+        return ansi_screens(self, G, view_lines(st, me), me, keys=keys, prepare=reads_typed(P, st, me))
 
     def test_keys_send_steps(self):
         st = midgame()
         rack = G.parse_view(view_lines(st, 0))["rack"]          # R1 R7 B7 B13 Y8 J: shown by color
         self.assertEqual(rack, ["R1", "R7", "B7", "B13", "Y8", "J"])
-        # pick R7 and B7 on the rack, N: a new set
-        for mode, (_, reqs) in self.keys(["RIGHT", "ENTER", "RIGHT", "ENTER", "n", "WAIT"]).items():
+        # pick R7 and B7 on the rack, M: a new set
+        for mode, (_, reqs) in self.keys(["RIGHT", "ENTER", "RIGHT", "ENTER", "m"]).items():
             self.assertIn("MOV 3 R7B7-n", reqs, mode)
         # pick Y8, go up to the table (the [new] slot, then set 3's tiles), Enter puts it there
         _, reqs = self.keys(["RIGHT"] * 4 + ["ENTER", "UP", "LEFT", "ENTER"])["pc"]
@@ -774,24 +775,40 @@ class Frontends(unittest.TestCase):
         # a table tile picked up and put on another set; split; back to the rack; undo, reset, end, check
         _, reqs = self.keys(["UP", "ENTER"])["utf8"]
         self.assertFalse([r for r in reqs if r.startswith("MOV")], reqs)
-        _, reqs = self.keys(["s", "WAIT"], st=st)["ansi"]
+        _, reqs = self.keys(["b"], st=st)["ansi"]
         for k, want in (("u", "UND 3"), ("z", "MOV 3 reset"), ("c", "CHK 3 !end")):
-            _, reqs = self.keys([k, "WAIT"])["ansi"]
+            _, reqs = self.keys([k])["ansi"]
             self.assertIn(want, reqs, k)
-        _, reqs = self.keys(["e", "WAIT", "y"])["ansi"]          # the table is not ready: asks first
+        shown, reqs = self.keys(["e", "y"])["ansi"]               # the table is not ready: asks first
         self.assertIn("END 3", reqs)
-        _, reqs = self.keys(["e", "WAIT", "n"])["ansi"]
+        self.assertIn("End your turn? The table doesn't count yet", shown)
+        _, reqs = self.keys(["e", "n"])["ansi"]
+        self.assertNotIn("END 3", reqs)
+        _, reqs = self.keys(["e", "ENTER"])["ansi"]                # the dialog starts on No
         self.assertNotIn("END 3", reqs)
         # typed steps, several on a line
-        _, reqs = self.keys(list("r7-1 b7-n") + ["ENTER"])["ansi"]
-        self.assertIn("MOV 3 r7-1 b7-n", reqs)
-        _, reqs = self.keys(list("undo") + ["ENTER"])["ansi"]
+        _, reqs = self.keys(["/"] + list("r7-1 b7-n") + ["ENTER"])["ansi"]
+        self.assertIn("MOV 3 R7-1 B7-N", reqs)
+        _, reqs = self.keys(["/"] + list("undo") + ["ENTER"])["ansi"]
         self.assertIn("UND 3", reqs)
-        _, reqs = self.keys(list("end") + ["ENTER"])["pc"]
+        _, reqs = self.keys(["/"] + list("end") + ["ENTER", "y"])["pc"]
         self.assertIn("END 3", reqs)
         # watchers and players waiting for their turn send nothing
-        _, reqs = self.keys(["ENTER", "n", "WAIT", "u", "WAIT"], me=-1)["pc"]
+        _, reqs = self.keys(["ENTER", "m", "u"], me=-1)["pc"]
         self.assertFalse([r for r in reqs if r.split()[0] in ("MOV", "UND", "END", "CHK")], reqs)
+
+    def test_pass_and_draw(self):
+        """draw always means a drawn game, never ending the turn; pass ends it only when nothing is played."""
+        _, reqs = self.keys(["/"] + list("draw") + ["ENTER"])["ansi"]
+        self.assertNotIn("END 3", reqs)
+        _, reqs = self.keys(["/"] + list("pass") + ["ENTER"])["ansi"]       # midgame has a set played this turn
+        self.assertNotIn("END 3", reqs)
+        st = state([["R7", "B7"], ["B1", "B2"]], melded=[True, False])
+        _, reqs = self.keys(["/"] + list("pass") + ["ENTER", "y"], st=st)["ansi"]
+        self.assertIn("END 3", reqs)
+        shown, reqs = self.keys(["p", "n"], st=st)["ansi"]                   # P asks first
+        self.assertNotIn("END 3", reqs)
+        self.assertIn("Pass your turn? You play nothing this turn.", shown)
 
     def test_click_and_split(self):
         """A click on a table tile picks it up; a click on a tile of another set moves it there; S splits a set."""
@@ -805,10 +822,11 @@ class Frontends(unittest.TestCase):
                                keys=[("CLICK", x1, y), ("CLICK", xx, x3)])["pc"]
         self.assertIn("MOV 3 1.2-3", reqs)
         _, reqs = ansi_screens(self, G, view_lines(midgame(), 0), 0,
-                               keys=[("CLICK", x1, y), "s", "WAIT"])["pc"]
+                               keys=[("CLICK", x1, y), "b"])["pc"]
         self.assertIn("MOV 3 1/2", reqs)
+        rack = next(i for i, l in enumerate(shown) if " R1 " in l and i > y)      # Enter on the rack: back to it
         _, reqs = ansi_screens(self, G, view_lines(midgame(), 0), 0,
-                               keys=[("CLICK", x1, y), "d", "WAIT"])["pc"]
+                               keys=[("CLICK", x1, y), ("CLICK", shown[rack].index("R1"), rack)])["pc"]
         self.assertIn("MOV 3 1.2-r", reqs)
 
     def test_plain_screen(self):
@@ -821,9 +839,9 @@ class Frontends(unittest.TestCase):
         text = plain_screen(self, G, view_lines(midgame(), 0), 0)
         self.assertIn(" 4! K9", text)
         self.assertIn(" 1: R3 R4 R5 R6", text)
-        self.assertIn("Your step (like R1-n)", text)
-        self.assertIn("Not valid yet: set 4", text)
-        self.assertIn("Waiting for an opponent", plain_screen(self, G, ["V rummytile/1 1"], 0))
+        self.assertIn("Your turn. Type a step such as /R1-n, or /end.", text)
+        self.assertIn("Set 4 is not valid yet.", text)
+        self.assertIn("Waiting for a second player", plain_screen(self, G, ["V rummytile/1 1"], 0))
 
 
 class TelnetTileColors(unittest.TestCase):

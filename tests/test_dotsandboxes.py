@@ -520,20 +520,20 @@ class Screens(unittest.TestCase):
         lines = view_lines(new(), 0)
         for mode, (text, reqs) in ansi_screens(self, D, lines, 0, keys=[]).items():
             self.assertIn("Dots and Boxes", text)
-            self.assertIn("you are A", text)
-            self.assertIn("Your move", text)
-            self.assertIn("Boxes left: 25 of 25", text)
-            self.assertIn("a1-b1: Enter draws this line.", text)
+            self.assertIn("Dots and Boxes, table 3, with", text)
+            self.assertIn("Your turn", text)
+            self.assertIn("25 of 25 boxes are left.", text)
+            self.assertIn("Press Enter to draw the line from a1 to b1.", text)
             self.assertIn(" A ", text)
             self.assertIn(" B ", text)
             if mode != "ansi":
                 self.assertEqual(text.count("■"), 36)        # 6 by 6 dots
         text = ansi_screens(self, D, view_lines(new(), 1), 1, keys=[])["ansi"][0]
-        self.assertIn("you are B", text)
+        self.assertIn("Dots and Boxes, table 3, with", text)
         self.assertIn("Waiting for %s." % LONG, text)
         text = ansi_screens(self, D, view_lines(new(), -1), -1, keys=[])["utf8"][0]
         self.assertIn("watching", text)
-        self.assertIn("Watching. T talks", text)
+        self.assertIn("You are watching", text)
 
     def test_keys_draw_lines(self):
         lines = view_lines(new("3"), 0)
@@ -546,10 +546,10 @@ class Screens(unittest.TestCase):
         for keys, tok in cases:
             reqs = ansi_screens(self, D, lines, 0, keys=keys)["pc"][1]
             self.assertEqual([q for q in reqs if q.startswith("MOV")], ["MOV 3 " + tok], keys)
-        # typed: either order, with or without the dash, or as two dots
-        for typed, tok in (("c2-c1", "c1-c2"), ("a1b1", "a1-b1"), ("d4 d3", "d3-d4")):
-            reqs = ansi_screens(self, D, lines, 0, keys=list(typed) + ["ENTER"])["ansi"][1]
-            self.assertIn("MOV 3 " + tok, reqs, typed)
+        # typed, a line runs on the server (CMD), as typed
+        for typed in ("c2-c1", "a1b1", "d4 d3"):
+            reqs = ansi_screens(self, D, lines, 0, keys=["/"] + list(typed) + ["ENTER"])["ansi"][1]
+            self.assertIn("CMD 3 /" + typed, reqs, typed)
         # the other seat and a watcher send nothing
         for me in (1, -1):
             reqs = ansi_screens(self, D, view_lines(new("3"), me), me, keys=["ENTER", "RIGHT", "ENTER"])["pc"][1]
@@ -588,9 +588,8 @@ class Screens(unittest.TestCase):
         st = play(new("3"), "a1-b1", "a1-a2", "b1-b2", "a2-b2")["state"]
         lines = view_lines(st, 1)
         for mode, (text, reqs) in ansi_screens(self, D, lines, 1, keys=[]).items():
-            self.assertIn("Your move again: box closed", text)
-            self.assertIn("You closed a box: move again.", text)
-        self.assertIn("Your move again (like", plain_screen(self, D, lines, 1))
+            self.assertIn("You closed a box, so it's your turn again.", text)
+        self.assertIn("You closed a box, so it's your turn again. Type a line such as /", plain_screen(self, D, lines, 1))
         names4 = (LONG, LONG.upper(), "cy" * 6, "dee" * 4)
         st = random_state(9, 9, 120, seed=4, players=4)
         for me in (3, -1):
@@ -628,7 +627,7 @@ class Screens(unittest.TestCase):
                 elif me == turn:
                     self.assertEqual(len([q for q in reqs if q.startswith("MOV")]), 1)
             text = plain_screen(self, D, lines, me, names=names4)
-            self.assertRegex(text, r"B %s +\d+ left" % LONG.upper())
+            self.assertRegex(text, r"B %s( \(you\))? +left" % LONG.upper())
             html = web_page(self, D, lines, me, names=names4)
             self.assertRegex(html, r"%s( \(you\))?, left the game" % LONG.upper())
             self.assertEqual("/move.htm" in html, me == turn)
@@ -645,14 +644,14 @@ class Screens(unittest.TestCase):
             self.assertEqual(D.parse_view(lines)["turn"], -1)
             for mode, (text, reqs) in ansi_screens(self, D, lines, me, keys=["ENTER"]).items():
                 self.assertIn("Game over", text)
-                self.assertIn("Boxes left: 0 of 25", text)
+                self.assertIn("0 of 25 boxes are left.", text)
                 self.assertFalse([q for q in reqs if q.startswith("MOV")])
             over = "Game over: %s wins 13-12" % LONG
 
             def ended(g, over=over):
                 g.over = over
             for mode, (text, _) in ansi_screens(self, D, lines, me, keys=[], prepare=ended).items():
-                self.assertIn(over + ". Esc goes back", text)
+                self.assertIn("Game over. %s wins 13-12. Press Esc" % LONG, text)
             self.assertIn("Game over", plain_screen(self, D, lines, me))
             html = web_page(self, D, lines, me)
             self.assertNotIn("/move.htm", html)
@@ -662,17 +661,16 @@ class Screens(unittest.TestCase):
     def test_plain_board(self):
         st = play(new("3"), "a1-b1", "a1-a2", "b1-b2", "a2-b2")["state"]
         text = plain_screen(self, D, view_lines(st, 1), 1)
-        self.assertIn("== Dots and Boxes, table 3: you are B ==", text)
-        self.assertIn("\n      a   b   c   d\n", text)
+        self.assertIn("Dots and Boxes, table 3, with", text)
+        self.assertIn("\n      a   b   c   d ", text)
         self.assertIn("  1   +---+   +   +", text)
         self.assertIn("      | B |", text)
         self.assertIn("  2   +===+   +   +", text)
-        self.assertIn("Boxes left: 8 of 9", text)
-        self.assertIn("Last line: a2-b2", text)
-        self.assertTrue(text.endswith("Your move again (like a2-a3) > "))
+        self.assertIn("8 of 9 boxes are left.", text)
+        self.assertTrue(text.endswith("You closed a box, so it's your turn again. Type a line such as /a2-a3. > "))
         text = plain_screen(self, D, view_lines(st, 0), 0)
-        self.assertTrue(text.endswith("\n> "))
-        self.assertIn("Waiting for an opponent", plain_screen(self, D, ["V dotsandboxes/1 1"], 0))
+        self.assertTrue(text.endswith("\nWaiting for %s. > " % LONG.upper()), text[-60:])
+        self.assertIn("Waiting for a second player", plain_screen(self, D, ["V dotsandboxes/1 1"], 0))
 
     def test_web_board(self):
         st = play(new("4"), "a1-b1", "a1-a2", "b1-b2", "a2-b2")["state"]
@@ -743,7 +741,7 @@ class Pickers(unittest.TestCase):
             menu = (T.PlainMenu if mode == "plain" else T.AnsiMenu)(s)
             asyncio.run(s.load())
             try:
-                asyncio.run(menu.new(args))
+                asyncio.run(menu.new(args, whom="anyone"))
             except EOFError:
                 pass
             return [r for r in core.reqs if r.startswith("NEW ")], "\n".join("\n".join(x) for x in io.screens)
@@ -757,12 +755,6 @@ class Pickers(unittest.TestCase):
         self.assertEqual(run("pc", ["dotsandboxes", "5p", "1h"], [])[0], [])
         self.assertEqual(run("plain", ["dotsandboxes"], ["3", ""])[0],
                          ["NEW dotsandboxes/1 standard turn=1d players=3"])
-        s = T.Session(FakeIO("pc"), Core(), "pc", "ann")
-        menu = T.AnsiMenu(s)
-        asyncio.run(menu.load())
-        menu.sel = [i for i, it in enumerate(menu.mine) if it[0] == "new"][0]
-        self.assertEqual("Enter starts a new Dots and Boxes table; you choose players and time per turn.",
-                         menu.describe())
 
 
 if __name__ == "__main__":

@@ -238,7 +238,7 @@ class TimeCommand(unittest.TestCase):
 
 @slow
 class TelnetTime(TelnetBase):
-    """The telnet menu's typed command time, in plain text and on the full screen."""
+    """The telnet lobby's /time, in plain text and on the full screen."""
     auth = "none"
 
     def test_time_in_the_menu(self):
@@ -249,11 +249,11 @@ class TelnetTime(TelnetBase):
         out = a.until("UTC.")
         self.assertTrue(re.search(r"Signed in \d+:\d\d\. Server time \d\d:\d\d UTC\.", out), out)
         a.send("help\r\n")
-        self.assertIn("how long you have been connected", a.until("quit "))
+        self.assertIn("/time the time signed in", a.until("/quit "))
         a.close()
         b = Client(self.tel_port)
         self.login(b, "tom", "1")                    # full screen
-        b.send("time\r")
+        b.send("/time\r")
         b.until("Server time", screen=True)
         b.close()
 

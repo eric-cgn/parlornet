@@ -187,6 +187,10 @@ The last move is said in one sentence and marked on the board. The server writes
 | Naval Combat | "ann fired at e10 and hit your 2-square ship." "ann fired at e10 and missed." "ann sank your 2-square ship." | the square fired at |
 | Rummy Tile | "ann played 3 tiles." "ann ended the turn and took a tile." | the sets changed this turn |
 
+### Stacks of pieces
+
+When a place holds more pieces than the screen draws, as a Backgammon point or the bar can, the last piece drawn shows a number. The number is how many pieces that one drawn piece stands for: itself and the ones hidden under it. So a point of five checkers drawn as four shows 2 on the top checker, and a stack that fits on the screen shows no number at all. The number is plain, such as 2, never +2, and it never counts the whole point and is never 1. The number sits on the piece itself, cut out of it or drawn in a contrasting color, not beside it. A frontend that can only fit one digit shows + for 10 or more.
+
 ### Time
 
 | What | How it reads |
