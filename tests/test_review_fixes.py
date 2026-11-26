@@ -18,6 +18,7 @@ import time
 import unittest
 from unittest import mock
 
+import procs
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
@@ -69,10 +70,7 @@ def mailed_password(srv):
 
 
 def spawn(*args):
-    p = subprocess.Popen([sys.executable, "-m"] + list(args), cwd=ROOT, stdout=subprocess.PIPE,
-                         stderr=subprocess.DEVNULL)
-    p.stdout.readline()
-    return p
+    return procs.spawn(*args, stderr=subprocess.DEVNULL)
 
 
 def raw_http(port, data, timeout=10):
@@ -216,16 +214,14 @@ class F01Adapters(unittest.TestCase):
         cls.core, cls.fe = free_port(), free_port()
         cls.ports = {n: free_port() for n in ("ios", "fibs", "web", "telnet")}
         cls.keys = make_keys(*cls.ports)
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none")]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "none"))
         for n, port in cls.ports.items():
             cls.procs.append(spawn(*adapter_args("adapters." + n, port, cls.fe, cls.keys, n)))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
+        procs.stop_all(cls.procs)
 
     def test_idle_and_login_floods(self):
         import resource
@@ -640,15 +636,13 @@ class WebStack(unittest.TestCase):
         cls.core, cls.fe, cls.port = free_port(), free_port(), free_port()
         cls.keys = make_keys("web")
         extra = ["--signup", cls.signup] if cls.signup else []
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", cls.auth, *extra)]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", cls.auth, *extra))
         cls.procs.append(spawn(*adapter_args("adapters.web", cls.port, cls.fe, cls.keys, "web"), *cls.web_args))
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
+        procs.stop_all(cls.procs)
 
 
 class F06WebFlood(WebStack):

@@ -56,10 +56,10 @@ def clean(value):
 MOVE_KEYS_PREF = "movekeys"
 MOVE_KEYS = ("arrows", "ijkl", "esdf", "wasd", "hjkl")
 
-# Whether telnet has offered the practice game (adapters/telnet_practice.py) at a sign-in, kept with PRF so
-# the question comes once: "new" until it has been asked, then "asked".
-PRACTICE_PREF = "practice"
-PRACTICE_STATES = ("new", "asked")
+# Whether telnet has offered the tutorial (adapters/telnet_tutorial.py) at a sign-in, kept with PRF so the
+# question comes once. It is "new" until it has been asked, and then the answer, "yes" or "no".
+TUTORIAL_PREF = "tutorial"
+TUTORIAL_STATES = ("new", "yes", "no")
 
 # Which side a Backgammon player's home board is drawn on (points 1-6 at the bottom right, or the mirror image
 # with them at the bottom left), kept with PRF by the telnet and web extensions (Play shares the web's).
@@ -444,6 +444,44 @@ class CoreClient:
         step (answer with aut()); returns when it is done."""
         data, final = await self.req("PWD")
         return self._signed(self.name, final, data)
+
+    # ---- staying signed in (KEY; docs/protocol.md, Staying signed in) ----------------------------------
+    # A sign-in key is a credential: an adapter keeps it only where its client stores it (a cookie of its
+    # own), never shows it on a page, in a URL or in a log, and forgets it when the player signs out.
+
+    async def key_new(self, label=""):
+        """KEY NEW: a sign-in key for this computer, right after signing in with the password. The key, or
+        None when the core gives none (the reason does not matter: the player just signs in next time)."""
+        data, final = await self.req(("KEY NEW %s" % claim_text(label, 32)).rstrip())
+        f = final.split()
+        return f[1] if final.startswith("OK") and len(f) == 2 else None
+
+    async def key_signin(self, name, key):
+        """Sign in with a sign-in key: USER name, then the key answers the password question (AUT key).
+        Returns the session id. It raises CoreError when the key is refused (code NOKEY, so forget it) or
+        anything else stops it."""
+        self.name = name
+        data, final = await self.req("USER %s" % name)
+        if final.startswith("ASK"):
+            f = final.split()
+            if len(f) < 2 or f[1] != "password":
+                raise CoreError("the server asks something else first", "STATE")
+            data, final = await self.req("AUT key %s" % key)
+        return self._signed(name, final, data)
+
+    async def keys(self):
+        """KEY LST: [{"n", "made", "used", "here", "label"}] of the signed-in player's sign-in keys."""
+        data, final = await self.req("KEY LST")
+        if not final.startswith("OK"):
+            raise CoreError(err_text(final), (final.split() + [""])[1])
+        return [{"n": int(f[1]), "made": f[2], "used": f[3], "here": f[4] == "here", "label": f[5] if len(f) > 5 else ""}
+                for f in (l.split(" ", 5) for l in data if l.startswith("KEY "))
+                if len(f) >= 5 and f[1].isdigit()]
+
+    async def key_del(self, which=None):
+        """KEY DEL [n|all]: forget this session's key, a listed one or every one. True if the core did."""
+        data, final = await self.req("KEY DEL" + ("" if which is None else " %s" % which))
+        return final.startswith("OK")
 
     async def can(self, kinds):
         """Tell the core which sign-in step kinds this frontend can show (text,

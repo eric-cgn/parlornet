@@ -22,7 +22,7 @@ runs the line, Esc clears it, Up and Down recall earlier lines, and the lit
 keys go dark. A line runs on the server with CMD (docs/protocol.md, Commands):
 the shared commands (/say, /invite, /time ...) and typed moves (/d3) get the
 server's words, and a command that asks first opens its dialog with them.
-Telnet keeps only its own screens (/help, /leave, /practice ...). T or Tab opens a
+Telnet keeps only its own screens (/help, /leave, /tutorial ...). T or Tab opens a
 table's chat screen, where a line is said to the table. ? opens help, and Esc
 cancels what is picked or open, and with nothing to cancel goes back to the
 lobby.
@@ -63,8 +63,8 @@ from . import declare
 from .common import (framed_motd, LOGIN_SECS, LOGIN_TOTAL_SECS, CLAIM_LEN, CoreClient, CoreError, Gate, claim_text,
                      keepalive, NeedAuth,
                      no_wait, describe_invite_event, err_text, group_games, parse_games, parse_invites,
-                     parse_reversi_view, parse_players, parse_tables, peer_addr, MOVE_KEYS_PREF, PRACTICE_PREF,
-                     PRACTICE_STATES,
+                     parse_reversi_view, parse_players, parse_tables, peer_addr, MOVE_KEYS_PREF, TUTORIAL_PREF,
+                     TUTORIAL_STATES,
                      describe_integrity_event, parse_turns,
                      turn_sentence, turn_time)
 from .common import CUT_ENDS, fit, parse_client, parse_clients
@@ -84,7 +84,9 @@ MAX_SESSIONS = 60
 IDLE_SECS = 1800
 COLS, ROWS = 80, 24
 ENTER_WAIT = 0.3        # after a Y or N answer, an Enter this soon is one typed out of habit
-PRACTICE_LINE = "Type /practice for a short lesson on these keys."
+TUTORIAL_LINE = "Type /tutorial for a short lesson on these keys."
+TUTORIAL_QUESTION = ("Would you like a short tutorial on how the games work? You can run it again any time "
+                     "with /tutorial.")
 POLL_SECS = 2.0         # game screen: ask the core for new events this often
 MENU_SECS = 15.0        # menu: reload the table list this often
 DETECT_SECS = 3.0       # the start: how long telnet waits for the terminal type, and for Enter to open the menu
@@ -105,7 +107,7 @@ MOUSE_ON = "\x1b[?1000h\x1b[?1006h"     # report clicks, with SGR (extended) coo
 MOUSE_OFF = "\x1b[?1000l\x1b[?1006l"
 QUIT_WORDS = ("quit", "q", "bye", "exit", "logoff", "logout")
 SORRY = "Something went wrong. You are back in the lobby."
-PLAIN_PRACTICE = "The practice game teaches the keys of the full screen, so plain mode doesn't have it."
+PLAIN_TUTORIAL = "The tutorial teaches the keys of the full screen, so plain mode doesn't have it."
 LINE_GONE = (EOFError, ConnectionError, TimeoutError, CoreError, OSError)   # the line or the core went away
 # Movement keys: the session's choice -> (its name, the letters for up, down, left and right). The arrows
 # work in every choice; "arrows" (no letters) is the default.
@@ -1342,7 +1344,7 @@ LOBBY_HELP = [         # the lobby's one page of help, on the full screen
     "bot or a player. /join TABLE or /join NAME sits down, /resume and",
     "/watch take a table, and /close closes your open tables. /who, /tables,",
     "/top, /score, /motd, /time and /activity tell you things. /password,",
-    "/machine and /keys change your settings.",
+    "/machine and /keys change your settings. /tutorial teaches the keys.",
     "",
     "Signing out",
     "/quit signs you out, after asking first. Your games go on without you.",
@@ -1391,10 +1393,10 @@ class MenuBase:
             return await self.password()
         if cmd == "keys" and self.s.ansi:
             return await self.options()
-        if cmd == "practice":
+        if cmd == "tutorial":                   # the client's own, and never sent to the server
             if not self.s.ansi:
-                return await self.notice(PLAIN_PRACTICE)
-            await self.s.practice()
+                return await self.notice(PLAIN_TUTORIAL)
+            await self.s.tutorial()
             return await self.relist()
         if cmd == "open" and not args:          # the questions N asks
             return await self.new([], whom="anyone")
@@ -1549,8 +1551,8 @@ class MenuBase:
         err = await self.s.enter(tid, watch, sit)
         if self.s.quitting:                 # /quit at the table, said yes to
             return "quit"
-        if self.s.practice_next:            # /practice at the table
-            await self.s.practice()
+        if self.s.tutorial_next:            # /tutorial at the table
+            await self.s.tutorial()
         if err:
             return await self.notice(err)
         return await self.back(tid)
@@ -1762,7 +1764,7 @@ class AnsiMenu(MenuBase, AnsiView):
             i = fresh[0]
             self.say("%s invites you to play %s at table %s. Press Enter on it to answer." % (
                 i["from"], self.s.game_name(i["key"]), i["id"]), A_YELLOW)
-        self.others = [("table", t) for t in tabs if me not in t["names"]] + [("practice", None)]
+        self.others = [("table", t) for t in tabs if me not in t["names"]] + [("tutorial", None)]
         ids = [self.item_id(it) for it in self.items]
         if self.first:
             self.first = False
@@ -1775,8 +1777,8 @@ class AnsiMenu(MenuBase, AnsiView):
     # ---- drawing ---------------------------------------------------------
     def row_text(self, it):
         """-> (text, status column, status attribute, plain attribute)."""
-        if it[0] == "practice":
-            return "%5s  %s" % ("", "The practice game teaches the keys."), 0, A_GREEN, A_GREEN
+        if it[0] == "tutorial":
+            return "%5s  %s" % ("", "The tutorial teaches the keys."), 0, A_GREEN, A_GREEN
         if it[0] == "invite":
             i = it[1]
             left = "%5s  %-8s  %-16s  %-10s  " % (i["id"], self.s.game_name(i["key"]), ("from " + i["from"])[:16],
@@ -1829,8 +1831,8 @@ class AnsiMenu(MenuBase, AnsiView):
         if not self.items:
             return "You have no games yet. Press N to open a table."
         kind, x = self.items[self.sel]
-        if kind == "practice":
-            return "Press Enter to play the practice game. It is not played on the parlor."
+        if kind == "tutorial":
+            return "Press Enter to run the tutorial. It is not played on the parlor."
         if kind == "invite":
             return "%s invites you to play %s at table %s. Press Enter to answer." % (
                 x["from"], self.s.game_name(x["key"]), x["id"])
@@ -1966,8 +1968,8 @@ class AnsiMenu(MenuBase, AnsiView):
         if not self.items:
             return None
         kind, x = self.items[self.sel]
-        if kind == "practice":
-            await self.s.practice()
+        if kind == "tutorial":
+            await self.s.tutorial()
             return await self.load()
         if kind == "invite":            # the invitation dialog: Accept sits down, Decline turns it down
             answer = await self.dialog("Invitation", [
@@ -2175,7 +2177,7 @@ class GameBase:
         "leave": "/leave goes back to the lobby. The game goes on without you.",
         "quit": "/quit signs you out, after asking first. Your games go on.",
         "help": "/help opens help.",
-        "practice": "/practice starts the practice game of Tic Tac Toe, which teaches the keys.",
+        "tutorial": "/tutorial starts the Tic Tac Toe tutorial, which teaches the keys.",
         "redraw": "/redraw loads the table again and redraws the screen.",
     }
     COMMANDS = {}           # a game's own commands (/roll, /pass ...): name -> what the sentence line says
@@ -2225,7 +2227,7 @@ class GameBase:
         return False
 
     async def run_command(self, line):
-        """A command line, without its slash -> "menu" to leave the table, else None. /leave, /practice, /help,
+        """A command line, without its slash -> "menu" to leave the table, else None. /leave, /tutorial, /help,
         /redraw and a game's own commands for its screen (/sort, /home) are the table screen's own. Every
         other line, a typed move included, runs on the server (shared)."""
         p = line.split()
@@ -2234,10 +2236,10 @@ class GameBase:
         cmd, args = p[0].lower(), p[1:]
         if cmd == "leave":
             return "menu"
-        if cmd == "practice":
+        if cmd == "tutorial":
             if not self.s.ansi:
-                return self.tell(PLAIN_PRACTICE)
-            self.s.practice_next = True
+                return self.tell(PLAIN_TUTORIAL)
+            self.s.tutorial_next = True
             return "menu"
         if cmd == "help":
             await self.help(2 if args[:1] == ["2"] else 1)
@@ -2853,7 +2855,7 @@ class AnsiGame(GameBase, AnsiView):
             self.HELP_KEYS or ["%s has no keys of its own." % self.GAME]) + ["", "Commands"] + self.HELP_COMMANDS \
             + ["", "Every game"] + self.EVERY_GAME
         extra = self.keys_help()
-        two = (extra + [""] if extra else []) + self.reference() + ["", self.EVERY_TABLE, PRACTICE_LINE]
+        two = (extra + [""] if extra else []) + self.reference() + ["", self.EVERY_TABLE, TUTORIAL_LINE]
         return one, two
 
     async def help(self, page=1):
@@ -3105,7 +3107,7 @@ class Session:
         self.since = getattr(io, "since", None) or time.time()     # signed in: the time connected counts from here
         self.history = []           # the command lines run, for Up and Down in command mode
         self.quitting = False       # /quit at a table, said yes to: the session ends
-        self.practice_next = False  # /practice at a table: the lobby opens the practice game
+        self.tutorial_next = False  # /tutorial at a table: the lobby opens the tutorial
 
     async def load(self):
         """-> (tables, {table id: (seat to move, secs left, turn secs, when)})
@@ -3256,25 +3258,25 @@ class Session:
             await self.core.req("LVE %s" % tid)
         return err
 
-    async def practice(self):
-        """Open the practice game (adapters/telnet_practice.py) on the full screen; back when the player leaves."""
-        from .telnet_practice import run_practice
-        self.practice_next = False
-        await run_practice(self)
+    async def tutorial(self):
+        """Open the tutorial (adapters/telnet_tutorial.py) on the full screen. The player comes back to the lobby
+        on leaving it. The tutorial runs here alone and sends the server nothing."""
+        from .telnet_tutorial import run_tutorial
+        self.tutorial_next = False
+        await run_tutorial(self)
 
-    async def offer_practice(self):
-        """Once, at a sign-in on the full screen: ask whether the player wants the practice game, and keep the
-        answer with the player (PRF) so that the question never comes back."""
+    async def offer_tutorial(self):
+        """Once, at the first sign-in on the full screen, ask whether the player wants the tutorial. The answer
+        is kept with the player (PRF) either way, so that the question never comes back."""
         load = getattr(self.core, "load_pref", None)
-        if not load or await load(PRACTICE_PREF, PRACTICE_STATES, "new") != "new":
+        if not load or await load(TUTORIAL_PREF, TUTORIAL_STATES, "new") != "new":
             return
         menu = AnsiMenu(self)
-        yes = await menu.dialog("Practice game", ["Would you like a two-minute practice game to learn",
-                                                  "the keys? It is not played on the parlor."],
-                                ("Yes", "No"), 0, "Press Y for yes, or N for no.")
-        await self.core.save_pref(PRACTICE_PREF, "asked")
+        yes = await menu.dialog("Tutorial", dialog_lines(TUTORIAL_QUESTION), ("Yes", "No"), 0,
+                                "Press Y for yes, or N for no.")
+        await self.core.save_pref(TUTORIAL_PREF, "yes" if yes else "no")
         if yes:
-            await self.practice()
+            await self.tutorial()
 
     async def run(self):
         mouse = self.ansi and getattr(self.io, "mouse", False)
@@ -3282,7 +3284,7 @@ class Session:
             self.io.write(MOUSE_ON)
         try:
             if self.ansi:
-                await self.offer_practice()
+                await self.offer_tutorial()
             for tries in range(4):
                 menu = AnsiMenu(self) if self.ansi else PlainMenu(self)
                 if tries:

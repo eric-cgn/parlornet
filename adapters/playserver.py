@@ -16,7 +16,8 @@ It answers under /play/ only:
   index.html carries the extension's VAPID public key in its meta tag pn-push while push is on;
 - POST /play/session, which trades the one-time handle a sign-in over the WebSocket gave (HND) for this
   extension's own session cookie, pnplay (Path=/play/, HttpOnly, SameSite=Strict), so a reload resumes with
-  SES alone; out=1 clears it. The web extension's cookie (pn) is never read or set here.
+  SES alone. The handle KEY NEW gave (Stay signed in) sets the key cookie, pnplaykey, the same way but kept
+  long. out=1 clears both. The web extension's cookies (pn, pnkey) are never read or set here.
 
 It speaks plain HTTP and is meant to sit behind a reverse proxy that terminates TLS (deploy/README.md):
 
@@ -72,6 +73,9 @@ HEADERS = ("Content-Security-Policy: default-src 'self'; script-src 'self'; styl
            "base-uri 'none'; form-action 'none'\r\nX-Content-Type-Options: nosniff\r\n"
            "Referrer-Policy: no-referrer\r\n")
 COOKIE = "pnplay"
+KEY_COOKIE = "pnplaykey"    # Stay signed in: name.key, the core's sign-in key for this browser
+KEY_COOKIE_SECS = 400 * 86400    # the longest a browser keeps a cookie (the core forgets a key unused 90 days)
+KEY_COOKIE_RE = re.compile(r"^([A-Za-z0-9_-]{1,12})\.([A-Za-z0-9_-]{22})\Z")
 COOKIE_PATH = "/play/"
 SID_RE = re.compile(r"^[A-Za-z0-9_-]{22}\Z")
 HOST_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,62})(?:\.[a-z0-9-]{1,63})*\.?|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?\Z")
@@ -243,6 +247,23 @@ class Play:
             return "Set-Cookie: %s=%s%s\r\n" % (COOKIE, sid, attrs)
         return "Set-Cookie: %s=%s; Max-Age=0\r\n" % (COOKIE, attrs)
 
+    def key_cookie(self, req, value):
+        """Stay signed in: name.key in a cookie of its own, kept long, for /play/ only (None: cleared)."""
+        attrs = "; Path=%s; HttpOnly; SameSite=Strict%s" % (COOKIE_PATH, "; Secure" if self.secure(req) else "")
+        if value:
+            return "Set-Cookie: %s=%s; Max-Age=%d%s\r\n" % (KEY_COOKIE, value, KEY_COOKIE_SECS, attrs)
+        return "Set-Cookie: %s=%s; Max-Age=0\r\n" % (KEY_COOKIE, attrs)
+
+    @staticmethod
+    def cookie_key(headers):
+        """(name, key) from the Stay signed in cookie, or None."""
+        for part in headers.get("cookie", "").split(";"):
+            k, _, v = part.strip().partition("=")
+            m = KEY_COOKIE_RE.match(v) if k == KEY_COOKIE else None
+            if m:
+                return m.group(1), m.group(2)
+        return None
+
     @staticmethod
     def cookie_sid(headers):
         for part in headers.get("cookie", "").split(";"):
@@ -310,8 +331,9 @@ class Play:
 
     def session(self, req):
         """POST /play/session: h= (the one-time handle the WebSocket gave after a sign-in) sets this
-        extension's session cookie, so the client resumes after a reload (SES alone, wsbridge.py); out=1
-        clears it. A request whose Origin is not this site's is refused. Text answers: ok, or no."""
+        extension's session cookie, so the client resumes after a reload (SES alone, wsbridge.py). The handle
+        KEY NEW gave sets the Stay signed in cookie instead. out=1 clears both: signing out forgets the key.
+        A request whose Origin is not this site's is refused. Text answers: ok, or no."""
         if req["method"] != "POST":
             return respond(405, "POST only", extra="Allow: POST\r\n")
         origin = req["headers"].get("origin", "").strip().lower()
@@ -319,10 +341,14 @@ class Play:
             return respond(403, "no", extra="Cache-Control: no-store\r\n")
         form = req["form"]
         if (form.get("out") or [""])[0] == "1":
-            return respond(200, "ok", extra=self.cookie(req, None) + "Cache-Control: no-store\r\n")
-        sid = self.bridge.take((form.get("h") or [""])[0])
-        if not sid:
+            return respond(200, "ok", extra=self.cookie(req, None) + self.key_cookie(req, None) +
+                           "Cache-Control: no-store\r\n")
+        got = self.bridge.take((form.get("h") or [""])[0])
+        if not got:
             return respond(403, "no", extra="Cache-Control: no-store\r\n")
+        kind, sid = got
+        if kind == "key":
+            return respond(200, "ok", extra=self.key_cookie(req, sid) + "Cache-Control: no-store\r\n")
         self.note_resumed(sid)
         return respond(200, "ok", extra=self.cookie(req, sid) + "Cache-Control: no-store\r\n")
 
@@ -387,7 +413,8 @@ class Play:
                 writer.write(respond(503, "Busy, try again."))
                 return
             req = {"method": method, "path": urlsplit(target).path or "/", "headers": headers, "form": {},
-                   "peer": client, "src": src, "proto": proto, "sid": self.cookie_sid(headers)}
+                   "peer": client, "src": src, "proto": proto, "sid": self.cookie_sid(headers),
+                   "key": self.cookie_key(headers)}
             if wsbridge.is_upgrade(headers):
                 try:
                     out = wsbridge.handshake(method, version, req["path"], headers,

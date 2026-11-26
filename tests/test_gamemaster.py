@@ -15,6 +15,7 @@ import time
 import unittest
 from urllib.parse import quote
 
+import procs
 from test_adapters import Client, WebPlayers
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
@@ -690,9 +691,10 @@ class WithAServer(WebPlayers, unittest.TestCase):
         cls.core, cls.fe, cls.web, cls.gm, cls.tel = [free_port() for _ in range(5)]
         cls.keys = make_keys("web", "gamemaster", "bot", "telnet")
         args = stack_args(cls.core, cls.fe, cls.keys)[1:] + ["--auth", "none", "--sweep", "0.3"]
-        cls.procs = [cls.spawn("tests.matrix_core", *args),
-                     cls.spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")),
-                     cls.spawn(*adapter_args("adapters.telnet", cls.tel, cls.fe, cls.keys, "telnet"))]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(cls.spawn("tests.matrix_core", *args))
+        cls.procs.append(cls.spawn(*adapter_args("adapters.web", cls.web, cls.fe, cls.keys, "web")))
+        cls.procs.append(cls.spawn(*adapter_args("adapters.telnet", cls.tel, cls.fe, cls.keys, "telnet")))
         cls.gm_out = []
         cls.gm_proc = cls.spawn(*adapter_args("adapters.gamemaster", cls.gm, cls.fe, cls.keys, "gamemaster"),
                                 "--wait", "6",
@@ -705,12 +707,11 @@ class WithAServer(WebPlayers, unittest.TestCase):
 
     @staticmethod
     def spawn(*args, out=None):
-        p = subprocess_popen(args)
-        first = p.stdout.readline()
+        import subprocess
+        p = procs.spawn(*args, stderr=subprocess.STDOUT if args[0] in ("bot", "adapters.gamemaster")
+                        else subprocess.DEVNULL, out=out)
         if out is not None:
-            out.append(first.decode())
-            threading.Thread(target=lambda: [out.append(l.decode()) for l in iter(p.stdout.readline, b"")],
-                             daemon=True).start()
+            out.insert(0, p.first)
         return p
 
     @classmethod
@@ -727,10 +728,7 @@ class WithAServer(WebPlayers, unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
+        procs.stop_all(cls.procs)
 
     def log_has(self, text):
         end = time.time() + 5
@@ -2159,13 +2157,6 @@ def gm_line(msg):
     if msg[1] == "0":
         return "%s%d-%s%d" % (chr(96 + c), r + 1, chr(97 + c), r + 1)
     return "%s%d-%s%d" % (chr(97 + c), r, chr(97 + c), r + 1)
-
-
-def subprocess_popen(args):
-    import subprocess
-    return subprocess.Popen([sys.executable, "-m"] + list(args), cwd=ROOT, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT if args[0] in ("bot", "adapters.gamemaster")
-                            else subprocess.DEVNULL)
 
 
 if __name__ == "__main__":

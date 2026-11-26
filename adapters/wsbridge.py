@@ -15,6 +15,11 @@ What the bridge adds or holds back, and nothing else:
   the public port, and before it an HND line: a one-time handle (60 seconds) that the page can trade for
   the Play extension's session cookie (POST /play/session). The session id itself never reaches a script.
 - SES alone (no id) resumes the session in the cookie that came with the WebSocket's handshake, if any.
+- Stay signed in (docs/accounts.md): the key KEY NEW gives never reaches a script either. Its OK carries
+  OK - and before it an HND line, a one-time handle the page trades for the key cookie (pnplaykey). When SES
+  alone finds no session to resume and that cookie came with the handshake, the bridge signs in with it
+  itself (USER name, then AUT key) and answers the SES as a resume would, with an HND for the new session;
+  a key the core refuses is answered ERR NOKEY, so the page clears the cookie.
 
 The handshake (RFC 6455) and the framing are written here, with limits: one message is at most 125 bytes
 (a line is at most 78 characters), printable ASCII; frames from the browser must be masked; fragments,
@@ -205,7 +210,7 @@ class Bridge:
         self.server = server
         self.gate = Gate(WS_SIGNED, WS_PENDING, WS_PER_ADDR)
         self.gate.notice = b""
-        self.handoffs = {}          # one-time handle -> (session id, until)
+        self.handoffs = {}          # one-time handle -> (kind, value, until): kind "sid" or "key" (name.key)
         self.conns = set()          # the open WebSockets (Conn)
 
     def in_use(self, name, secs):
@@ -215,19 +220,19 @@ class Bridge:
         now, key = time.monotonic(), name.lower()
         return any(c.name == key and now - c.last < secs for c in self.conns)
 
-    def handoff(self, sid):
+    def handoff(self, value, kind="sid"):
         now = time.time()
-        for h, (_, until) in list(self.handoffs.items()):
+        for h, (_, _, until) in list(self.handoffs.items()):
             if until < now:
                 del self.handoffs[h]
         h = secrets.token_urlsafe(16)
-        self.handoffs[h] = (sid, now + HANDOFF_SECS)
+        self.handoffs[h] = (kind, value, now + HANDOFF_SECS)
         return h
 
     def take(self, h):
-        """The session id for a handle, once, or None."""
+        """(kind, value) for a handle, once, or None: ("sid", a session id) or ("key", name.key)."""
         entry = self.handoffs.pop(h, None)
-        return entry[0] if entry and entry[1] >= time.time() else None
+        return entry[:2] if entry and entry[2] >= time.time() else None
 
     async def serve(self, reader, writer, req):
         """A WebSocket after its 101: req is the handshake (headers, peer, src, the cookie's session id)."""
@@ -308,6 +313,8 @@ class Conn:
         self.signed = False
         self.name = None            # the player signed in here (lower case), for Bridge.in_use
         self.asked = None           # the name in the last USER, HELO or REG
+        self.asked_as = None        # the same name as typed, for the key cookie
+        self.key_tried = False      # SES alone tried the Stay signed in cookie's key already
         self.last = 0.0             # when the browser last sent a line
         self.lock = asyncio.Lock()  # writes to the core: one line at a time
 
@@ -332,23 +339,40 @@ class Conn:
             verb = words[0].upper()
             if verb in ("USER", "HELO", "REG") and len(words) > 1:
                 self.asked = words[1].lower()
+                self.asked_as = words[1]
             if verb in EXT_ONLY or (verb == "SES" and len(words) > 1):
                 await self.out.text("ERR NOTFRONTEND %s is not for this connection" % verb)
                 continue
             if verb == "SES":
                 await self.resume()
                 continue
+            if verb == "KEY" and len(words) > 1 and words[1].upper() == "NEW":
+                verb = "KEYNEW"             # its key goes to the cookie by a handle, never to the page
             self.pending.append(verb)
             await self.to_core(line)
 
     async def resume(self):
-        """SES alone: resume the session of the cookie the handshake carried (the Play extension's own)."""
+        """SES alone: resume the session of the cookie the handshake carried (the Play extension's own), or,
+        without one, sign in with the Stay signed in cookie's key."""
         sid, addr = self.req.get("sid"), self.req["src"]
         if not sid or not self.bridge.server.resume_allowed(addr, sid):
-            await self.out.text("ERR NOSESSION no session to resume")
+            if not await self.key_signin():
+                await self.out.text("ERR NOSESSION no session to resume")
             return
         self.pending.append("SES")
         await self.to_core("SES %s" % sid)
+
+    async def key_signin(self):
+        """Sign in with the key cookie (once a WebSocket): USER name now, AUT key when the core asks for the
+        password (from_core). False when there is no key cookie or it was tried."""
+        got = self.req.get("key")
+        if not got or self.key_tried:
+            return False
+        self.key_tried = True
+        self.asked, self.asked_as = got[0].lower(), got[0]
+        self.pending.append("KEYUSER")
+        await self.to_core("USER %s" % got[0])
+        return True
 
     async def from_core(self):
         while True:
@@ -357,7 +381,21 @@ class Conn:
                 raise Closed(GOING, "the game server closed the connection")
             line = raw.decode("ascii", "replace").rstrip("\r\n")
             final = line.startswith(("OK", "ERR", "ASK"))
+            if self.pending and self.pending[0] in ("KEYUSER", "KEYAUT"):
+                if not final:
+                    continue                # the sign-in with the key is the bridge's own: the page sees none of it
+                await self.key_step(self.pending.pop(0), line)
+                continue
             verb = self.pending.pop(0) if final and self.pending else None
+            if final and verb == "KEYNEW" and line.startswith("OK"):
+                f = line.split()
+                if len(f) == 2 and SID_RE.match(f[1]) and self.name:
+                    name = self.asked_as or self.name
+                    await self.out.text("HND %s" % self.bridge.handoff("%s.%s" % (name, f[1]), "key"))
+                    line = "OK -"
+            if final and verb == "SES" and line.startswith("ERR") and await self.key_signin():
+                self.bridge.server.note_failed_resume(self.req["src"], self.req.get("sid"))
+                continue
             if final and line.startswith("OK"):
                 f = line.split()
                 if verb in SIGNIN_VERBS and len(f) == 2 and SID_RE.match(f[1]):
@@ -375,6 +413,26 @@ class Conn:
             elif final and verb == "SES" and line.startswith("ERR"):
                 self.bridge.server.note_failed_resume(self.req["src"], self.req.get("sid"))
             await self.out.text(line)
+
+    async def key_step(self, verb, line):
+        """The bridge's own sign-in with the key cookie, answering the page's SES: the core's question for the
+        password gets the key (AUT key). Its OK becomes a resume's OK name, with the new session's HND first. A
+        refusal becomes the page's ERR, which is NOKEY for the key itself, so the page clears the cookie."""
+        if verb == "KEYUSER" and line.startswith("ASK password"):
+            self.pending.append("KEYAUT")
+            await self.to_core("AUT key %s" % self.req["key"][1])
+            return
+        f = line.split()
+        if line.startswith("OK") and len(f) == 2 and SID_RE.match(f[1]):
+            self.name = self.asked
+            await self.signed_in(f[1])
+            self.bridge.server.note_resumed(f[1])
+            await self.out.text("OK %s" % self.asked_as)
+            return
+        if line.startswith("ERR NOKEY"):
+            await self.out.text(line)
+            return
+        await self.out.text("ERR NOSESSION no session to resume")
 
     async def signed_in(self, sid):
         if not self.admit():

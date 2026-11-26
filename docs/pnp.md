@@ -21,7 +21,7 @@ A transcript line starts with a connection letter and a direction:
 | `A<` | A line the server sends to connection A. The first is the server's greeting. |
 | `#` | A note on the session, not part of it. |
 
-Several letters in one sample are several connections, usually two players at one table. Values that differ from run to run are written as placeholders in angle brackets: `<secs>` (the seconds left on a turn clock), `<sid>` (a session id), `<mailed>` (the temporary password from the latest mail), `<n>` (a wait in seconds) and `<when>` (the time a turn was played). The protocol itself never uses `<` or `>`.
+Several letters in one sample are several connections, usually two players at one table. Values that differ from run to run are written as placeholders in angle brackets: `<secs>` (the seconds left on a turn clock), `<sid>` (a session id), `<key>` (a sign-in key), `<mailed>` (the temporary password from the latest mail), `<n>` (a wait in seconds), `<when>` (the time a turn was played) and `<date>` (a day). The protocol itself never uses `<` or `>`.
 
 The passwords in the samples (`swordfish 1997` and the like) and the addresses at `example.org` are made up for this guide.
 
@@ -381,6 +381,75 @@ Z< ERR NOSESSION no such session; sign in again
 ```
 
 A frontend on the public port can ignore `SES` and `SRC`, but it may meet `ERR SIGNEDOUT` (after `OUT all` from another place, or a password change).
+
+### Staying signed in
+
+A player can choose **Stay signed in** in a frontend that can keep a little data of its own, such as the 8-bit program on its disk or a browser in a cookie. It is a feature of the server, and every frontend uses the same requests for it. A frontend that cannot keep anything simply does not offer it. Telnet is one of those, because a telnet program has nowhere to keep a key.
+
+- **Getting a key.** With the setting on, the frontend sends `KEY NEW [label]` right after the player signs in with the password, on the same connection. The reply is `OK key`, a sign-in key of 22 characters like a session id. The frontend keeps the key instead of the password and never shows it. The label is up to 32 characters, such as `Apple IIe`. Without one, the server uses the machine the frontend named with `CLI MACH`, then the program it named with `CLI PROG`.
+- **Signing in with it.** Next time the frontend sends `USER name`, and when the server asks for the password it answers `AUT key key` instead. That signs in as the password would, so the player is asked nothing.
+- **When the key is refused.** `ERR NOKEY` means the server does not take that key any more. It was forgotten, it expired or the password changed. The frontend then forgets the key and asks for the password with a new `USER name`. A refused key counts as one wrong answer toward the name's lockout (Lockouts, above), so it should not be tried twice.
+- **Signing out** with `OUT` always forgets the key that session signed in with or was given, whatever the setting, and the frontend forgets its copy. `OUT all` forgets every key of the player. A frontend that stays signed in closes its connection without `OUT` (with `BYE`, or by hanging up) when the player leaves without signing out.
+- **The player's list.** `KEY LST` lists the player's keys, one `KEY n made used here label` line each, where `made` and `used` are days and `here` marks the key this session signed in with (`-` for the others), then `OK count`. `KEY DEL n` forgets one, `KEY DEL all` every one, and `KEY DEL` alone the key of this session without signing out (when the player turns the setting off). A session that signed in with a key that is forgotten ends.
+- **Expiry and the rest.** A key unused for 90 days expires (the setting `keys.idle_secs`). A password change, a recovery by mail and the operator's reset forget every key. A key works only where it was given, which is the public port or the server extension that asked for it. A player can hold at most 20 keys (`ERR LIMIT`). Under sign-in `none` there is nothing to keep (`ERR NOAUTH`).
+
+```pnp stay-signed-in
+A> PARLORNET/1
+A< PARLORNET/1 parlornet AUTH=password SIGNUP=password
+# bo makes an account on his Apple IIe, with Stay signed in on.
+A> REG bo
+A< INF New account bo: choose a password.
+A< INF A password needs at least 8 characters (at most 64) and at least three of
+A< INF these four kinds: lowercase letters, capital letters, digits and symbols.
+A< ASK password Choose_a_password secret cred new
+A> AUT password swordfish 1997
+A< ASK confirm Type_it_again secret cred new
+A> AUT confirm swordfish 1997
+A< OK -
+# The program names the machine; the key is labeled with it.
+A> CLI MACH Apple IIe
+A< OK
+# Right after the password, the key for this computer. The program keeps it, never the password.
+A> KEY NEW
+A< OK <key>
+# The computers where bo stays signed in.
+A> KEY LST
+A< KEY 1 <date> <date> here Apple IIe
+A< OK 1
+B> PARLORNET/1
+B< PARLORNET/1 parlornet AUTH=password SIGNUP=password
+# Another day: the key answers the password question, and nothing is asked.
+B> USER bo
+B< ASK password Password secret cred
+B> AUT key <key>
+B< OK -
+# Signing out forgets the key, on the server and in the program.
+B> OUT
+B< OK 1
+C> PARLORNET/1
+C< PARLORNET/1 parlornet AUTH=password SIGNUP=password
+# A key the server no longer has is refused, and counts as a wrong answer.
+C> USER bo
+C< ASK password Password secret cred
+C> AUT key <key>
+C< ERR NOKEY This computer was signed out. Sign in again
+# The program forgets it and asks for the password.
+C> USER bo
+C< ASK password Password secret cred
+C> AUT password swordfish 1997
+C< OK -
+# Stay signed in is still on, so this sign-in gets a new key. A label may come with the request.
+C> KEY NEW Apple IIe
+C< OK <key>
+C> KEY LST
+C< KEY 2 <date> <date> here Apple IIe
+C< OK 1
+# Forget every key: no computer stays signed in as bo.
+C> KEY DEL all
+C< OK 1
+C> KEY LST
+C< OK 0
+```
 
 ### The lobby
 
@@ -1046,13 +1115,14 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `IDLE` | Nothing was sent for 15 minutes; the connection is closed. |
 | `ILLEGAL` | A move or check the game refuses; the text is the game's reason. |
 | `INTERNAL` | Something went wrong on the server; the request was not done. |
-| `LIMIT` | `NEW` or `JON` by a player playing as many games as the server allows, or waiting at as many open tables of that game (Tables, above), a table has twice as many invitations out as free seats, or 20 notes, `PRF SET` would pass 16 keys or 1024 bytes, `TDS` 16 keys, or a connection would declare more than 4 protocols with `PRO`. |
+| `LIMIT` | `NEW` or `JON` by a player playing as many games as the server allows, or waiting at as many open tables of that game (Tables, above), a table has twice as many invitations out as free seats, or 20 notes, `PRF SET` would pass 16 keys or 1024 bytes, `TDS` 16 keys, a connection would declare more than 4 protocols with `PRO`, or `KEY NEW` for a player with 20 sign-in keys. |
 | `LOCKED` | The name is locked after wrong answers, or the address has used up its wrong answers (with `wait=`). |
 | `NAMEINUSE` | `REG` for a name that has an account, or the name was taken by someone else while this sign-up ran (a pending account holds its name). |
 | `NAMERULE` | `REG` (or `HELO` for a free name) with a name outside the rule for new names: it has at least one letter, so it cannot read as a table number, and `-` and `_` go only between letters or digits. Names from before the rule still sign in. |
-| `NOAUTH` | `PWD` on a server whose sign-in has no password. |
+| `NOAUTH` | `PWD` or `KEY NEW` on a server whose sign-in has no password. |
 | `NOGAME` | `NEW` or `TOP` for a game this server does not host, or `RES`, `MOV` or `CHK` at a table whose game is not running. |
 | `NOHELO` | The request needs a sign-in first (or `OUT` when not signed in). |
+| `NOKEY` | `AUT key` with a sign-in key the server does not take (forgotten, expired, or the password changed): forget it and ask for the password (with `wait=` when the name is locked); or `KEY DEL` for a key that is not there. |
 | `NEWLINE` | A line that does not end with the connection's line ending; it was not carried out. |
 | `NOINVITE` | `UNV` for an invitation that does not exist. |
 | `NEWPASS` | A temporary password was right, but the frontend cannot ask for the new password; sign in on the web or by telnet first. |
@@ -1074,7 +1144,7 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `RATE` | Too many requests too fast (the request was not done), or three failed `SES` on one connection. |
 | `RESERVED` | `REG` (or `HELO` for a free name) with a reserved word: `new` or `guest`, or a name that would pass for the server or its staff (`parlornet`, the server's own name, `admin`, `administrator`, `sysop`, `system`, `server`, `operator`, `moderator`, `staff`, `root`); `USER`, `HELO` or `REG` with a bot's name (`bot`, `bot1` to `bot3`). |
 | `SIGNEDOUT` | This connection's session was ended elsewhere; sign in again. |
-| `STATE` | Not now: already signed in, already seated, an `AUT` that answers nothing asked, a seat that has left the game. |
+| `STATE` | Not now: already signed in, already seated, an `AUT` that answers nothing asked, a seat that has left the game, `KEY NEW` anywhere but right after a sign-in with the password. |
 | `SUSPENDED` | The operator suspended this name. |
 | `SYNTAX` | The request is malformed; the text shows the right form. |
 | `TAKEN` | The seat is taken or held for an invited player. |

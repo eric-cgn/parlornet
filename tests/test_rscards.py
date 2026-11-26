@@ -3,11 +3,11 @@ ends, driven by the scripted front end in tests/rscfront.py."""
 import os
 import socket
 import sys
-import threading
 import time
 import unittest
 
-from test_adapters import spawn
+import procs
+from procs import owned, spawn
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 from rscfront import Front
 
@@ -132,26 +132,18 @@ class Stack(unittest.TestCase):
     def setUpClass(cls):
         cls.core, cls.fe, cls.port = free_port(), free_port(), free_port()
         cls.keys = make_keys("rscards", "bot")
-        cls.procs = [spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password"),
-                     spawn(*adapter_args("adapters.rscards", cls.port, cls.fe, cls.keys, "rscards"),
-                           "--poll", "0.3", "--guide", "3", "--guide-again", "6",
-                           "--trigger-again", "4")]
+        del LOG[:]
+        cls.procs = owned(cls)
+        cls.procs.append(spawn(*stack_args(cls.core, cls.fe, cls.keys), "--auth", "password"))
+        cls.procs.append(spawn(*adapter_args("adapters.rscards", cls.port, cls.fe, cls.keys, "rscards"),
+                               "--poll", "0.3", "--guide", "3", "--guide-again", "6",
+                               "--trigger-again", "4", err=LOG))
         cls.procs.append(spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", cls.keys + "/bot.key",
                                "--think", "0,0", "--pace", "0", "--poll", "0.3"))
-        del LOG[:]
-        for i, p in enumerate(cls.procs):
-            for f in (p.stdout, p.stderr):
-                keep = LOG if (i == 1 and f is p.stderr) else None
-                threading.Thread(target=lambda f=f, keep=keep: [keep.append(l.decode(errors="replace").rstrip())
-                                                                if keep is not None else None
-                                                                for l in iter(f.readline, b"")],
-                                 daemon=True).start()
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
+        procs.stop_all(cls.procs)
 
     def signup(self, name):
         from test_fibs import Stack as FibsStack

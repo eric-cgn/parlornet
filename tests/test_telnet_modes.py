@@ -348,7 +348,7 @@ class Help(unittest.TestCase):
             self.assertEqual(heads, ["Moving", "Keys for %s" % module.NAME, "Commands", "Every game"], module.KEY)
             self.assertEqual(one[-2:], g.EVERY_GAME)
             self.assertEqual(two[-2:], ["Every table also takes /say, /invite, /note, /time and /leave.",
-                                        "Type /practice for a short lesson on these keys."])
+                                        "Type /tutorial for a short lesson on these keys."])
             for page in (one, two):
                 self.assertLessEqual(len(page), T.HELP_ROWS, module.KEY)
                 for l in page:

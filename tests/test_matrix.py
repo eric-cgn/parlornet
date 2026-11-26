@@ -22,6 +22,7 @@ import unittest
 from itertools import permutations
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+import procs
 from test_adapters import Browser, Client, spawn
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
@@ -297,13 +298,13 @@ class TelnetFE:
             c.send(p.name + "\r\n")
             self.raw_until(c, "Press Enter")
             c.send("\r\n")
-        if self.full:                                   # the first sign-in offers the practice game once
+        if self.full:                                   # the first sign-in offers the tutorial once
             end = time.time() + WAIT
-            while "Your tables" not in c.vt.text() and "practice game to learn" not in c.vt.text():
+            while "Your tables" not in c.vt.text() and "short tutorial on how" not in c.vt.text():
                 if c.closed or time.time() > end:
                     raise AssertionError("no lobby:\n%s" % self.dump(c))
                 c.pump()
-            if "practice game to learn" in c.vt.text():
+            if "short tutorial on how" in c.vt.text():
                 c.send("n")
         self.see(c, "Your tables")
         if self.moves:                                  # /keys: the movement keys (kept for the player)
@@ -868,7 +869,8 @@ class Matrix:
         cls.core_port, cls.fe_port, cls.web_port, cls.tel_port = free_port(), free_port(), free_port(), free_port()
         cls.keys = make_keys("web", "telnet")
         core = ["tests.matrix_core"] + stack_args(cls.core_port, cls.fe_port, cls.keys)[1:]
-        cls.procs = [spawn(*core, "--auth", "none")]
+        cls.procs = procs.owned(cls)
+        cls.procs.append(spawn(*core, "--auth", "none"))
         if cls.FE[0] == "web":
             cls.procs.append(spawn(*adapter_args("adapters.web", cls.web_port, cls.fe_port, cls.keys, "web")))
         if cls.FE[0] == "telnet":
@@ -877,11 +879,7 @@ class Matrix:
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            p.stderr.close()
+        procs.stop_all(cls.procs)
 
     def frontend(self):
         kind = self.FE[0]
@@ -920,8 +918,8 @@ class Matrix:
         if fails:
             logs = []
             for proc in self.procs:         # what the servers said (they are not needed any more)
-                proc.kill()
-                logs.append(proc.stderr.read().decode("latin-1")[-4000:])
+                procs.stop(proc)
+                logs.append("\n".join(proc.tail)[-4000:])
             self.fail("%d of %d tables failed over %s:\n\n%s\n\nThe servers' errors:\n%s"
                       % (len(fails), len(jobs), "/".join(self.FE), "\n\n".join(fails), "\n".join(logs)))
 

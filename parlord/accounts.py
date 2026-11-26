@@ -10,6 +10,8 @@ The core calls it through a connection object `conn` with these attributes:
     pending       the method's dialog state (the method owns it)
     signin        the connection's SessionRec once signed in, else None
     ses_fails     failed SES on this connection
+    key_ok        True right after this connection signed in with the account's password: it may ask for
+                  a sign-in key (KEY NEW) once
 Results are wire-neutral tuples:
     ("ok", player, words)   words for the OK line
     ("ask", field, label, secret)
@@ -31,6 +33,11 @@ SID_RE = re.compile(r"^[A-Za-z0-9_-]{22}\Z")
 SES_TRIES = 3               # failed SES on one connection before SES is refused there
 TOUCH_WRITE_SECS = 60       # write a session's last use at most this often
 LOCK_STRIPES = 64
+# Sign-in keys (docs/accounts.md, Staying signed in): a computer where a player stays signed in keeps one,
+# never the password. 128 random bits, 22 characters, stored only as SHA-256 like session ids.
+KEYS_MAX = 20               # keys one player may hold at once (ERR LIMIT past it)
+KEY_IDLE_SECS = 90 * 86400  # the default of keys.idle_secs: a key unused this long is forgotten
+KEY_LABEL_LEN = 32          # a key's label (KEY NEW label): printable ASCII, cleaned by the core
 
 
 STEP_KINDS = frozenset(("text", "secret", "yn", "info"))     # what a frontend may declare with CAN
@@ -65,12 +72,13 @@ class SessionRec:
     """One sign-in. hash is None for a connection-bound session (public port).
     fp: the fingerprint of the server extension's key it was issued under. since: created on the
     monotonic clock (time.monotonic), so the seconds since it (TIM) never run backward with the wall clock."""
-    __slots__ = ("hash", "key", "frontend", "method", "created", "used", "written", "ended", "fp", "since")
+    __slots__ = ("hash", "key", "frontend", "method", "created", "used", "written", "ended", "fp", "since", "devkey")
 
-    def __init__(self, h, key, frontend, method, created, used, fp=""):
+    def __init__(self, h, key, frontend, method, created, used, fp="", devkey=0):
         self.hash, self.key, self.frontend, self.method = h, key, frontend, method
         self.created, self.used, self.written, self.ended = created, used, used, False
         self.fp = fp or ""
+        self.devkey = devkey or 0       # the number of the sign-in key it signed in with or was given (0: none)
         self.since = time.monotonic() - max(0.0, time.time() - created)
 
 
@@ -149,8 +157,8 @@ class Accounts:
             self.players[row[0].lower()] = Player(*row)
         bots.load(self)             # the bot accounts (parlord/bots.py)
         now = time.time()
-        for h, key, frontend, method, created, used, fp in self.store.load_sessions():
-            rec = SessionRec(h, key, frontend, method, created, used, fp)
+        for h, key, frontend, method, created, used, fp, devkey in self.store.load_sessions():
+            rec = SessionRec(h, key, frontend, method, created, used, fp, devkey)
             if key in self.players and self.valid(rec, now, idle=True):
                 self.sessions[h] = rec
                 self.by_player.setdefault(key, set()).add(rec)
@@ -322,32 +330,38 @@ class Accounts:
         conn.pending = None
         if method is not self.method:
             return ("err", "STATE", "the sign-in method changed; sign in again")
-        if conn.signin is not None:     # a password change: other sessions end, this one stays
+        extra = r[3] if len(r) > 3 else {}
+        if conn.signin is not None:     # a password change: other sessions end, this one stays, and keys go
             self.end_all(p.name.lower(), keep=conn.signin)
+            self.forget_keys(p.name.lower())
+            self.set_devkey(conn.signin, 0)
+            conn.key_ok = self.keys_offered(p)
             return ("done",)
         if p.suspended:
             return ("err", "SUSPENDED", "this name is suspended")
-        if len(r) > 3 and r[3].get("revoke"):
+        if extra.get("revoke"):        # a new password: every other session ends and every sign-in key goes
             self.end_all(p.name.lower())
+            self.forget_keys(p.name.lower())
         self.trust(p.name, getattr(conn, "source", None))       # this address is the player's now
-        rec, sid = self.create(p, conn.frontend, getattr(conn, "fingerprint", None))
+        rec, sid = self.create(p, conn.frontend, getattr(conn, "fingerprint", None), extra.get("key", 0))
         conn.signin = rec
+        conn.key_ok = not extra.get("key") and self.keys_offered(p)    # signed in with the password itself
         p.last_seen = time.time()
         self.save_player(p)
         return ("ok", p, [sid if conn.frontend else "-"])
 
     # ---- sessions --------------------------------------------------------------
-    def create(self, p, frontend, fp=None):
+    def create(self, p, frontend, fp=None, devkey=0):
         now = time.time()
         key = p.name.lower()
         sid = None
         if frontend:
             sid = secrets.token_urlsafe(16)
-            rec = SessionRec(sid_hash(sid), key, frontend, self.method.name, now, now, fp)
+            rec = SessionRec(sid_hash(sid), key, frontend, self.method.name, now, now, fp, devkey)
             self.sessions[rec.hash] = rec
             self.store.save_session(rec)
         else:
-            rec = SessionRec(None, key, None, self.method.name, now, now)
+            rec = SessionRec(None, key, None, self.method.name, now, now, devkey=devkey)
         self.by_player.setdefault(key, set()).add(rec)
         return rec, sid
 
@@ -442,12 +456,21 @@ class Accounts:
         return n
 
     def sign_out(self, conn, everywhere=False):
-        """OUT (this session) or OUT all (every session of the player)."""
+        """OUT (this session) or OUT all (every session of the player). Signing out always forgets the
+        sign-in key the session signed in with or was given. OUT all forgets every key of the player."""
         rec = conn.signin
         if rec is None:
             return ("err", "NOHELO", "not signed in")
         conn.signin = None
-        n = self.end_all(rec.key) if everywhere else (self.end(rec) or 1)
+        conn.key_ok = False
+        if everywhere:
+            n = self.end_all(rec.key)
+            self.forget_keys(rec.key)
+        else:
+            self.end(rec)
+            n = 1
+            if rec.devkey:
+                self.store.delete_key(rec.key, rec.devkey)
         return ("ok", None, [str(n)])
 
     def connection_closed(self, conn):
@@ -499,6 +522,7 @@ class Accounts:
         if p is None:
             return False, "no such player", None
         p.fails, p.locked_until = 0, 0.0
+        self.forget_keys(p.name.lower())        # every computer where the player stays signed in signs in again
         signin = self.method.signin
         code = None
         if signin.name == "password":
@@ -539,6 +563,115 @@ class Accounts:
         if now - getattr(self, "trust_swept", 0) > 3600:
             self.trust_swept = now
             self.store.forget_trust(now - auth.TRUST_SECS)
+            self.store.forget_unused_keys(now - self.key_idle())
         for rec in list(self.sessions.values()):
             if not self.valid(rec, now, idle=True):
                 self.end(rec)
+
+    # ---- sign-in keys: staying signed in (docs/accounts.md, Staying signed in) ------------------------
+    # A computer where the player chose "Stay signed in" asks for a key right after signing in with the
+    # password (KEY NEW) and keeps it instead of the password. Next time it answers the password question
+    # with the key (AUT key, checked by the sign-in method under the name's lock, auth.PasswordSignIn), so a
+    # wrong key counts like a wrong password. Only a key's SHA-256 is stored, with the channel it was issued
+    # on (the server extension's key name, or "" for the public port), which is the only channel where it
+    # works. Signing out forgets it, and a password change or the operator's reset forgets them all.
+    def key_idle(self):
+        return self.secs("keys.idle_secs", KEY_IDLE_SECS)
+
+    def keys_offered(self, p):
+        """Whether a player may have sign-in keys: sign-in password, and not a bot."""
+        return self.method.signin.name == "password" and not bots.is_bot(p)
+
+    def live_keys(self, key, now=None):
+        """The player's keys used within keys.idle_secs: [(n, hash, frontend, label, created, used)]. Older
+        ones are forgotten on the way."""
+        now = now or time.time()
+        rows = self.store.keys_of(key)
+        live = [r for r in rows if now - r[5] <= self.key_idle()]
+        for r in rows:
+            if r not in live:
+                self.store.delete_key(key, r[0])
+        return live
+
+    def has_keys(self, p):
+        return bool(self.live_keys(p.name.lower()))
+
+    def key_check(self, p, value, conn, now=None):
+        """The number of the player's key that value is, for the channel conn is on, if it is live; else 0.
+        Every key of the player is compared (constant time, no early end), so the time taken does not say
+        which or whether one matched. A right key is marked used now."""
+        now = now or time.time()
+        value = (value or "").strip()
+        h = sid_hash(value if SID_RE.match(value) else "-" * 22)
+        channel = getattr(conn, "frontend", None) or ""
+        found = 0
+        for n, kh, kfe, _label, _created, _used in self.live_keys(p.name.lower(), now):
+            same = hmac.compare_digest(kh.encode("ascii"), h.encode("ascii"))
+            here = hmac.compare_digest(kfe.encode("ascii", "replace"), channel.encode("ascii", "replace"))
+            if same and here and SID_RE.match(value):
+                found = n
+        if found:
+            self.store.touch_key(p.name.lower(), found, now)
+        return found
+
+    def set_devkey(self, rec, n):
+        rec.devkey = n or 0
+        if rec.hash:
+            self.store.set_session_devkey(rec.hash, rec.devkey)
+
+    def key_issue(self, conn, label):
+        """KEY NEW: a sign-in key for this computer, once, right after signing in with the password on this
+        connection. ("ok", key) or ("err", code, text). The key is returned once and never kept."""
+        rec = conn.signin
+        p = self.players.get(rec.key) if rec else None
+        if p is None:
+            return ("err", "NOHELO", "not signed in")
+        if not self.keys_offered(p):
+            return ("err", "NOAUTH", "this server signs in without a password, so there is no key to keep")
+        if not getattr(conn, "key_ok", False):
+            return ("err", "STATE", "a key is given right after signing in with your password")
+        if len(self.live_keys(rec.key)) >= KEYS_MAX:
+            return ("err", "LIMIT", "you already stay signed in on %d computers, and that is the most" % KEYS_MAX)
+        key = secrets.token_urlsafe(16)
+        n = self.store.add_key(rec.key, sid_hash(key), conn.frontend or "", label, time.time())
+        self.set_devkey(rec, n)
+        conn.key_ok = False
+        return ("ok", key)
+
+    def key_list(self, conn, now=None):
+        """KEY LST: [(n, created, used, here, label)] of the signed-in player's live keys; here: the key this
+        session signed in with or was given."""
+        rec = conn.signin
+        return [(n, created, used, n == rec.devkey, label)
+                for n, _h, _fe, label, created, used in self.live_keys(rec.key, now)]
+
+    def key_forget(self, conn, which=None):
+        """KEY DEL (this session's key), KEY DEL n or KEY DEL all. Sessions that signed in with a forgotten key,
+        or were given it, end, except this connection's own, so forgetting a computer signs it out. Returns
+        ("ok", how many) or ("err", code, text)."""
+        rec = conn.signin
+        if which is None:
+            if not rec.devkey:
+                return ("err", "NOKEY", "this computer has no key")
+            gone = {rec.devkey}
+            n = self.store.delete_key(rec.key, rec.devkey)
+        elif which == "all":
+            gone = {r[0] for r in self.store.keys_of(rec.key)}
+            n = self.store.delete_keys(rec.key)
+        else:
+            if not self.store.delete_key(rec.key, which):
+                return ("err", "NOKEY", "there is no key %d" % which)
+            gone, n = {which}, 1
+        for other in list(self.by_player.get(rec.key, ())):
+            if other is not rec and other.devkey in gone:
+                self.end(other)
+        if rec.devkey in gone:
+            self.set_devkey(rec, 0)
+        return ("ok", n)
+
+    def forget_keys(self, key):
+        """Every sign-in key of a player goes (a password change, the operator's reset, OUT all)."""
+        for rec in list(self.by_player.get(key, ())):
+            if rec.devkey:
+                self.set_devkey(rec, 0)
+        return self.store.delete_keys(key)

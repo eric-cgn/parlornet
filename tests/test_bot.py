@@ -13,11 +13,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from urllib.parse import urlencode
 
+import procs
 from test_adapters import Browser, Client
 from test_auth import frontend, public, say, server
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
@@ -205,35 +205,19 @@ class WithAServer(unittest.TestCase):
         cls.core, cls.fe, cls.web_port, cls.tel_port = free_port(), free_port(), free_port(), free_port()
         cls.keys = make_keys("web", "telnet", "bot")
         args = stack_args(cls.core, cls.fe, cls.keys)[1:] + ["--auth", "none", "--turn-min", "1", "--sweep", "0.3"]
-        cls.procs = [cls.spawn("tests.matrix_core", *args)]
-        cls.procs.append(cls.spawn(*adapter_args("adapters.web", cls.web_port, cls.fe, cls.keys, "web")))
-        cls.procs.append(cls.spawn(*adapter_args("adapters.telnet", cls.tel_port, cls.fe, cls.keys, "telnet")))
+        cls.procs = procs.owned(cls)
+        cls.procs.append(procs.spawn("tests.matrix_core", *args))
+        cls.procs.append(procs.spawn(*adapter_args("adapters.web", cls.web_port, cls.fe, cls.keys, "web")))
+        cls.procs.append(procs.spawn(*adapter_args("adapters.telnet", cls.tel_port, cls.fe, cls.keys, "telnet")))
         cls.out = []
-        cls.bot = cls.spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", os.path.join(cls.keys, "bot.key"),
-                            "--think", "0,0", "--pace", "0", "--poll", "0.3", "--gridwords-secs", "0.3")
+        cls.bot = procs.spawn("bot", "--core", "127.0.0.1:%d" % cls.fe, "--key", os.path.join(cls.keys, "bot.key"),
+                              "--think", "0,0", "--pace", "0", "--poll", "0.3", "--gridwords-secs", "0.3",
+                              stderr=subprocess.STDOUT, out=cls.out)
         cls.procs.append(cls.bot)
-        threading.Thread(target=cls.drain, args=(cls.bot,), daemon=True).start()
-
-    @staticmethod
-    def spawn(*args):
-        p = subprocess.Popen([sys.executable, "-m"] + list(args), cwd=ROOT, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT if args[0] == "bot" else subprocess.PIPE)
-        p.first = p.stdout.readline().decode("latin-1")
-        return p
-
-    @classmethod
-    def drain(cls, p):
-        for line in iter(p.stdout.readline, b""):
-            cls.out.append(line.decode("latin-1").rstrip())
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.procs:
-            p.kill()
-            p.wait()
-            p.stdout.close()
-            if p.stderr:
-                p.stderr.close()
+        procs.stop_all(cls.procs)
 
     def bot_said(self):
         """What the bot logged: nothing but sign-in news is expected (a refused move or a failure is a fault)."""
@@ -440,7 +424,7 @@ class WithAServer(unittest.TestCase):
             c.send("fully\r\n")
             c.until("Press Enter")
             c.send("\r\n")
-            c.until("Would you like a two-minute practice game", screen=True)
+            c.until("Would you like a short tutorial", screen=True)
             c.send("n")
             c.until("Your tables", screen=True)
             c.send("/open mancala kalah 5m\r")

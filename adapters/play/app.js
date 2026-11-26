@@ -271,7 +271,15 @@ var PN = (function () {
       }
       return req("SES");
     }).then(function (r) {
+      // SES alone resumes the cookie's session, or signs in with the Stay signed in key, and then an HND for
+      // the new session comes first. A key the server refused is cleared here too.
+      var h = r.lines.filter(function (l) { return l.indexOf("HND ") === 0; })[0];
+      if (h) keepSession(h.split(" ")[1]);
       if (ok(r) && r.final.split(" ")[1]) return signedIn(r.final.split(" ")[1]);
+      if (/^ERR NOKEY/.test(r.final)) {
+        forgetCookies();
+        return showSignin(PNNet.errText(r.final));
+      }
       showSignin();
     }).catch(function () {
       $("connect-msg").textContent = "The game server isn't answering.";
@@ -300,6 +308,7 @@ var PN = (function () {
       $("t-signup").setAttribute("aria-selected", kind === "signup");
       $("signin-title").textContent = kind === "signin" ? "Sign in" : "New account";
       $("b-name").textContent = kind === "signin" ? "Sign in" : "Make the account";
+      $("l-stay").hidden = kind !== "signin" || (S.info && S.info.auth === "none");
       $("signin-msg").textContent = "";
     }
     $("t-signin").addEventListener("click", function () { tab("signin"); });
@@ -309,6 +318,7 @@ var PN = (function () {
       var name = $("i-name").value.trim();
       if (!/^[A-Za-z0-9_-]{1,12}$/.test(name)) { $("signin-msg").textContent = "Names are letters, digits, - and _, up to 12."; return; }
       flow.name = name;
+      flow.stay = flow.kind === "signin" && $("i-stay").checked && !$("l-stay").hidden;
       $("b-name").disabled = true;
       var verb = flow.kind === "signup" ? "REG" : (S.info.auth === "none" ? "HELO" : "USER");
       req(verb + " " + name).then(step).then(function () { $("b-name").disabled = false; });
@@ -329,6 +339,7 @@ var PN = (function () {
   function showSignin(msg) {
     show("signin");
     $("f-name").hidden = false; $("f-step").hidden = true;
+    $("l-stay").hidden = flow.kind !== "signin" || !S.info || S.info.auth === "none";
     $("signin-msg").textContent = msg || "";
     crumbs([["Sign in"]]);
     $("who").textContent = ""; $("b-out").hidden = true; $("b-activity").hidden = true;
@@ -354,7 +365,15 @@ var PN = (function () {
     if (ok(r)) {
       var h = r.lines.filter(function (l) { return l.indexOf("HND ") === 0; })[0];
       if (h) keepSession(h.split(" ")[1]);
-      return signedIn(flow.name);
+      if (!flow.stay) return signedIn(flow.name);
+      // Stay signed in asks for a sign-in key for this browser right after the password. The page never
+      // sees the key, only a handle for the key cookie.
+      flow.stay = false;
+      return req("KEY NEW").then(function (k) {
+        var kh = k.lines.filter(function (l) { return l.indexOf("HND ") === 0; })[0];
+        if (ok(k) && kh) keepSession(kh.split(" ")[1]);
+        return signedIn(flow.name);
+      });
     }
     var msg = PNNet.errText(r.final);
     if (/^ERR NOPLAYER/.test(r.final)) msg = "There is no account named " + flow.name + ". Choose New account to make one.";
@@ -362,6 +381,11 @@ var PN = (function () {
     showSignin(msg);
     $("i-name").value = flow.name;
     // a refused step ends the connection's dialog on the server: start again cleanly
+  }
+  function forgetCookies() {
+    // signing out forgets this browser's session and its Stay signed in key
+    return fetch("/play/session", {method: "POST", credentials: "same-origin", body: "out=1",
+                                   headers: {"Content-Type": "application/x-www-form-urlencoded"}}).catch(function () {});
   }
   function keepSession(handle) {
     // the Play extension's session cookie, so a reload resumes (SES)
@@ -398,8 +422,7 @@ var PN = (function () {
     pushSubscription().then(function (sub) { return sub ? pushOff() : null; }).catch(function () {}).then(function () {
       return req("OUT");
     }).then(function () {
-      fetch("/play/session", {method: "POST", credentials: "same-origin", body: "out=1",
-                              headers: {"Content-Type": "application/x-www-form-urlencoded"}}).catch(function () {});
+      forgetCookies();
       closeTable();
       S.me = null;
       history.replaceState(null, "", "#/");

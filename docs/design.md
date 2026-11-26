@@ -10,7 +10,7 @@ The design has three layers. The principles say what every frontend does and why
 2. **A game has a game mode and a command mode.** In game mode, keys play the game and never type. Keys are shortcuts there, and the arrows move the cursor. The `/` key switches to command mode, where every key types until Enter runs the line or Esc clears it. Two modes mean a key has one job at a time.
 3. **Each letter has one meaning in every game.** R always resigns, U always undoes and D always doubles or offers a draw. A letter that a game has no use for does nothing. A player who learns a letter in one game never has to unlearn it in another.
 4. **Offers and confirmations are dialogs.** A double, a draw offer, an offer to resign, an invitation and every "are you sure" question appear in a dialog over the board. The dialog is answered inside itself, with its own buttons or keys. A question that interrupts play should look like one, and it should never be answered by accident from the command line.
-5. **The `?` key opens help that explains the keys for where you are.** It works the same at a table, in the lobby, in the practice game and on the chat screen. A player who is lost needs one key to remember.
+5. **The `?` key opens help that explains the keys for where you are.** It works the same at a table, in the lobby, in the tutorial and on the chat screen. A player who is lost needs one key to remember.
 6. **The Esc key cancels the current operation, and with nothing to cancel it goes back to the lobby.** It drops a pick, clears a typed command line, closes a dialog or leaves an entry mode. When nothing is going on, it takes you to the lobby, and the game goes on without you. Esc never ends a game, a turn or a session, so pressing it is always safe.
 7. **One sentence always says what you can do now.** The sentence line says whose turn it is and what the next key or click will do. A player who reads it never has to guess.
 8. **Every frontend uses the same names, labels and order.** An action has one name, its button has one label, and the actions appear in one order. A player who moves from a terminal to a browser finds everything where they expect it.
@@ -18,6 +18,7 @@ The design has three layers. The principles say what every frontend does and why
 10. **Every action can be reached by keys alone and by pointer alone.** A keyboard player never needs a mouse, and a joystick, mouse or touch player never needs the keyboard, except to type chat or commands. Old machines have one or the other, and some players can use only one.
 11. **The words are plain.** Every line on screen is a sentence a person would say aloud. The screen never shows internal words such as seat numbers, protocol verbs or port numbers, and it never uses labels like "PASS=p". A player reads a game, not a program.
 12. **Nothing that ends a turn or a game happens without asking.** Resigning, passing, dropping a double, ending a turn that won't count and signing out all ask first, in a dialog. A slip of a finger should never cost a game.
+13. **A few commands belong to the client, and the client never sends them to the server.** `/tutorial`, `/help` and redrawing the screen are the client's own, and every other `/` line goes to the server. A command that only changes what is on the player's screen has no business on the parlor. [Commands the client handles itself](#commands-the-client-handles-itself) says which ones and how.
 
 ## The shared words
 
@@ -154,7 +155,7 @@ A dialog appears over the board for every offer and every confirmation. It holds
 | a draw offer | "ann offers a draw. If you accept, the game ends as a draw. If you decline, the game goes on." | Accept, Decline | Decline |
 | an offer to resign | "ann offers to resign a gammon. If you accept, you win 2 points and the game. If you decline, the game goes on." | Accept, Decline | Decline |
 | an invitation | "ann invites you to play Grid Words at table 12. If you accept, you sit down there." | Accept, Decline | Accept |
-| the practice game, at the first sign-in | "Would you like a two-minute practice game to learn the keys? It is not played on the parlor." | Yes, No | Yes |
+| the tutorial, at the first sign-in | "Would you like a short tutorial on how the games work? You can run it again any time with /tutorial." | Yes, No | Yes |
 
 At a table with more than two players, "ann wins." becomes "The others play on."
 
@@ -209,7 +210,7 @@ A frontend that can't redraw once a second may show whole minutes above the last
 Every game's help has two pages, with the same headings on every frontend. The title of a page reads "Grid Words help, page 1 of 2".
 
 - **Page 1 explains how to play here.** It has four parts. "Moving" comes first, with at most four lines in the order the move happens. "Keys for Grid Words" comes next, with one sentence for each shortcut. A frontend of buttons calls it "Buttons for Grid Words". "Commands" follows, with the typed move and the game's commands. "Every game" comes last, and it says the same thing in every game. On telnet it reads "R resigns, after asking first. T or Tab opens the chat. Esc goes back to the lobby, and the game goes on without you."
-- **Page 2 is the reference.** It holds the facts you look up, such as the letter values, the notation, the rules in use, ship sizes and what the marks on the board mean. Its last line names the commands that work at every table, and the practice game where the frontend has one.
+- **Page 2 is the reference.** It holds the facts you look up, such as the letter values, the notation, the rules in use, ship sizes and what the marks on the board mean. Its last line names the commands that work at every table, and the tutorial where the frontend has one.
 
 Space or the Right arrow turns to the next page, the Left arrow turns back, and Esc or Enter closes help. The foot of each page says how, as in "Press Space for page 2, or Esc to close." The lobby's help has one page, which explains the lobby's keys and commands.
 
@@ -230,12 +231,13 @@ The server keeps the text of both pages with each game. Page 2 is the same on ev
 | dialog | the box that asks a question or shows an offer |
 | draw | a drawn game, and never taking a tile |
 | leave | going back to the lobby while the game goes on |
-| sign out | ending your session, while your games go on |
+| sign out | ending your session, while your games go on; it also ends Stay signed in on this computer |
+| Stay signed in | the setting that lets this computer sign in again without the password |
 | lobby | the list of your games, your invitations and the open tables |
 | log | the list of what happened at the table, under the chat |
 | clock | the time you have left for this turn |
 | the bot | ParlorNet's computer player |
-| practice game | the Tic Tac Toe lesson, which is never played on the parlor |
+| tutorial | the Tic Tac Toe lesson, which is never played on the parlor |
 
 ## The program flow
 
@@ -249,17 +251,19 @@ The frontend reaches the parlor. It says what it is doing in a sentence, as in "
 |---|---|
 | connect | Enter, or the frontend's Connect step |
 | choose the terminal type or the line's settings | where the frontend has them |
-| play the practice game | on the 8-bit program, before connecting |
+| run the tutorial | on the 8-bit program, before connecting |
 
 ### 2. Signing in or signing up
 
 The parlor asks its questions one at a time, and the frontend shows each one as the parlor words it. A new name starts a sign-up. A password is never shown on screen. Esc goes back to the step before.
 
-At the first sign-in on telnet or the 8-bit program, the practice game dialog asks whether the player wants the lesson. The answer is kept with the player, so the dialog never comes back.
+**Stay signed in.** A frontend that can keep a little data of its own offers the setting Stay signed in, with that label. On the 8-bit program it is in the settings, and on the web pages and in Play it is a checkbox on the sign-in form. With it on, the first successful sign-in with the password gets a sign-in key for this computer (`KEY NEW`), and nothing more is asked. The frontend keeps the key and never the password. Next time it signs in with the name and the key (`AUT key`), and the player goes straight to the lobby. When the parlor refuses the key (`ERR NOKEY`), the frontend forgets it and asks for the password as usual, in the parlor's words. Turning the setting off forgets the key (`KEY DEL`). A frontend that cannot keep anything does not show the setting. Telnet is one, because a telnet program has nowhere to keep a key. The player's profile lists the computers where they stay signed in, with each one's label and when it was last used, and lets them forget any of them.
+
+At the first sign-in on telnet's full screen or the 8-bit program, a player who has never seen the tutorial gets the tutorial dialog. It asks whether the player wants the lesson, and it says that `/tutorial` runs it again any time. The answer is kept with the player either way, so the dialog never comes back.
 
 ### 3. The lobby
 
-The lobby lists, in this order, your games with the ones where it's your turn first, your invitations, the open tables waiting for a player, and the practice game. Its sentence says what matters most, as in "It's your turn at table 12." or "You have no games yet. Press N to open a table."
+The lobby lists, in this order, your games with the ones where it's your turn first, your invitations, the open tables waiting for a player, and the tutorial. Its sentence says what matters most, as in "It's your turn at table 12." or "You have no games yet. Press N to open a table."
 
 | What you can do | How |
 |---|---|
@@ -268,7 +272,7 @@ The lobby lists, in this order, your games with the ones where it's your turn fi
 | join an open table | Enter on it |
 | watch a game | Enter on a game you don't play in |
 | open a table | N, or the New table button |
-| play the practice game | Enter on it, or `/practice` |
+| run the tutorial | Enter on it, or `/tutorial` |
 | run a command | `/`, as in `/who` or `/top` |
 | see the keys | `?` |
 | sign out | `/quit`, or the Sign out button, which opens the sign-out dialog |
@@ -320,7 +324,7 @@ Esc with nothing picked, the Lobby button or `/leave` takes you back to the lobb
 
 ### 10. Signing out
 
-`/quit`, the Sign out button or the 8-bit program's OA-Q opens the sign-out dialog, "Sign out? Your games go on without you." Yes signs you out. Your games wait for you at their tables.
+`/quit`, the Sign out button or the 8-bit program's OA-Q opens the sign-out dialog, "Sign out? Your games go on without you." Yes signs you out. Your games wait for you at their tables. Signing out always forgets this computer's sign-in key, on the computer and at the parlor, whatever the Stay signed in setting, so the next sign-in asks for the password. With the setting still on, that sign-in gets a new key. Leaving the program without signing out, by switching the computer off or closing the window, keeps the key.
 
 ## Each game's actions
 
@@ -345,19 +349,19 @@ Esc with nothing picked, the Lobby button or `/leave` takes you back to the lobb
 
 **Page 2 of each game's help** holds the board's notation, the marks on the board and the rules in use. It also covers Grid Words' letter values and premium squares, Backgammon's numbering, cube and bearing off, Checkers' compulsory captures and kings, Naval Combat's ship sizes and salvos, Cannon Fire's angles, power and wind, and Rummy Tile's step forms, set marks and first meld.
 
-## The practice game
+## The tutorial
 
-The practice game is a lesson in Tic Tac Toe that teaches the keys, the command line, the chat, help and dialogs. It runs only on the player's own screen. It never sends a move to the parlor and never makes a table. Telnet and the 8-bit program have it, because their keys are the one thing a new player can't guess. Play, the web pages and GameMaster don't, because every action there is a labeled button or link.
+The tutorial is a lesson in Tic Tac Toe that teaches the keys, the command line, the chat, help and dialogs. It runs only on the player's own screen. It never sends a move to the parlor and never makes a table. Telnet and the 8-bit program have it, because their keys are the one thing a new player can't guess. Play, the web pages and GameMaster don't, because every action there is a labeled button or link.
 
-It uses the same screen as a real game. The title reads "Tic Tac Toe practice", and a line says "Practice only. Nothing you do here reaches the parlor." The opponent is the "practice partner", whose moves are scripted so that every player sees the same game. A Lesson box says "Step 2 of 18." and what the step teaches. Each step puts one instruction on the sentence line, and the next step comes only when the player does that thing. Any other key gets the same instruction again, starting with "Not yet." Every key still works as in a real game. Commands that need the parlor answer "This is a practice game, so that command does nothing here."
+It uses the same screen as a real game. The title reads "Tic Tac Toe tutorial", and a line says "This tutorial is not played on the parlor. Nothing you do here reaches it." The opponent is the "tutorial partner", whose moves are scripted so that every player sees the same game. A Lesson box says "Step 2 of 18." and what the step teaches. Each step puts one instruction on the sentence line, and the next step comes only when the player does that thing. Any other key gets the same instruction again, starting with "Not yet." Every key still works as in a real game. Commands that need the parlor answer "This is the tutorial, so that command does nothing here."
 
-It starts from the lobby's list, from `/practice`, from the first-sign-in dialog and from the last line of every game's help page 2. On the 8-bit program it also starts from the start screen, before connecting.
+It starts from the lobby's list, from `/tutorial`, from the first-sign-in dialog and from the last line of every game's help page 2. `/tutorial` is a command the client handles itself, and it never contacts the parlor. The tutorial's last step says that `/tutorial` runs it again. On the 8-bit program it also starts from the start screen, before connecting.
 
 The steps are below in telnet's keys. The 8-bit program names its own keys in each step, such as Return, OA-U and RUN/STOP, and each of its steps also takes the button or the click that does the same thing.
 
 | Step | The instruction | What the player does | What it teaches |
 |---|---|---|---|
-| 1 | "This practice game shows how every game works. Press Enter to begin." | presses Enter | Enter |
+| 1 | "This tutorial shows how every game works. Press Enter to begin." | presses Enter | Enter |
 | 2 | "Press the arrows to move to the middle square." | moves to b2 | moving |
 | 3 | "Press Enter to place your X." | places X on b2, and the partner places O on a1 | Enter plays, and the panel shows the last move |
 | 4 | "Your partner placed an O on a1. Move to c1 and press Enter." | places X on c1 | the turn and the last move in words |
@@ -374,7 +378,22 @@ The steps are below in telnet's keys. The 8-bit program names its own keys in ea
 | 15 | "Press ? to open help. Space turns the page, and Esc closes it." | opens help and closes it | help |
 | 16 | "Press R to see how a game asks before it ends something. Then press Esc to answer No." | opens the resign dialog and cancels it | dialogs, and Esc in a dialog |
 | 17 | "Move to c2 and press Enter to finish your line." | places X on c2 and wins | the end of a game |
-| 18 | "You won the practice game. Press Esc to go back to the lobby." | presses Esc | Esc with nothing to cancel |
+| 18 | "You won. Press Esc to go back to the lobby. /tutorial runs it again any time." | presses Esc | Esc with nothing to cancel |
+
+## Commands the client handles itself
+
+A few `/` commands belong to the client. The client runs them on its own and never sends them to the server. Every other `/` line, a typed move included, goes to the server with the `CMD` request ([What the server provides](#what-the-server-provides)), and the server answers it in the shared words.
+
+**A client-side command must never be sent to the server.** It is not a command line for `CMD`, it is not chat and it is not a request of any other kind. These commands belong to the client's own screens, so they mean nothing to the server. Some of them open a screen of the client's that then asks the server for what it shows, as the lobby's `/password` does with its own requests. `/tutorial` goes further, because it never contacts the parlor at all.
+
+Every full-screen client handles at least these two commands itself. Today those clients are telnet's full screen and the 8-bit program.
+
+| Command | What it does |
+|---|---|
+| `/tutorial` | It starts the tutorial, which runs entirely on the client and never reaches the parlor. |
+| `/help` | It opens help for where you are, as `?` does. |
+
+A client may add commands of its own, such as one that redraws the screen or one that goes back to the lobby. Each kind of frontend lists its client-side commands in its own section below. A client keeps the list short, because a command that the server runs reads the same on every frontend, and a client's own command does not.
 
 ## How each kind of frontend carries it
 
@@ -386,6 +405,7 @@ The steps are below in telnet's keys. The 8-bit program names its own keys in ea
 - T or Tab opens the chat screen, where every line is said without `/say`, and a line that starts with `/` is a command.
 - A dialog is a box over the board with its two buttons.
 - Plain mode, for terminals without cursor control, works line by line. A line that starts with `/` is a command or a move, and any other line is chat.
+- Telnet handles these commands itself. At a table they are `/tutorial`, `/help`, `/redraw`, `/leave` and a game's few commands for its screen, such as `/sort` in Rummy Tile and `/home` in Backgammon. In the lobby they are `/tutorial`, `/help`, `/list`, `/resume`, `/watch`, `/password`, `/machine`, `/activity` and `/keys`, and `/open` with nothing after it, which asks the questions N asks. Plain mode has no tutorial, so there `/tutorial` says that the tutorial needs the full screen.
 
 ### 8-bit Hi-Res (the Apple IIe, IIgs and C64 program)
 
@@ -399,7 +419,9 @@ The steps are below in telnet's keys. The 8-bit program names its own keys in ea
 - The buttons along the bottom are Chat, Help, Resign and Lobby. The display choice lives on the start screen and the lobby's Display button. The line console opens with OA-C from the lobby, since the console belongs to the connection and not to a game.
 - **The joystick and the mouse.** A joystick hops the pointer as the arrows do, and a mouse moves it freely. The first button clicks, exactly as Return does. That is the fire button, button 0 of an Apple joystick and the left mouse button. The second button cancels, as Esc does, but it never leaves the table. That is button 1 of an Apple joystick and the 1351 mouse's right button. On the Apple II, the joystick's buttons are the same switches as Open-Apple and Closed-Apple, so the joystick is turned on in the settings. While it is on, a press of button 0 with no key during it is a click, and a key pressed while it is held is an OA shortcut.
 - Every action has a button on screen, so a joystick or a mouse alone can play every game. Grid Words can be played by clicking the rack's tiles.
-- The practice game is an overlay loaded from the disk, so none of it stays in memory during a real game.
+- The tutorial is an overlay loaded from the disk, so none of it stays in memory during a real game.
+- The program handles `/tutorial`, `/help` and `/leave` itself, because they open its own screens. Every other `/` line goes to the server.
+- **Stay signed in** is one of the settings, beside the line's. With it on, the program keeps the name and the sign-in key with its settings, where they last across a power-off (from ProDOS on the Apple II), and signs in with them when it connects. Signing out with OA-Q forgets the key there. A disk image made to share is made signed out, so it carries no key.
 
 ### The browser (ParlorNet Play)
 
@@ -410,6 +432,8 @@ The steps are below in telnet's keys. The 8-bit program names its own keys in ea
 - Every button names its key, as "Roll (Enter)", "Undo (U)" and "New set (M)".
 - A dialog is a modal box. Its safe button has the focus, and Esc cancels it.
 - Refusals show in a short notice at the foot of the board, in the server's words.
+- Play handles `/help` itself, and it opens the help dialog. Play has no tutorial, because every action there is a labeled button.
+- The sign-in form has a Stay signed in checkbox. The key goes into Play's own cookie by a one-time handle, so the page never holds it.
 
 ### HTML 3.2 forms (the web pages)
 
@@ -422,6 +446,8 @@ The steps are below in telnet's keys. The 8-bit program names its own keys in ea
 - The bar shows how long you have been signed in, as "Signed in 42m".
 - A refusal shows at the top of the table page, above the board.
 - The page reloads on a timer, because HTML 3.2 can't be told that something changed.
+- The web pages handle no command themselves. Every line of the Say form that starts with `/` goes to the server, and help is a link.
+- The sign-in form has a Stay signed in checkbox, and the key goes into a cookie of its own. Your profile lists the computers where you stay signed in, each with a Forget link.
 
 ### GameMaster's rulebooks
 
@@ -431,7 +457,7 @@ The steps are below in telnet's keys. The 8-bit program names its own keys in ea
 - A pick is put back by clicking it again, because the Mac Plus keyboard has no Esc key.
 - A dialog is a modal box drawn by the rulebook, with its two buttons. The safe button is the default, which Return presses. Command-period and the Cancel button do what Esc does.
 - Help is a box with the two pages, opened by a Help button in the panel.
-- GameMaster has no console, so there is no command line. The ParlorNet window's controls stand for the lobby's commands.
+- GameMaster has no console, so there is no command line and no client-side command. The ParlorNet window's controls stand for the lobby's commands.
 - Closing a game window leaves the game at its table, as leaving does on every frontend. GameMaster's own Othello, Dots&Boxes and BattleShips rulebooks can't take a game up again, so the window says before closing that the game can be finished on the web or by telnet.
 
 ## What the server provides
@@ -450,10 +476,11 @@ Every frontend reaches the server through a protocol. ParlorNet's own frontends 
 | `CMD` | a command line typed after the slash, at a table or in the lobby, run on the server with the lines to show, and the confirmation dialog for the commands that ask first |
 | `NOTE` | the table's notes |
 | `TIM` | the time signed in, for frontends without a clock |
-| `PRF` | small settings kept with the player, such as the display choice and the answer to the practice game dialog |
-| `OUT`, `BYE` | signing out and closing |
+| `PRF` | small settings kept with the player, such as the display choice and the answer to the tutorial dialog |
+| `KEY` | Stay signed in, with a sign-in key for this computer (`KEY NEW`), the player's list of keys (`KEY LST`) and forgetting them (`KEY DEL`). `AUT key` signs in with one. |
+| `OUT`, `BYE` | signing out, which forgets this computer's sign-in key, and closing |
 
-The server runs every command in one place, with `CMD` ([protocol.md](protocol.md), Commands). It has the names of [chat-commands.md](chat-commands.md), and a typed move goes to the game's own reading of it. Telnet's command line, Play's chat box, the web's Say form and the 8-bit command line all send their slash lines this way. A command that ends a turn or a game, such as `/resign` or `/pass`, answers with the dialog to open, and the dialog's Yes sends the confirmed form. No command answers an offer. The 8-bit program handles `/help`, `/leave` and `/practice` itself, because they open its own screens.
+The server runs every command in one place, with `CMD` ([protocol.md](protocol.md), Commands). It has the names of [chat-commands.md](chat-commands.md), and a typed move goes to the game's own reading of it. Telnet's command line, Play's chat box, the web's Say form and the 8-bit command line all send their slash lines this way. A command that ends a turn or a game, such as `/resign` or `/pass`, answers with the dialog to open, and the dialog's Yes sends the confirmed form. No command answers an offer. The commands the client handles itself never take this path ([Commands the client handles itself](#commands-the-client-handles-itself)).
 
 The design also asks the server for these, which are decided and not yet in the protocol.
 
@@ -464,4 +491,4 @@ The design also asks the server for these, which are decided and not yet in the 
 - **Refusals in the player's terms.** Each game's `ERR ILLEGAL` reason is a sentence for the player, as in "You can't play d3. It flips no discs."
 - **Help pages.** A request returns a game's two help pages, with the keys left as slots for each frontend to fill.
 
-The practice game needs nothing from the server, because it never reaches it.
+The tutorial needs nothing from the server, because it never reaches it.

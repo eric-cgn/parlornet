@@ -4,11 +4,10 @@ import importlib.util
 import os
 import random
 import re
-import subprocess
-import sys
 import unittest
 
 from game_checks import LONG, ansi_screens, board_image, plain_screen, web_page
+import procs
 from test_core import ROOT, Client, free_port
 
 from adapters.games import mancala as M  # noqa: E402
@@ -268,14 +267,9 @@ class Oware(unittest.TestCase):
 class OverProtocol(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.port = free_port()
-        self.proc = subprocess.Popen([sys.executable, "-m", "parlord", "--port", str(self.port), "--rate", "1000",
-                                      "--burst", "1000", "--auth", "none"], cwd=ROOT, stdout=subprocess.PIPE)
-        self.proc.stdout.readline()
-
-    async def asyncTearDown(self):
-        self.proc.kill()
-        self.proc.wait()
-        self.proc.stdout.close()
+        self.proc = procs.spawn("parlord", "--port", str(self.port), "--rate", "1000",
+                                "--burst", "1000", "--auth", "none", stderr=None)
+        self.addCleanup(procs.stop, self.proc)
 
     async def whole_game(self, new_line, rules, tid):
         a, b = await Client.connect(self.port), await Client.connect(self.port)
