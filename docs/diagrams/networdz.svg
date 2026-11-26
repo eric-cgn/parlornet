@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Source of static/img/diagram-networdz.gif: python3 tools/diagrams.py networdz -->
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="366" viewBox="0 0 480 366"
+     font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#000000">
+  <title>Networdz with ParlorNet Link: the Link connects to Networdz in Answer mode and to the parlor's Networdz extension, which seats the player at a Grid Words table</title>
+  <defs>
+    <marker id="head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"
+            markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 z" fill="#000000"/>
+    </marker>
+  </defs>
+  <rect width="480" height="366" fill="#FFFFFF"/>
+
+  <g shape-rendering="crispEdges" stroke="#000000" stroke-width="1">
+    <rect x="10.5" y="10.5" width="210" height="190" fill="#FFFFFF" stroke-dasharray="4,2"/>
+    <rect x="20.5" y="40.5" width="190" height="40" fill="#FFFFFF"/>
+    <rect x="20.5" y="142.5" width="190" height="48" fill="#FFFFFF"/>
+
+    <rect x="270.5" y="10.5" width="199" height="344" fill="#FFFFFF" stroke-dasharray="4,2"/>
+    <rect x="280.5" y="142.5" width="180" height="48" fill="#FFFFCC"/>
+    <rect x="280.5" y="222.5" width="180" height="40" fill="#99CC99"/>
+    <rect x="280.5" y="292.5" width="180" height="52" fill="#FFFFCC"/>
+  </g>
+
+  <g stroke="#000000" stroke-width="1" marker-end="url(#head)">
+    <line x1="115.5" y1="141" x2="115.5" y2="82"/>
+    <line x1="212" y1="166.5" x2="279" y2="166.5"/>
+  </g>
+  <g stroke="#000000" stroke-width="1" marker-start="url(#head)" marker-end="url(#head)">
+    <line x1="370.5" y1="192" x2="370.5" y2="221"/>
+    <line x1="370.5" y1="264" x2="370.5" y2="291"/>
+  </g>
+
+  <text x="20" y="28" font-size="12" font-weight="bold">The player's PC (Windows)</text>
+  <text x="30" y="57" font-size="12" font-weight="bold">Networdz 2.0</text>
+  <text x="30" y="72">in Answer mode: it waits</text>
+
+  <text x="123" y="106">connects to it</text>
+  <text x="123" y="119">on 127.0.0.1</text>
+
+  <text x="30" y="159" font-size="12" font-weight="bold">ParlorNet Link</text>
+  <text x="30" y="173">connects to both and passes</text>
+  <text x="30" y="186">the bytes both ways</text>
+
+  <text x="230" y="160">TCP</text>
+  <text x="228" y="182">6516</text>
+
+  <text x="280" y="28" font-size="12" font-weight="bold">The parlor</text>
+  <text x="290" y="159" font-size="12" font-weight="bold">The Networdz extension</text>
+  <text x="290" y="173">it plays the host's side and</text>
+  <text x="290" y="186">seats the player as a guest</text>
+
+  <text x="290" y="239" font-size="12" font-weight="bold">The core</text>
+  <text x="290" y="254">an ordinary Grid Words table</text>
+
+  <text x="290" y="309" font-size="12" font-weight="bold">The table's other seats</text>
+  <text x="290" y="324">the web, telnet, ParlorNet Play,</text>
+  <text x="290" y="337">other extensions or the bot</text>
+
+  <text x="10" y="236">A parlor never connects out to a</text>
+  <text x="10" y="250">player, and Networdz in Answer</text>
+  <text x="10" y="264">mode only waits for its host, so</text>
+  <text x="10" y="278">the Link makes both connections.</text>
+</svg>

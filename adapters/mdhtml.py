@@ -1,7 +1,8 @@
 """A small Markdown-to-HTML 3.2 converter for the project's own docs.
 
 Covers what docs/ uses: headings, paragraphs, - and 1. lists, pipe tables,
-fenced code blocks, `code`, **bold**, [text](link). Every heading carries an
+fenced code blocks, `code`, **bold**, [text](link), and a picture on a line
+of its own, ![caption](file), which the caller draws (image). Every heading carries an
 <a name> anchor named as GitHub names it (slug()). Output has no CSS and no
 hex character references, so 1990s browsers show it. The docs read as a manual:
 body text and tables in the browser's own text face (no FONT per paragraph or
@@ -48,7 +49,18 @@ def slug(heading, seen):
     return name
 
 
-def to_html(md, link_fix=lambda u: u):
+IMAGE_RE = re.compile(r"^!\[([^\]]+)\]\(([^)\s]+)\)$")
+
+
+def plain_image(caption, url, link_fix):
+    """A picture without its size, for a caller that draws none of its own."""
+    return '<p><img src="%s" alt="[%s]"><br>\n%s</p>' % (esc(link_fix(url)), esc(caption), esc(caption))
+
+
+def to_html(md, link_fix=lambda u: u, image=None):
+    """md as HTML 3.2. link_fix(url) gives each link's address; image(caption, url) the HTML of a picture on a
+    line of its own (plain_image when None)."""
+    image = image or (lambda caption, url: plain_image(caption, url, link_fix))
     lines = md.split("\n")
     out, i = [], 0
     para = []
@@ -69,6 +81,9 @@ def to_html(md, link_fix=lambda u: u):
                 code.append(esc(lines[i]))
                 i += 1
             out.append("<pre>%s</pre>" % "\n".join(code))
+        elif IMAGE_RE.match(s):
+            flush()
+            out.append(image(*IMAGE_RE.match(s).groups()))
         elif re.match(r"^#{1,6} ", s):
             flush()
             n = len(s) - len(s.lstrip("#"))

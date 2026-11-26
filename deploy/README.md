@@ -1,6 +1,6 @@
 # Installing on a Docker host
 
-The main README shows how to run ParlorNet with a single `docker run`. The scripts here do the same job with tighter limits, for a server that stays up. Build the image, load it on the host, copy the scripts across and run one of them as root.
+This is how to install your own ParlorNet server on a Linux host with Docker. The main README's [Run your own parlor](../README.md#run-your-own-parlor) starts ParlorNet with a single `docker run`; the scripts here do the same job with tighter limits, for a server that stays up. Get the source from https://github.com/eric-cgn/parlornet, build the image (on the host, or elsewhere and load it on the host), copy the scripts across and run one of them as root.
 
 ```sh
 docker build --platform linux/amd64 -t parlornet:1 .
@@ -9,9 +9,11 @@ sudo PARLOR_NAME=games.example.org PARLOR_AUTH=password PARLOR_SIGNUP=email sh d
 
 `install.sh` runs one container named `parlornet`. It runs as uid 10042 with every capability dropped, no new privileges, a read-only root file system, a 448 MB memory limit and its own Docker network. It publishes the players' ports (6500 to 6508, 6512, 6514 to 6517, which it also publishes as 1744, 6518, 6519 and 6520) and puts the admin menus and ParlorNet Play (6513) on the host's loopback address only. Players, tables and settings live in `/srv/parlornet` on the host, so a restart or an upgrade keeps them. Running the script again with a newer image replaces the container and keeps the data.
 
-The script reads `PARLOR_NAME`, `PARLOR_AUTH`, `PARLOR_SIGNUP`, `PARLOR_WEB_HOSTS`, `PARLOR_PLAY_URL`, `PARLOR_PLAY_PROXIES` and `PARLOR_PLAY_OPEN` from its environment; the comments at the top of the script explain each one. Settings you would rather keep out of the environment, such as the SMTP relay's password, go in `/etc/parlornet/settings.conf`. Make that file readable only by uid 10042 (`chown 10042 settings.conf; chmod 400 settings.conf`). The script mounts it into the container when it exists.
+![What install.sh runs: the players' programs, the reverse proxy for ParlorNet Play, and the processes in the container](../static/img/diagram-parlor.gif)
 
-With `PARLOR_SIGNUP=email`, sign-up mails each new player a temporary password, so the server needs an SMTP relay (README.md, "The open internet"). The first sign-in with that password confirms the account and asks the player to choose a password of their own; an account nobody signs into within 24 hours is deleted.
+The script reads `PARLOR_NAME`, `PARLOR_AUTH`, `PARLOR_SIGNUP`, `PARLOR_WEB_HOSTS`, `PARLOR_WEB_URL`, `PARLOR_WEB_PROXIES`, `PARLOR_PLAY_URL`, `PARLOR_PLAY_PROXIES` and `PARLOR_PLAY_OPEN` from its environment; the comments at the top of the script explain each one. Settings you would rather keep out of the environment, such as the SMTP relay's password, go in `/etc/parlornet/settings.conf`. Make that file readable only by uid 10042 (`chown 10042 settings.conf; chmod 400 settings.conf`). The script mounts it into the container when it exists.
+
+With `PARLOR_SIGNUP=email`, sign-up mails each new player a temporary password, so the server needs an SMTP relay ([The open internet](../README.md#the-open-internet) in the main README). The first sign-in with that password confirms the account and asks the player to choose a password of their own; an account nobody signs into within 24 hours is deleted.
 
 **Upgrading from a version before mailed passwords.** Accounts used to be kept in another format, and that database is not carried over. When the server starts and finds a database in the earlier format, it renames it to `parlord.db.old-<date and time>` in the same directory and starts a new, empty one: players, tables and games in progress are gone, and the admin menus ask to be set up again, with a new setup password in `docker logs parlornet`. Settings given in the environment or in `/etc/parlornet/settings.conf` still apply. Delete the old file once you no longer need it.
 
@@ -57,6 +59,27 @@ server {
     location /play { return 301 https://$host/play/; }
 }
 ```
+
+## The web site on the usual ports
+
+The web site itself is on port 6500, which players can keep using. To serve it at your name's own address as well, `https://games.example.org/` and `http://games.example.org/`, let the same proxy pass everything else to 6500. Pass it, don't redirect: a redirect to another port is not a page, so search engines index nothing, and port 80 must not send period browsers to https, which they cannot speak. Add this `location` to both server blocks above:
+
+```nginx
+    location / {
+        proxy_pass http://127.0.0.1:6500;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+```
+
+Then tell the web extension about the proxy, the same way as for ParlorNet Play:
+
+```sh
+sudo PARLOR_WEB_URL=https://games.example.org/ PARLOR_WEB_PROXIES=172.30.4.1 sh deploy/install.sh parlornet:1
+```
+
+`PARLOR_WEB_PROXIES` (`web.proxies` in `/etc/parlornet/settings.conf`) lists the proxies' addresses or networks, separated by commas, as the container sees them. For a request from one of them, the web takes the visitor's own address from `X-Forwarded-For`, so the limits per address (sign-ups, wrong passwords, requests in progress) count each visitor and not the proxy, and it takes the scheme from `X-Forwarded-Proto`, so its redirects stay on https. A request from any other address is taken as it comes, and its forwarded headers are ignored. `PARLOR_WEB_URL` (`web.public_url`) is the site's own address. With it, every page answered without a query names its address there as canonical (a `Link: <...>; rel="canonical"` header), so the copies at port 6500, plain http and other names all count as one page. The site's address `/` is the welcome page itself, not a redirect to it.
 
 Do not add `Strict-Transport-Security` on this name. Browsers would apply it to every port, including the 1997 pages on 6500, which are plain HTTP for the computers they serve. Certbot renews the certificate on its own timer.
 

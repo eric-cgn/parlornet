@@ -18,14 +18,19 @@ The site serves every ParlorNet server alike. Its pages, from the site's root:
     download/, img/         the downloads of the patcher and the rulebooks' installer, and their READMEs (from
                             the releases pinned in docsite/downloads.json, docsite/downloads.py), the
                             patcher's screenshot, and the site's emblem
+    running.html            running a server of your own: the README's "Run your own parlor" section and
+                            deploy/README.md (docsite/running.py)
     docs.html               the docs in groups, with a finder
     docs/<name>.html        every Markdown file under docs/, rendered by adapters/mdhtml.py
+    img/                    besides the files above, every picture a page shows: the client pages'
+                            screenshots and the docs' diagrams (docs/diagrams/, drawn by tools/diagrams.py)
     404.html, CNAME, .nojekyll   for GitHub Pages
 
-Only docs/ is read for docs pages (docs/clients/ becomes the client pages instead): nothing from deploy/ or
-anywhere else is published. A link in a doc to another doc becomes a link to its page; to a client's Markdown,
-a link to the client's page; to any other file of the repository, a link to it at the project's home on
-GitHub; to http://docs.parlornet.org/..., a link within the site. Every page is built in the web site's
+Only docs/ is read for docs pages (docs/clients/ becomes the client pages instead). Outside it, only the two
+files running.html is made from are read: nothing else from deploy/ or anywhere else is published. A link in a
+doc to another doc becomes a link to its page; to a client's Markdown, a link to the client's page; to a picture
+in static/img/, the picture on the site; to any other file of the repository, a link to it at the project's
+home on GitHub; to http://docs.parlornet.org/..., a link within the site. Every page is built in the web site's
 frame and palette (adapters/webstyle.py), HTML 3.2 as on the game server, with the docs site's own navigation
 and footer, and links relative to the page, so the site works from any address or a folder.
 
@@ -46,7 +51,7 @@ from adapters import clients as C
 from adapters import webstyle as S
 from adapters.mdhtml import to_html
 from adapters.webstyle import a, esc, h1, h2, p, ul
-from . import clientpages, eclipse, gamerulebooks, protocols, rulebook
+from . import clientpages, eclipse, gamerulebooks, protocols, rulebook, running
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS_DIR = os.path.join(ROOT, "docs")
@@ -57,7 +62,8 @@ GITHUB_BLOB = PROJECT_URL + "/blob/main/"
 GITHUB_TREE = PROJECT_URL + "/tree/main/"
 
 NAV = [("/index.html", "Clients"), ("/protocols.html", "Protocols"), ("/browsers.html", "Browsers"),
-       ("/telnet.html", "Telnet programs"), ("/docs.html", "Docs"), (PROJECT_URL, "Source")]
+       ("/telnet.html", "Telnet programs"), ("/docs.html", "Docs"), (running.PAGE, running.TITLE),
+       (PROJECT_URL, "Source")]
 FOOT = ("These pages cover every ParlorNet server. | %s | ParlorNet is free software."
         % a(PROJECT_URL, "Source code"))
 
@@ -93,6 +99,8 @@ DOC_GROUPS = [
         ("/docs/design/trust.html", "Trust", "the rules for clients and server extensions, with the server deciding"),
     ]),
     ("For operators and developers", [
+        (running.PAGE, running.TITLE, "running a parlor of your own: the quick start, installing on a Docker "
+         "host, ParlorNet Play over HTTPS and the admin menus"),
         (PROJECT_URL, "Source code", "the project's home, for running your own server or contributing"),
         ("/docs/adapters.html", "Server extensions", "how they are built"),
         ("/docs/architecture.html", "Architecture", "the core, the games and the extensions"),
@@ -282,7 +290,8 @@ def doc_page(path, md_file):
     with open(md_file, encoding="utf-8") as f:
         md = f.read().encode("ascii", "replace").decode("ascii")
     rel = path[len("/docs/"):-len(".html")]
-    body = to_html(md, link_fixer(posixpath.dirname("docs/" + rel)))
+    fix = link_fixer(posixpath.dirname("docs/" + rel))
+    body = to_html(md, fix, clientpages.figure)
     body += p(a(GITHUB_BLOB + "docs/" + rel + ".md", "This doc on GitHub"), 2)
     return frame("ParlorNet: %s" % doc_title(md, rel), body, "/docs.html")
 
@@ -326,9 +335,11 @@ def pages():
         rulebook.PAGE: frame("ParlorNet rulebook for GameMaster", rulebook.body()),
         gamerulebooks.PAGE: frame("ParlorNet game rulebooks for GameMaster", gamerulebooks.body()),
         "/docs.html": docs_index(docs),
+        running.PAGE: frame("ParlorNet: run a server", running.body(link_fixer), running.PAGE),
         "/404.html": frame("ParlorNet: not found", h1("Not found") + p(
-            "There is no page at this address. Try the %s, %s or %s page."
-            % (a("/index.html", "Clients"), a("/protocols.html", "Protocols"), a("/docs.html", "Docs")))),
+            "There is no page at this address. Try the %s, %s, %s or %s page."
+            % (a("/index.html", "Clients"), a("/protocols.html", "Protocols"), a("/docs.html", "Docs"),
+               a(running.PAGE, running.TITLE)))),
     }
     fix = link_fixer(clientpages.PAGES_REL)
     for c in C.EVERY:
@@ -361,16 +372,19 @@ def relativize(page, html):
 def files():
     """{site path: bytes}: every file of the site, pages with their links made relative (404.html keeps them
     from the root: GitHub Pages shows it at any address)."""
-    out = {}
+    out, shown = {}, set()
     for path, html in pages().items():
         name = path.lstrip("/")
         out[name] = (html if name == "404.html" else relativize(name, html)).encode("ascii")
+        shown.update(re.findall(r'<img src="/(img/[^"]+)"', html))
     from adapters.web import make_gif
     out[S.EMBLEM.lstrip("/")] = S.emblem_gif(make_gif)
     out.update(eclipse.files())
     out.update(rulebook.files())
     out.update(gamerulebooks.files())
     out.update(clientpages.files())
+    for name in shown - set(out):       # the docs' diagrams and any other picture from static/img/
+        out[name] = clientpages.read_file("static/" + name)
     out["CNAME"] = (CNAME + "\n").encode("ascii")
     out[".nojekyll"] = b""
     out[MARKER] = b"Written by tools/build_docs.py; the folder is emptied before each build.\n"

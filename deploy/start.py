@@ -46,6 +46,10 @@ Environment (all optional):
                        (http://docs.parlornet.org/; empty: no link)
     PARLOR_GAMEMASTER_PORT  the port the ParlorNet rulebook connects to, declared to the core, when the
                        host publishes the container's 6508 under another number (6508)
+    PARLOR_WEB_URL     web.public_url until the settings file sets it: the web site's own address, such as
+                       https://games.example.org/, which its pages name as canonical for search engines
+    PARLOR_WEB_PROXIES  web.proxies until the settings file sets it: the addresses of reverse proxies in front
+                       of the web site (port 6500), whose X-Forwarded-For and X-Forwarded-Proto it believes
     PARLOR_PLAY_URL    play.public_url until the settings file sets it: the address of ParlorNet Play behind
                        a TLS proxy, such as https://parlornet.org/play/ (the web's /play answers 301 there)
     PARLOR_PLAY_PROXIES  play.proxies until the settings file sets it: the proxies' addresses, whose
@@ -239,7 +243,8 @@ def prepare(per_user=False):
         v = stored(key)
         return (conf.get(key) if v is None else v) or ""
     return {"names": out, "settings": settings if os.access(settings, os.R_OK) else None,
-            "web_hosts": setting("web.hosts"), "play_url": setting("play.public_url"),
+            "web_hosts": setting("web.hosts"), "web_url": setting("web.public_url"),
+            "web_proxies": setting("web.proxies"), "play_url": setting("play.public_url"),
             "play_proxies": setting("play.proxies"), "play_push_contact": setting("play.push_contact"),
             "play_dir": play_dir,
             "idle": {k: setting(k) for k in ("%s.%s" % (n, f) for n in IDLE_NOTES for f, _ in IDLE_FLAGS)
@@ -360,6 +365,9 @@ def main():
                 hosts = ready.get("web_hosts") or env("PARLOR_WEB_HOSTS") or ""
                 extra = ["--hosts", hosts] if hosts else []
                 extra += ["--play-url", play_url] if play_url else []
+                web_url = ready.get("web_url") or env("PARLOR_WEB_URL") or ""
+                web_proxies = ready.get("web_proxies") or env("PARLOR_WEB_PROXIES") or ""
+                extra += (["--public-url", web_url] if web_url else []) + (["--proxies", web_proxies] if web_proxies else [])
             if name == "play":      # play.public_url and play.proxies (settings file), else the environment
                 proxies = ready.get("play_proxies") or env("PARLOR_PLAY_PROXIES") or ""
                 push_contact = ready.get("play_push_contact") or env("PARLOR_PLAY_PUSH_CONTACT") or ""

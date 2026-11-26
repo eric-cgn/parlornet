@@ -75,9 +75,10 @@ async def first_sign_in(srv, s, pw, new="Fresh-start9"):
 
 class Helpers(unittest.TestCase):
     def test_schedule(self):
-        self.assertEqual(auth.lock_secs(1), 60)
-        self.assertEqual(auth.lock_secs(3), 900)
-        self.assertTrue(auth.lock_secs(2) > 60 and auth.lock_secs(4) > 900)
+        self.assertEqual((auth.lock_secs(1), auth.lock_secs(2)), (0, 0))      # two tries before any wait
+        self.assertEqual(auth.lock_secs(3), 60)
+        self.assertEqual(auth.lock_secs(5), 900)
+        self.assertTrue(auth.lock_secs(4) > 60 and auth.lock_secs(6) > 900)
         self.assertEqual(auth.lock_secs(20), 4 * 3600)       # at most 4 hours
 
     def test_password_hashing(self):
@@ -178,7 +179,11 @@ class PasswordPassword(unittest.IsolatedAsyncioTestCase):
         f = frontend()
         self.assertEqual(await say(srv, f, "HELO bo"), "ASK password Password secret cred")
         self.assertRegex(await say(srv, f, "AUT password Bo secret 1"), SID)
-        # wrong password: locked a minute, even the right one waits
+        # two wrong passwords are only refused; the third locks the name a minute, and even the right one waits
+        for _ in range(2):
+            c = public()
+            await say(srv, c, "HELO bo")
+            self.assertEqual(await say(srv, c, "AUT password nope nope"), "ERR WRONG Wrong password; try again")
         c = public()
         await say(srv, c, "HELO bo")
         self.assertRegex(await say(srv, c, "AUT password nope nope"),
@@ -207,7 +212,7 @@ class PasswordPassword(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await say(srv, f, "LST"), "ERR SIGNEDOUT your session has ended; sign in again")
         c = public()
         await say(srv, c, "HELO bo")
-        self.assertTrue((await say(srv, c, "AUT password New secret 9")).startswith("ERR LOCKED"))
+        self.assertTrue((await say(srv, c, "AUT password New secret 9")).startswith("ERR WRONG"))
         srv.players["bo"].locked_until = 0
         c = public()
         await say(srv, c, "HELO bo")
@@ -218,7 +223,7 @@ class PasswordPassword(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await say(srv, c, "AUT confirm Third secret"), "OK -")
         c = public()
         await say(srv, c, "HELO bo")
-        self.assertTrue((await say(srv, c, "AUT password " + code)).startswith("ERR LOCKED"))   # used up
+        self.assertTrue((await say(srv, c, "AUT password " + code)).startswith("ERR WRONG"))   # used up
 
 
 class EmailSignUp(unittest.IsolatedAsyncioTestCase):
@@ -279,7 +284,7 @@ class EmailSignUp(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await say(srv, c, "AUT password Eli's own 1"), "OK -")
         c = public()
         await say(srv, c, "USER eli")
-        self.assertTrue((await say(srv, c, "AUT password " + pw)).startswith("ERR LOCKED"))   # used up
+        self.assertTrue((await say(srv, c, "AUT password " + pw)).startswith("ERR WRONG"))   # used up
 
     async def test_signing_in_later_and_the_mail_names_where(self):
         srv = server("password", "email")
@@ -292,12 +297,16 @@ class EmailSignUp(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await srv.dispatch(f, "USER fia"),
                          ["INF Type the password we emailed you.", "ASK password Password secret cred"])
         self.assertEqual(await say(srv, f, "AUT password not-the-one"),
-                         "ERR LOCKED wait=60 Wrong password; try again in 60 seconds")
+                         "ERR WRONG Wrong password; try again")
         srv.players["fia"].locked_until = 0
         f = frontend()
         await say(srv, f, "USER fia")
         r = await say(srv, f, "AUT password reset")                 # no reset before it is confirmed: a wrong one
-        self.assertTrue(r.startswith("ERR LOCKED wait=") and "Wrong password" in r, r)
+        self.assertEqual(r, "ERR WRONG Wrong password; try again")
+        f = frontend()
+        await say(srv, f, "USER fia")
+        r = await say(srv, f, "AUT password not-it-either")         # the third wrong answer locks it
+        self.assertTrue(r.startswith("ERR LOCKED wait=60 ") and "Wrong password" in r, r)
         f = frontend()
         await say(srv, f, "USER fia")
         self.assertRegex(await first_sign_in(srv, f, pw), SID)    # a temporary password works while locked
@@ -345,7 +354,7 @@ class EmailSignUp(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(srv.store.email_count(0, name="ida", kind="recovery-own")[0], 1)    # the owner's, then
         c = public()
         await say(srv, c, "USER ida")
-        self.assertTrue((await say(srv, c, "AUT password Ida's first 1")).startswith("ERR LOCKED"))
+        self.assertTrue((await say(srv, c, "AUT password Ida's first 1")).startswith("ERR WRONG"))
         # the limits: two recovery mails for a name from one client address a day
         srv.players["ida"].locked_until = 0
         srv.store.db.execute("UPDATE email_log SET at = at - 120")

@@ -229,9 +229,9 @@ class WebPlayers:
 
 class Web(Stack):
     def test_root_and_welcome(self):
-        st, loc, _, _ = self.get("/")
-        self.assertEqual(st, 302)
-        self.assertTrue(loc.endswith("/welcome.htm"))
+        st, _, ct, root = self.get("/")        # the welcome page itself: a search engine indexes no redirect
+        self.assertEqual((st, ct), (200, "text/html"))
+        self.assertIn("<title>ParlorNet</title>", root)
         st, _, ct, body = self.get("/welcome.htm")
         self.assertEqual((st, ct), (200, "text/html"))
         self.assertNotIn("6505", body)          # only what this server speaks now (test_protocols_list.py)
@@ -306,7 +306,7 @@ class Web(Stack):
         on its row), linking to the game's own page; status as on the welcome page. Each game's page: players,
         status, frontends, the rules; Backgammon's says where FIBS is and that ParlorNet is not FIBS. HTML 3.2
         only, and generic names only."""
-        from adapters import web as W
+        from adapters import siteimages as PIC, web as W
         from parlord import DOCS_URL
         st, _, ct, page = self.get("/games.htm")
         self.assertEqual((st, ct), (200, "text/html"))
@@ -323,7 +323,7 @@ class Web(Stack):
             st, _, _, part = self.get("/games/%s.htm" % anchor)
             self.assertEqual(st, 200, anchor)
             pages[anchor] = part = plain(part)
-            self.assertIn("<h1>%s</h1>" % name, part)
+            self.assertIn("<h1>%s %s</h1>" % (PIC.game_img(anchor), name), part)     # its icon, then its name
             self.assertIn("<b>Status here:</b> %s<br>" % status, part)
             self.assertIn("<b>Players:</b> %s<br>" % players, part)
             self.assertIn('<a href="%sindex.html#%s">Clients page</a>' % (DOCS_URL, anchor), part)

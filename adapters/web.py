@@ -42,6 +42,7 @@ from .common import (BG_HOME_PREF, BG_HOMES, CoreClient, CoreError, NeedAuth, Re
                      turn_time, with_program,
                      group_games, more_tables, parse_games, parse_invites, parse_players, parse_tables, pending_invites)
 from .common import parse_client, parse_clients
+from .common import as_ip, forwarded_client, proxy_list, trusted_proxy
 from .common import SCORES_NOTE, parse_top, score_text
 from .chatcmd import note_lines
 from .board import BoardCache, hit, view_digest
@@ -52,6 +53,7 @@ from . import clients as C
 from . import declare
 from .medals import ICONS as MEDAL_ICONS
 from . import palette as PAL
+from . import siteimages as PIC
 from . import webstyle as S
 from .games import rules_name
 from .webstyle import DEEP, FELT, IVORY, SAGE, a, callout, data_table, esc, font, h1, h2, p, small, ul
@@ -229,22 +231,24 @@ def first_sentence(text):
 
 def games_page(hosted=None, scores=False, nav=None):
     """/games.htm: every game in build order, one row each (anchor: the game type, so old links to a
-    game's section still land on it): its name linking to its own page, players, status here, and the
-    first sentence of what it is. scores: the server shows its leaderboard (a link to it). nav: the
-    navigation bar for a signed-in player (site_nav)."""
+    game's section still land on it): its icon (adapters/siteimages.py), its name linking to its own page,
+    players, status here, and the first sentence of what it is. scores: the server shows its leaderboard (a
+    link to it). nav: the navigation bar for a signed-in player (site_nav)."""
     rows = []
     for r in game_rows(hosted):
         about = game_about(r["type"])
         name = "<b>%s</b>" % esc(r["name"])
         if about:
             name = a(game_page_path(r["type"]), name)
-        rows.append(['<a name="%s"></a>%s' % (r["type"], name), esc(r["players"]), esc(r["status"]),
+        rows.append([PIC.game_img(r["type"], None) or "&nbsp;", '<a name="%s"></a>%s' % (r["type"], name),
+                     esc(r["players"]), esc(r["status"]),
                      esc(first_sentence(about[0])) if about else "-"])
     body = (h1("Games") +
-            p("The games ParlorNet plays, in the order they were built. Each is an original implementation of "
-              "public rules under a generic name. This server hosts the playable ones now. Each game&#39;s page "
-              "has its rules and the programs that play it.") +
-            data_table(["Game", "Players", "Status", "What it is"], rows, "100%", (None, "center")) +
+            p("These are the games ParlorNet plays, listed in the order they were added. ParlorNet wrote each "
+              "one itself from the game&#39;s public rules and gives it a generic name. You can play the ones "
+              "marked playable on this server now, and each game&#39;s page has its rules and the programs "
+              "that play it.") +
+            data_table(["", "Game", "Players", "Status", "What it is"], rows, "100%", (None, None, "center")) +
             (p("Every finished game scores points: see who leads on the %s." % a(LEADERBOARD_PAGE, "leaderboard"), 2)
              if scores else ""))
     return respond(200, page("ParlorNet: games", body, current=GAMES_PAGE, nav=nav))
@@ -282,7 +286,7 @@ def game_page(gtype, hosted=None, nav=None):
                          a(docs_link("index.html#" + gtype), "Clients page"), esc(r["name"])), 2)
     else:
         programs = ""
-    body = (h1(esc(r["name"])) +
+    body = (h1((PIC.game_img(gtype) + " " if PIC.game_img(gtype) else "") + esc(r["name"])) +
             p("<br>\n".join("<b>%s:</b> %s" % kv for kv in facts), 2) +
             p(esc(about)) +
             h2("rules", "Rules and options here" if r["status"] == "playable" else "Rules and options") +
@@ -291,6 +295,34 @@ def game_page(gtype, hosted=None, nav=None):
             h2("frontends", "Programs that play it") + programs +
             p("%s | %s" % (a("%s#%s" % (GAMES_PAGE, gtype), "All games"), a("/lobby.htm", "Play")), 2))
     return respond(200, page("ParlorNet: %s" % r["name"], body, current=GAMES_PAGE, nav=nav))
+
+
+def credits_page(nav=None):
+    """/credits.htm: where each photo of a computer on the welcome page comes from (adapters/img/CREDITS.tsv),
+    each with the picture, what it shows linking to its file page on Wikimedia Commons, its author and its
+    license, as the licenses ask; then that the drawn pictures are ParlorNet's own. A lean table
+    (webstyle.plain_table), so the page stays small."""
+    rows = []
+    for c in PIC.credits():
+        rows.append([PIC.img(PIC.MACHINE_URL % c["picture"].split("/")[1][:-len(".gif")]),
+                     a(c["source"], esc(c["shows"])), html_text(c["author"]),
+                     a(c["license_url"], esc(c["license"])) if c["license_url"] else esc(c["license"])])
+    body = (h1("Picture credits") +
+            p("The photos of the computers on the welcome page come from Wikimedia Commons. Each row names what "
+              "the photo shows, which links to its page there, and its author and license.") +
+            S.plain_table(["Picture", "Shows", "Author", "License"], rows) +
+            p("Each picture is a changed copy of its photo: cropped, cut out from its background, scaled down to "
+              "at most %d by %d pixels and reduced to 16 colors or fewer. Each is shared under the same license "
+              "as its photo. The game icons and the picture for Any new computer are ParlorNet&#39;s own, drawn "
+              "for this site, and come under ParlorNet&#39;s license." % PIC.MACHINE_BOX, 2) +
+            p("%s | %s" % (a("/welcome.htm#%s" % MACHINES_ANCHOR, "Play from your computer"),
+                           a(GAMES_PAGE, "Games")), 2))
+    return respond(200, page("ParlorNet: picture credits", body, nav=nav))
+
+
+def html_text(s):
+    """Text for a page, escaped, with any character beyond ASCII as a decimal character reference."""
+    return "".join(c if ord(c) < 128 else "&#%d;" % ord(c) for c in esc(s))
 
 
 # ---- the protocols this server speaks now (the core's PRL) ---------------------------------------
@@ -382,13 +414,14 @@ def any_new_html(play):
 
 def machines_html(play=None):
     """Play from your computer: the machines' names, each a jump to its row, then a row per machine (anchored)
-    with its ways to play, best first, then Any old computer and Any new computer, and what the medals mean.
+    with its picture (adapters/siteimages.py) and its ways to play, best first, then Any old computer and Any new
+    computer, and what the medals mean, with the link to the picture credits.
     play: ParlorNet Play's address (play_link), None while it does not run."""
     machines = [(anchor, name, note) for anchor, name, note, _ in C.PLAY_MACHINES] + [ANY_OLD, ANY_NEW]
     cells = {anchor: machine_ways(targets) for anchor, _, _, targets in C.PLAY_MACHINES}
     cells[ANY_OLD[0]], cells[ANY_NEW[0]] = any_old_html(), any_new_html(play)
-    rows = ['<tr%s valign="top"><td>%s</td></tr>\n' % (
-        ' bgcolor="%s"' % IVORY if n % 2 else "",
+    rows = ['<tr%s valign="top"><td align="center">%s</td><td>%s</td></tr>\n' % (
+        ' bgcolor="%s"' % IVORY if n % 2 else "", PIC.machine_img(anchor) or "&nbsp;",
         '<a name="%s"></a>%s %s' % (anchor, font(esc(name), 3, S.HEAD_FACE, DEEP),
                                     font("%s<br>\n%s" % ("(%s)" % esc(note) if note else "", cells[anchor]), 2)))
             for n, (anchor, name, note) in enumerate(machines)]
@@ -398,7 +431,8 @@ def machines_html(play=None):
             p("Find your computer: its row starts with the best way to play there, and each program&#39;s page "
               "says how to get it and set it up.", 2) +
             '<table width="100%%" border="0" cellpadding="4" cellspacing="0">\n%s</table>\n' % "".join(rows) +
-            p("%s Not yet rated: nobody has played a whole game with it there yet." % legend, 1))
+            p("%s Not yet rated: nobody has played a whole game with it there yet. The photos are from Wikimedia "
+              "Commons: %s." % (legend, a(PIC.CREDITS_PAGE, "picture credits")), 1))
 
 
 # ---- old addresses of the documentation, now on the docs site -------------------------------------
@@ -489,6 +523,7 @@ IMAGES = games.Images()
 # The site's own image, on every page's masthead (webstyle.EMBLEM): served and cached like the games' images.
 SITE_IMAGES = {S.EMBLEM: S.emblem_gif(make_gif)}
 SITE_IMAGES.update({C.MEDALS[m][1]: MEDAL_ICONS[C.MEDALS[m][1].rsplit("/", 1)[1]]() for m in (C.GOLD, C.SILVER, C.BRONZE)})
+SITE_IMAGES.update(PIC.IMAGES)      # the computers' photos and the games' icons (adapters/siteimages.py)
 
 # ---- one image per board (adapters/board.py) ------------------------------------
 #
@@ -569,6 +604,8 @@ PROTOCOLS_SECS = 5      # the protocols (PRL) are asked again after this long
 # The protocol this extension serves, declared to the core (adapters/declare.py): key, name, description.
 PROTOCOL = ("HTTP", "HTTP and HTML 3.2", "HTML 3.2 pages for any browser with tables and forms")
 HOSTS = []      # web.hosts: the names this site answers to ("name" or "name:port"); empty: any well-formed one
+PROXIES = []    # web.proxies: the reverse proxies (ip_networks) whose X-Forwarded-For and -Proto are believed
+PUBLIC_URL = [""]   # web.public_url: the site's own address (https://games.example.org/), for canonical links
 
 
 def allowed_host(h):
@@ -623,8 +660,24 @@ def respond(status, body, ctype="text/html", extra=""):
     return head.encode("ascii") + body
 
 
+def canonical(req, head):
+    """The page's address under web.public_url, for a Link rel=canonical header: for a GET of a page (200,
+    HTML) with no query, so the site's copies at other addresses (plain http, the port of its own, another
+    name) point search engines at one. "/" and the welcome page are the address itself. None without the
+    setting, or for anything else."""
+    base = PUBLIC_URL[0]
+    if not base or req["method"] not in ("GET", "HEAD") or req["query"] or req.get("ismap"):
+        return None
+    if not head.startswith(b"HTTP/1.0 200 ") or b"\r\nContent-Type: text/html" not in head:
+        return None
+    path = req["path"]
+    if path in ("/", "/index.htm", "/index.html", "/welcome.htm"):
+        path = "/"
+    return base.rstrip("/") + path
+
+
 def redirect(req, path, extra=""):
-    loc = "http://%s%s" % (location_host(req), path)
+    loc = "%s://%s%s" % (req.get("proto") or "http", location_host(req), path)
     return respond(302, bare_page("Moved", "<p>Go to %s</p>" % a(path, "the next page")),
                    extra="Location: %s\r\n%s" % (loc, extra))
 
@@ -870,13 +923,15 @@ def lobby_page(me, link, games, tables, note="", auth="password", invites=(), bo
 
     new = "".join("""<li><form action="/new.htm" method="get">
 <input type="hidden" name="g" value="%s">%s
-<font face="%s"><b>%s</b>, %stime per turn: <select name="turn">%s</select>
+<font face="%s">%s<b>%s</b>, %stime per turn: <select name="turn">%s</select>
 <input type="radio" name="vis" value="public" checked> Public
 <input type="radio" name="vis" value="private"> Private (by invitation)
 <input type="checkbox" name="bot" value="1"> Play the bot
 <input type="submit" value="Start a game of %s"></font>
 </form></li>
-""" % (esc(g["key"]), hidden_fields(link("/new.htm")), S.TEXT_FACE, esc(g["name"]), choices(g),
+""" % (esc(g["key"]), hidden_fields(link("/new.htm")), S.TEXT_FACE,
+       (PIC.game_img(g["key"].split("/")[0]) + " " if PIC.game_img(g["key"].split("/")[0]) else ""),
+       esc(g["name"]), choices(g),
        "".join('<option value="%s"%s>%s' % (v, " selected" if v == "1d" else "", lbl) for v, lbl in turns),
        esc(g["name"])) for g in group_games(games) if g["key"] in GAME_PAGES)
     account = [a(link(PLAYER_PAGE), "Your profile"), a(link(PROFILE_PAGE), "Preferred machine"),
@@ -1617,8 +1672,8 @@ class Web:
 
     async def route(self, req):
         path, q = req["path"], req["query"]
-        if path in ("/", "/index.htm", "/index.html"):
-            return redirect(req, "/welcome.htm")
+        if path in ("/", "/index.htm", "/index.html"):     # the welcome page itself, so the site's address
+            return await self.welcome(req)                   # is a page (search engines index no redirect)
         if path == "/play" or path.startswith("/play/"):       # ParlorNet Play: its own extension now
             return play_moved(req, None if PLAY_URL[0] else await self.protocols())
         if path == "/welcome.htm":
@@ -1644,6 +1699,8 @@ class Web:
                 return got
         if path == LEADERBOARD_PAGE:
             return await self.leaderboard(req, (q.get("g") or [""])[0])
+        if path == PIC.CREDITS_PAGE:
+            return credits_page(self.visitor_nav(req, None))
         if moved_to(path) is not None:          # the documentation's old addresses: the docs site
             await self.refresh_info()
             return moved_page(req, path, q)
@@ -2186,7 +2243,10 @@ class Web:
     async def handle(self, reader, writer):
         peer = writer.get_extra_info("peername")
         addr = addr_key(peer[0] if peer else "?")       # IPv6 by its /48, as the core counts
-        if self.active >= MAX_REQUESTS or self.active_by.get(addr, 0) >= REQUESTS_PER_ADDR:
+        # a trusted proxy carries everyone's requests: only the whole adapter's limit holds for its
+        # connections, and each request counts against its own client's address (req["src"])
+        proxied = trusted_proxy(as_ip(peer[0]) if peer else None, PROXIES)
+        if self.active >= MAX_REQUESTS or (not proxied and self.active_by.get(addr, 0) >= REQUESTS_PER_ADDR):
             writer.write(notice("Busy", "Busy, try again.", "This server has too many requests in progress.",
                                 status=503))
             writer.close()
@@ -2271,9 +2331,10 @@ class Web:
         if m:                       # ISMAP: the browser put ?x,y after the link's own query
             query, ismap = query[:m.start()], (int(m.group(1)), int(m.group(2)))
         peer = writer.get_extra_info("peername")
+        client, proto = forwarded_client(peer[0] if peer else "?", headers, PROXIES)
         req = {"path": u.path or "/", "query": parse_qs(query, max_num_fields=MAX_FIELDS),
-               "headers": headers, "method": parts[0], "form": form,
-               "peer": peer[0] if peer else "?", "src": addr, "ismap": ismap}
+               "headers": headers, "method": parts[0], "form": form, "proto": proto,
+               "peer": client, "src": addr_key(client), "ismap": ismap}
         try:
             out = await self.route(req)
         except (CoreError, OSError, asyncio.TimeoutError):
@@ -2281,6 +2342,9 @@ class Web:
                          status=503)
         keep = self.keep_alive(parts, headers, addr, served)
         head, _, body = out.partition(b"\r\n\r\n")
+        link = canonical(req, head)
+        if link:
+            head += b"\r\nLink: <" + link.encode("ascii") + b'>; rel="canonical"'
         if keep:
             head = head.replace(b"\r\nConnection: close", b"\r\nConnection: keep-alive\r\nKeep-Alive: timeout=%d, max=%d"
                                 % (KEEPALIVE_IDLE, KEEPALIVE_MAX - served - 1), 1)
@@ -2309,6 +2373,13 @@ def parse_args(argv=None):
     ap.add_argument("--hosts", default=os.environ.get("PARLOR_WEB_HOSTS", ""),
                     help="web.hosts: comma-separated names (name or name:port) this site answers to; the first "
                          "is used for any other Host header (default: any well-formed Host)")
+    ap.add_argument("--proxies", default=os.environ.get("PARLOR_WEB_PROXIES", ""),
+                    help="web.proxies: comma-separated addresses or networks of the reverse proxies whose "
+                         "X-Forwarded-For and X-Forwarded-Proto are believed (the visitor's address for the "
+                         "per-address limits, and the scheme for redirects)")
+    ap.add_argument("--public-url", default=os.environ.get("PARLOR_WEB_URL", ""),
+                    help="web.public_url: the site's own address, such as https://games.example.org/; "
+                         "pages name their address under it as canonical (a Link header)")
     ap.add_argument("--play-url", default=os.environ.get("PARLOR_PLAY_URL", ""),
                     help="play.public_url: where ParlorNet Play is (https://parlornet.org/play/); /play and "
                          "/play/ answer 301 there, and the welcome page links it while Play runs")
@@ -2316,6 +2387,10 @@ def parse_args(argv=None):
     if a_.key:
         CoreClient.key_file = a_.key
     HOSTS[:] = [h.strip() for h in a_.hosts.split(",") if h.strip()]
+    PROXIES[:] = proxy_list(a_.proxies, "web.proxies")
+    PUBLIC_URL[0] = a_.public_url.strip()
+    if PUBLIC_URL[0] and not re.match(r"^https?://[A-Za-z0-9.:\[\]-]+(/[^\s<>\"]*)?\Z", PUBLIC_URL[0]):
+        raise ValueError("web.public_url is an http:// or https:// address: %r" % PUBLIC_URL[0])
     PLAY_URL[0] = a_.play_url.strip()
     a_.core_host, _, p = a_.core.rpartition(":")
     a_.core_port = int(p)
