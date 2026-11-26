@@ -569,6 +569,16 @@ class DocsPages(Built):
             self.assertIn('<a name="%s">' % folder, index)
         self.assertIn('href="https://github.com/eric-cgn/parlornet"', index)
 
+    def test_frontend_design_page(self):
+        """docs/design.md builds into its page, which the docs index and the frontends doc link to."""
+        page = plain(self.pages["docs/design.html"])
+        self.assertIn('<h1><a name="frontend-design">Frontend design</a></h1>', page)
+        for anchor in ("the-principles", "the-shared-words", "the-program-flow", "each-games-actions",
+                       "the-practice-game", "how-each-kind-of-frontend-carries-it", "what-the-server-provides"):
+            self.assertIn('<a name="%s">' % anchor, page)
+        self.assertIn('href="docs/design.html"', self.pages["docs.html"])
+        self.assertIn('href="design.html"', self.pages["docs/frontends.html"])
+
     def test_doc_links(self):
         """A doc's link to another doc goes to its page; to another file of the repository, to GitHub; to the
         docs site, within the site."""
