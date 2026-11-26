@@ -1,8 +1,8 @@
 """The game rulebooks page of the docs site (gamemaster-rulebooks.html) and its downloads: ParlorNet's own game
 rulebooks for GameMaster 1.0.0 and Install ParlorNet Rulebooks, the installer made with EUP that holds them and
 the ParlorNet rulebook. Their source, their build and their releases are in their own repository
-(eric-cgn/parlornet-gamemaster); the installer and the README come from its release pinned in
-docsite/downloads.json (docsite/downloads.py)."""
+(eric-cgn/parlornet-gamemaster). The installer comes as .hqx, .bin and .dsk from its release pinned in
+docsite/downloads.json, and the README from its source at the same tag (docsite/downloads.py)."""
 import collections
 
 from adapters import clients as C
@@ -42,7 +42,7 @@ def files():
 
 def body():
     """gamemaster-rulebooks.html: the games, what they need, installing them with the installer,
-    playing, and the downloads with sizes and checksums."""
+    playing, and the installer's three downloads with sizes and checksums."""
     parts = [("games", "The games"), ("need", "What you need"), ("install", "Installing"), ("play", "Playing"),
              ("download", "Download"), ("licence", "License")]
     rows = [[a("/parlornet-rulebook.html", "ParlorNet"), "the lobby: sign in, start games, take invitations"]]
@@ -97,8 +97,13 @@ def body():
         h2("play", "Playing") +
         "<ol>\n%s</ol>\n" % "".join("<li>%s\n" % font(s) for s in play) +
         h2("download", "Download") +
-        p("<b>Install ParlorNet Rulebooks</b>, all of them in one installer:") +
+        p("<b>Install ParlorNet Rulebooks</b> holds all of them in one installer. You need only one of these "
+          "files. The .hqx is BinHex, for a Mac that decodes BinHex with StuffIt Expander or BinHex 4.0. The "
+          ".bin is MacBinary, for a Mac or a download program that reads MacBinary. The .dsk is an 800K disk "
+          "image holding the installer, for an emulator or for writing a floppy disk.") +
         downloads.downloads_html(downloads.INSTALLER, README) +
+        p("The same three files are also on the %s on GitHub."
+          % a(downloads.release_page(downloads.GAMEMASTER_REPO), "release of %s" % downloads.GAMEMASTER_REPO)) +
         h2("licence", "License") +
         p("The rulebooks are free software under the MIT license; the full text is in the %s. Their source "
           "is in %s. The installer is made with %s, which carries parts of newlib, Multiversal Interfaces, "

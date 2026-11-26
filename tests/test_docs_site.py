@@ -703,8 +703,9 @@ class EclipsePage(Built):
 
     def test_game_rulebooks_page_and_downloads(self):
         """gamemaster-rulebooks.html: the games, what they need, the installer, how to play, and the one
-        download, Install ParlorNet Rulebooks (an application made by EUP) as BinHex and MacBinary. No rulebook is
-        offered on its own."""
+        download, Install ParlorNet Rulebooks (an application made by EUP) as BinHex, MacBinary and an 800K disk
+        image, with a sentence on which to pick and a link to its GitHub release. No rulebook is offered on its
+        own."""
         from docsite import gamerulebooks as G, downloads
         body = self.pages["gamemaster-rulebooks.html"]
         for text in ("A Mac Plus or later with System 6.0 or later", "The installer needs System 6.0.3 or later",
@@ -717,6 +718,12 @@ class EclipsePage(Built):
             self.assertIn(r.game, body)
             self.assertFalse([f for f in self.files if f.startswith("download/%s." % r.slug)], r.slug)
         self.check_downloads(body, downloads.INSTALLER)
+        self.assertEqual(downloads.extensions(downloads.INSTALLER), ("hqx", "bin", "dsk"))
+        for text in ("You need only one of these files", "StuffIt Expander or BinHex 4.0",
+                     "reads MacBinary", "for an emulator or for writing a floppy disk"):
+            self.assertIn(text, body)
+        tag = downloads.entry(downloads.INSTALLER + ".hqx")["tag"]
+        self.assertIn('<a href="https://github.com/eric-cgn/parlornet-gamemaster/releases/tag/%s">' % tag, body)
         self.assertEqual(self.files["download/gamemaster-rulebooks-readme.txt"],
                          self.fixture.data["gamemaster-rulebooks-readme.txt"])
         self.assertIn('<a href="gamemaster-rulebooks.html"><b>Game rulebooks</b></a>', self.pages["docs.html"])
@@ -729,7 +736,8 @@ class Downloads(unittest.TestCase):
 
     def test_the_manifest(self):
         """Every download the pages offer is pinned once, to a release of its own repository, with a SHA-256;
-        each repository has one tag."""
+        each repository has one tag. A README, which a release need not carry, comes from its repository's
+        source at that tag, from its path there."""
         from docsite import downloads
         entries = downloads.entries(downloads.MANIFEST)
         self.assertEqual(sorted(e["file"] for e in entries), sorted(downloads.FILES))
@@ -741,6 +749,13 @@ class Downloads(unittest.TestCase):
             tags.setdefault(e["repo"], set()).add(e["tag"])
             self.assertEqual(downloads.release_url(e), "https://github.com/%s/releases/download/%s/%s"
                              % (e["repo"], e["tag"], e["file"]))
+            path = downloads.FILES[e["file"]][1]
+            self.assertEqual(e.get("path"), path if e["repo"] == downloads.GAMEMASTER_REPO else None, e)
+            if path and e["repo"] == downloads.GAMEMASTER_REPO:
+                self.assertEqual(downloads.source_url(e), "https://raw.githubusercontent.com/%s/%s/%s"
+                                 % (e["repo"], e["tag"], path))
+            else:
+                self.assertEqual(downloads.source_url(e), downloads.release_url(e))
         self.assertEqual(set(tags), set(downloads.REPOS))
         self.assertTrue(all(len(t) == 1 for t in tags.values()), tags)
 
@@ -781,12 +796,15 @@ class Downloads(unittest.TestCase):
                     "sha256": hashlib.sha256(good).hexdigest()},
                    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.3", "file": "c.bin",
                     "sha256": hashlib.sha256(good).hexdigest()}]
-        served = {downloads.release_url(entries[0]): good, downloads.release_url(entries[2]): bad}
+        entries.append({"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.3", "file": "d.txt",
+                        "path": "release/d.txt", "sha256": hashlib.sha256(good).hexdigest()})
+        served = {downloads.release_url(entries[0]): good, downloads.release_url(entries[2]): bad,
+                  "https://raw.githubusercontent.com/eric-cgn/parlornet-gamemaster/v1.3/release/d.txt": good}
         with tempfile.TemporaryDirectory() as tmp:
             problems = fetch_downloads.fetch(entries, tmp, self.fake_opener(served))
             with open(os.path.join(tmp, "a.bin"), "rb") as f:
                 self.assertEqual(f.read(), good)
-            self.assertEqual(sorted(os.listdir(tmp)), ["a.bin"])
+            self.assertEqual(sorted(os.listdir(tmp)), ["a.bin", "d.txt"])
             self.assertEqual(len(problems), 2)
             self.assertIn("The release v1.0 of eric-cgn/parlornet-eclipse-fix is not published", problems[0])
             self.assertIn("https://github.com/eric-cgn/parlornet-eclipse-fix/releases/download/v1.0/b.bin",
@@ -794,7 +812,11 @@ class Downloads(unittest.TestCase):
             self.assertIn("SHA-256 %s" % hashlib.sha256(bad).hexdigest(), problems[1])
             self.assertIn("not written", problems[1])
             # fetched already: nothing is asked of the network
-            self.assertEqual(fetch_downloads.fetch(entries[:1], tmp, self.fake_opener({})), [])
+            self.assertEqual(fetch_downloads.fetch(entries[:1] + entries[3:], tmp, self.fake_opener({})), [])
+            missing = dict(entries[3], file="e.txt", path="release/e.txt")
+            problems = fetch_downloads.fetch([missing], tmp, self.fake_opener({}))
+            self.assertEqual(len(problems), 1)
+            self.assertIn("The tag v1.3 of eric-cgn/parlornet-gamemaster has no file release/e.txt", problems[0])
 
     def test_build_needs_the_downloads(self):
         """With --require-downloads (as the workflow builds the site) a missing download stops the build and is
