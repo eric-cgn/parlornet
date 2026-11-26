@@ -5,10 +5,9 @@ the game module interface (adapters/games/__init__.py).
 """
 import re
 
-from ..telnet import (A_AXIS, A_AXIS_HI, A_BORDER, A_BRIGHT, A_DIM, A_GRID, A_HEAD, A_RED, A_TEXT, A_YELLOW, COLS,
-                      ROWS, SQUARE_RE, AnsiGame, Canvas, GameBase, PlainGame, clock_text, fmt_secs, rule, status_bar,
-                      title_bar, turn_text)
-from ..telnet import box, describe_event as describe_common
+from ..telnet import (A_AXIS, A_AXIS_HI, A_DIM, A_GRID, A_RED, A_TEXT, AnsiGame, COLS, Canvas, GameBase, PlainGame,
+                      ROWS, SQUARE_RE, title_bar)
+from ..telnet import describe_event as describe_common
 from ..board import Canvas as Picture
 from ..web import board_html, esc, make_gif
 
@@ -142,34 +141,44 @@ def web_parts(v, tid, link, seat, names, sel):
 
 # ---- telnet --------------------------------------------------------------------------
 
-HELP = [
-    "Arrow keys   move the cursor",
-    "Enter/Space  place a disc on the cursor square",
-    "Mouse        click a legal square to play it",
-    "T            talk: type a line to the table",
-    "R            resign (asks first)",
-    "Esc          back to the menu; the game goes on",
-    "Ctrl-L       redraw the screen",
-    "",
-    "Typed commands work too: a square like d3,",
-    "say <text>, resign, redraw, menu, help.",
-    "",
-    "Leaving or logging off never resigns. Your",
-    "turn timer runs while it is your move.",
-]
-GAME_HELP = HELP            # its old name in adapters/telnet.py
 
 
 class ReversiBase(GameBase):
     """What both Reversi screens share: the view, the events, typed squares."""
 
+    HELP_MOVING = ["The arrows move the cursor over the board. Press Enter to place a",
+                   "disc there. A click on a square does the same."]
+    HELP_KEYS = []
+    HELP_COMMANDS = ["Press / to type one. /d3 places a disc on d3."]
+    HELP_REFERENCE = ["The board",
+                      "The letters name the columns from the left, and the numbers name",
+                      "the rows from the top. The dots show where you can place a disc,",
+                      "and brackets mark the last disc placed.",
+                      "",
+                      "Passing",
+                      "When you have no move, the server passes your turn for you. The",
+                      "game ends when neither player can move, and more discs win."]
+
     parse = staticmethod(parse_view)
+    GAME = NAME
+    MOVE_EXAMPLE = "/d3"
 
     def describe(self, text):
         return describe_event(text, self.names) or describe_common(text, self.names)
 
     def move_word(self, cmd, words=()):
         return cmd if SQUARE_RE.match(cmd) else None
+
+    last_sq = None          # the square of the last disc placed
+
+    def last_move(self, text):
+        p = text.split()
+        if p[0] == "PUT" and len(p) >= 3:
+            self.last_sq, n = p[2], len(p) - 4
+            return "%s placed a disc on %s and flipped %d." % (self.actor(p[1]), p[2], n)
+        if p[0] == "PASS" and len(p) >= 2:
+            return "%s had no move, so the turn passed." % self.actor(p[1])
+        return None
 
 
 class AnsiReversi(ReversiBase, AnsiGame):
@@ -178,7 +187,6 @@ class AnsiReversi(ReversiBase, AnsiGame):
 
     HOTKEYS = "rt?"
     LOG_TOP, LOG_ROWS = 9, 11
-    TITLE, HELP = "Reversi", HELP
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
@@ -217,28 +225,26 @@ class AnsiReversi(ReversiBase, AnsiGame):
 
     def compose(self):
         cv = Canvas()
-        right = "watching" if self.me < 0 else "you play %s" % ("black" if self.me == 0 else "white")
-        title_bar(cv, self.g, "Reversi %s table %s" % (self.g["v"], self.tid), right)
+        title_bar(cv, self.g, self.title_text())
         self.draw_board(cv)
         self.draw_panel(cv)
-        text, attr = (self.msg, self.msg_attr) if self.msg else self.hint()
+        text, attr = self.sentence(self.hint)
         cv.put(1, ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
-        if self.buf:
-            keys = [("Enter", "send"), ("Esc", "cancel"), ("Backspace", "erase")]
+        if self.my_turn():
+            keys = self.keys("move", "place")
         elif self.me >= 0 and self.playing():
-            keys = [("Arrows", "move"), ("Enter", "place"), ("T", "talk"), ("R", "resign"),
-                    ("?", "help"), ("Esc", "menu")]
+            keys = self.keys("look")
         else:
-            keys = [("T", "talk"), ("?", "help"), ("Esc", "menu")]
-        status_bar(cv, keys)
+            keys = self.keys()
+        self.keys_line(cv, keys)
         return cv
 
     def draw_board(self, cv):
         g, v = self.g, self.v
         n, p, bx, by = self.geometry()
         rows = v["rows"] if v else []
-        showcur = self.me >= 0 and self.playing()
+        showcur = self.me >= 0 and self.playing() and self.lit()
         legal = set(v["moves"]) if self.my_turn() else set()
         for i in range(n):
             hi = showcur and i == self.cur[0]
@@ -262,6 +268,8 @@ class AnsiReversi(ReversiBase, AnsiGame):
                 c = rows[y][x] if y < len(rows) and x < len(rows[y]) else "."
                 if c in "01":
                     text, attr = self.disc(int(c), bg)
+                    if self.sq((x, y)) == self.last_sq:         # the last disc placed, framed
+                        text = "[%s]" % text[1]
                 elif self.sq((x, y)) in legal:
                     text, attr = " %s " % g["hint"], "0;1;33;" + bg
                 else:
@@ -274,63 +282,28 @@ class AnsiReversi(ReversiBase, AnsiGame):
             self.draw_waiting(cv, bx + (4 * n + 1 - w) // 2, by + (height - 5) // 2, w)
 
     def draw_panel(self, cv):
-        g, v = self.g, self.v
         n, p, bx, by = self.geometry()
         px = max(40, bx + 4 * n + 3)
-        pw = COLS - 1 - px
-        inner = pw - 4
-        box(cv, g, px, 2, pw, 19, A_BORDER, "Players", tattr=A_HEAD)
-        rows = v["rows"] if v else []
+        rows = self.v["rows"] if self.v else []
+        players = []
         for i in (0, 1):
-            y = 3 + i
-            tomove = self.playing() and v["turn"] == i
-            empty = i >= len(self.names) or self.names[i] == "-"
-            cv.put(px + 2, y, g["ptr"] if tomove else " ", A_YELLOW)
-            cv.put(px + 4, y, *self.disc(i))
-            label = ("(empty seat)" if empty else self.names[i]) + (" (you)" if i == self.me else "")
-            count = v["counts"][i] if rows else 0
-            cnt = ("%2d disc%s" % (count, "" if count == 1 else "s")).ljust(8) if inner >= 34 else "%2d" % count
-            cv.put(px + 8, y, label[:inner - 6 - len(cnt)], A_BRIGHT if tomove else A_DIM if empty else A_TEXT)
-            if rows:
-                cv.put(px + pw - 2 - len(cnt), y, cnt, A_BRIGHT if tomove else A_TEXT)
-        rule(cv, g, px, 5, pw, A_BORDER)
-        if not rows:
-            turn, tattr = "Waiting for an opponent", A_YELLOW
-        elif self.over:
-            turn, tattr = self.over, A_YELLOW
-        elif self.my_turn():
-            turn, tattr = "Your move", A_YELLOW
-        elif self.me >= 0 and v["turn"] == self.me:
-            turn, tattr = "Your turn: no legal move", A_TEXT
-        else:
-            turn, tattr = "%s to move" % self.name(v["turn"]), A_TEXT
-        cv.put(px + 2, 6, turn[:inner], tattr)
-        c = self.clock()
-        if c:
-            seat, left, limit = c
-            urgent = seat == self.me and left < 60
-            clock = "Clock: %s left of %s" % (fmt_secs(left), turn_text(limit))
-            cv.put(px + 2, 7, clock[:inner], A_RED if urgent else A_TEXT)
-        elif self.turn_secs and not self.over:
-            cv.put(px + 2, 7, ("Time per turn: %s" % turn_text(self.turn_secs))[:inner], A_DIM)
-        rule(cv, g, px, 8, pw, A_BORDER, "Log", tattr=A_HEAD)
-        self.draw_log(cv, px + 2, inner)
+            count = self.v["counts"][i] if rows else 0
+            players.append((i, self.disc(i), "%d disc%s" % (count, "" if count == 1 else "s")))
+        self.draw_panel_parts(cv, px, 2, COLS - 1 - px, players)
 
     def hint(self):
         if not (self.v and self.v["rows"]):
-            return ("Table %s starts when someone joins: telnet, the web (port 6500) or IOS (6503)."
-                    % self.tid, A_DIM)
+            return self.waiting_hint()
         if self.over:
-            return "%s. Esc goes back to the menu." % self.over, A_YELLOW
+            return self.over_hint()
         if self.me < 0:
-            return "Watching. T talks to the table, Esc goes back to the menu.", A_DIM
+            return self.watch_hint()
         if self.my_turn():
             sq = self.sq(self.cur)
             if sq in self.v["moves"]:
-                return "Your move. %s: Enter or Space places a disc here." % sq, A_TEXT
-            return "Your move. %s is not a legal square; legal ones show %s." % (sq, self.g["hint"]), A_DIM
-        return ("Waiting for %s. Leaving or logging off never resigns." % self.name(self.v["turn"]),
-                A_DIM)
+                return "Your turn. Press Enter to place a disc on %s." % sq, A_TEXT
+            return "Your turn. You can't place a disc on %s. The dots show where you can." % sq, A_DIM
+        return self.their_hint(self.v["turn"])
 
     def cursor_at(self):
         if self.me >= 0 and self.playing():
@@ -342,8 +315,7 @@ class AnsiReversi(ReversiBase, AnsiGame):
     async def on_click(self, value):
         if value[0] == "sq" and self.me >= 0 and self.playing():
             self.cur = (value[1], value[2])
-            if self.my_turn() and self.sq(self.cur) in self.v["moves"]:
-                return await self.place()       # a click on a legal square plays it
+            return await self.place()             # a click does what Enter does there
         return None
 
     def on_arrow(self, k):
@@ -356,12 +328,8 @@ class AnsiReversi(ReversiBase, AnsiGame):
         return await self.place()
 
     async def place(self):
-        if self.me < 0:
-            return self.say("You are watching this table.")
-        if not self.playing():
-            return self.say(self.over or "The game has not started yet.")
         if not self.my_turn():
-            return self.say("It is %s's move." % self.name(self.v["turn"]))
+            return self.say(self.not_yours())
         err = await self.move(self.sq(self.cur))
         if err:
             self.say(err, A_RED)
@@ -373,54 +341,25 @@ class PlainReversi(ReversiBase, PlainGame):
     moves at a prompt."""
 
     BOARD_KINDS = ("PUT", "PASS", "JOIN", "LEAVE", "START", "END")
-    HELP_TEXT = (" A square like d3 plays there. say <text> talks to the table.\n"
-                 " resign gives up (it asks first). menu goes back to the menu;\n"
-                 " the game goes on and leaving never resigns. redraw or Enter\n"
-                 " shows the board again.")
 
     def lines(self):
-        v, me = self.v, self.me
-        you = "you are watching" if me < 0 else "you play %s (%s)" % ("black" if me == 0 else "white", "XO"[me])
-        out = ["", "== Reversi, table %s: %s ==" % (self.tid, you)]
+        v = self.v
+        out = [""] + self.plain_header()
         if not v["rows"]:
-            return out + ["", "Waiting for an opponent.",
-                          "The game starts when someone joins table %s from telnet, the web" % self.tid,
-                          "(port 6500) or an IOS client (port 6503). Type menu to go back;",
-                          "the table stays open."]
+            return out + self.plain_waiting()
         n = v["n"]
         legal = set(v["moves"]) if self.my_turn() else set()
-        side = {}
-        for i in (0, 1):
-            mark = ">" if self.playing() and v["turn"] == i else " "
-            side[i] = "%s %s %-12s %2d" % (mark, "XO"[i], self.name(i), v["counts"][i])
-        if self.over:
-            side[3] = self.over
-        elif self.my_turn():
-            side[3] = "Your move."
-        else:
-            side[3] = "%s to move." % self.name(v["turn"])
-        if me >= 0 and not self.over:
-            side[5], side[6] = "Type a square to play, or", "say <text>, resign, menu, help."
-        else:
-            side[5] = "Type say <text>, menu or help."
-        out.append("      " + "".join(" %s " % chr(97 + i) for i in range(n)))
-        out.append("    +" + "-" * (3 * n + 2) + "+")
+        board = ["      " + "".join(" %s " % chr(97 + i) for i in range(n)), "    +" + "-" * (3 * n + 2) + "+"]
         for y, row in enumerate(v["rows"]):
             cells = "".join(" %s " % ("X" if c == "0" else "O" if c == "1" else
                                       "*" if "%s%d" % (chr(97 + x), y + 1) in legal else ".")
                             for x, c in enumerate(row))
-            out.append((" %2d | %s |    %s" % (y + 1, cells, side.get(y, ""))).rstrip())
-        out.append("    +" + "-" * (3 * n + 2) + "+")
-        if not self.over:
-            out.append(" " + clock_text(v, self.names))
-        for l in self.log[-4:]:
-            out.append(" " + l[:78])
-        return out
+            board.append(" %2d | %s |" % (y + 1, cells))
+        board.append("    +" + "-" * (3 * n + 2) + "+")
+        side = self.side_text([(i, "XO"[i], "%d" % v["counts"][i]) for i in (0, 1)])
+        return out + self.beside(board, side, 3 * n + 12) + self.plain_log()
 
-    def prompt(self):
-        if self.my_turn():
-            return "Your move (like %s) > " % sorted(self.v["moves"])[0]
-        return "> "
-
+    def turn_prompt(self):
+        return "Your turn. Type a square such as /%s." % sorted(self.v["moves"])[0]
 
 AnsiScreen, PlainScreen = AnsiReversi, PlainReversi

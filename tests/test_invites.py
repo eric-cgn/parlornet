@@ -415,22 +415,23 @@ class Stack(WebPlayers, unittest.TestCase):
         c.send("list\r\n")
         c.until("Invitations for you:")
         c.until("from wyn")
-        c.send("decline %s\r\n" % tid)
+        c.until("wyn invites you to play")                  # asked once at the prompt: N declines it
+        c.send("n\r\n")
         c.until("You declined wyn's invitation to table %s." % tid)
         self.assertIn("tess declined the invitation", self.web_get("/table.htm?t=%s&n=wyn" % tid)[2])
         tid = self.web_table("wyn")
         self.web_invite("wyn", tid, "tess")
         c.send("join %s\r\n" % tid)                             # join accepts it: the held seat
         c.until("O tess")                                      # seated: the game started
-        c.send("menu\r\n")
+        c.send("/leave\r\n")
         c.until("Your tables")
         # at a table of its own, telnet invites by name; the web lobby shows it
-        c.send("new mancala kalah 5m\r\n")
-        c.until("Waiting for an opponent")
-        c.send("invite wyn\r\n")
-        c.until("You invited wyn.")
+        c.send("open mancala kalah 5m\r\n")
+        c.until("Waiting for a second player")
+        c.send("/invite wyn\r\n")
+        c.until("You invited wyn to table")
         self.assertIn("Invitations for you", self.web_get("/lobby.htm?n=wyn")[2])
-        c.send("uninvite wyn\r\n")
+        c.send("/uninvite wyn\r\n")
         c.until("You withdrew wyn's invitation.")
 
 

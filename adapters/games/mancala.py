@@ -7,10 +7,9 @@ a pit number, 1 to 6. Two rulesets: kalah (store rules) and oware (abapa).
 """
 import re
 
-from ..telnet import (A_AXIS, A_AXIS_HI, A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_TEXT, A_YELLOW, COLS, ROWS,
-                      AnsiGame, Canvas, GameBase, PlainGame, clock_text, fmt_secs, rule, status_bar, title_bar,
-                      turn_text)
-from ..telnet import box, describe_event as describe_common
+from ..telnet import (A_AXIS, A_AXIS_HI, A_DIM, A_RED, A_TEXT, AnsiGame, COLS, Canvas, GameBase, PlainGame, ROWS,
+                      title_bar)
+from ..telnet import describe_event as describe_common
 from ..board import Canvas as Picture
 from ..web import board_html, esc, make_gif
 
@@ -238,33 +237,16 @@ def web_parts(v, tid, link, seat, names, sel):
 
 # ---- telnet --------------------------------------------------------------------------
 
-HELP = [
-    "Left/Right   move the cursor along your pits",
-    "Enter/Space  sow the seeds of the cursor pit",
-    "Mouse        click one of your pits to sow it",
-    "1 to 6       typed, then Enter: sow that pit",
-    "T            talk: type a line to the table",
-    "R            resign (asks first)",
-    "Esc          back to the menu; the game goes on",
-    "Ctrl-L       redraw the screen",
-    "",
-    "Your pits are the bottom row, 1 to 6 from the",
-    "left, and your store is on the right. Typed",
-    "commands: say <text>, resign, redraw, menu, help.",
-    "Leaving or logging off never resigns.",
-]
 
-LEGEND = {
-    "kalah": ["Sown counterclockwise, one seed a pit,",
-              "through the mover's store, not the other.",
-              "Last seed in the mover's store: move again.",
-              "Last seed in an empty own pit: it and the",
-              "seeds opposite go to the mover's store."],
-    "oware": ["Sown counterclockwise, one seed a pit;",
-              "stores only keep captures. A last seed that",
-              "makes 2 or 3 on the far row captures them,",
-              "and the 2s and 3s just before. Feed an",
-              "empty side. More than 24 seeds wins."],
+RULES_HELP = {         # help's page 2, the rules in use
+    "kalah": ["Seeds are sown counterclockwise, one in each pit. They go through",
+              "your own store but not the other player's. When your last seed",
+              "lands in your store, you move again. When it lands in an empty pit",
+              "of yours, it and the seeds opposite go to your store."],
+    "oware": ["Seeds are sown counterclockwise, one in each pit, and the stores",
+              "keep only captures. When your last seed makes 2 or 3 in a pit on",
+              "the far row, you capture them and the 2s and 3s just before it.",
+              "You must feed a side that is empty. More than 24 seeds wins."],
 }
 
 
@@ -283,16 +265,37 @@ A_PIT = "0;1;37;40"         # a pit's or a store's inside
 class MancalaBase(GameBase):
     """What both Mancala screens share: the view, the events, typed pits."""
 
+    HELP_MOVING = ["The arrows move the cursor along your pits, and the digits 1 to 6",
+                   "go straight to that pit. Press Enter to sow it. A click on one of",
+                   "your pits does the same."]
+    HELP_KEYS = ["1 to 6 put the cursor on that pit."]
+    HELP_COMMANDS = ["Press / to type one. /3 sows pit 3."]
+    HELP_REFERENCE = ["Your pits",
+                      "Your pits are the bottom row, numbered 1 to 6 from the left, and",
+                      "your store is on the right. The last pit sown is blue."]
+
+    def reference(self):
+        rules = (self.v or {}).get("rules") or "kalah"
+        return list(self.HELP_REFERENCE) + ["", "The rules"] + RULES_HELP.get(rules, RULES_HELP["kalah"])
+
     parse = staticmethod(parse_view)
+    GAME = NAME
+    MOVE_EXAMPLE = "/3"
 
     def describe(self, text):
         return describe_event(text, self.names) or describe_common(text, self.names)
 
     def move_word(self, cmd, words=()):
-        if MOVE_RE.match(cmd):
-            return cmd
-        if cmd in ("pit", "sow") and len(words) > 1 and MOVE_RE.match(words[1]):
-            return words[1]
+        return cmd if MOVE_RE.match(cmd) else None
+
+    def view_last(self):
+        last = self.v.get("last") if self.v else None
+        return "%s sowed pit %d." % (self.actor(last[0]), last[1]) if last else ""
+
+    def last_move(self, text):
+        p = text.split()
+        if p[0] == "SOW" and len(p) >= 3:
+            return "%s sowed pit %s." % (self.actor(p[1]), p[2])
         return None
 
     def rules_name(self):
@@ -303,9 +306,8 @@ class AnsiMancala(MancalaBase, AnsiGame):
     """Mancala, full screen: the board on the left (a cursor along the player's own pits), players,
     clock, rules and log on the right."""
 
-    HOTKEYS = "rt?"
+    HOTKEYS = "rt?123456"         # 1 to 6 put the cursor on that pit
     LOG_TOP, LOG_ROWS = 10, 10
-    TITLE, HELP = "Mancala", HELP
     BX, BY = 2, 4               # the board frame's top left corner
     PX = 46                     # the panel's left edge
 
@@ -339,22 +341,19 @@ class AnsiMancala(MancalaBase, AnsiGame):
     # ---- drawing ---------------------------------------------------------
     def compose(self):
         cv = Canvas()
-        rn = self.rules_name()
-        right = "watching" if self.me < 0 else "you play the bottom row"
-        title_bar(cv, self.g, "Mancala %s table %s (%s)" % (self.g["v"], self.tid, rn), right)
+        title_bar(cv, self.g, self.title_text())
         self.draw_board(cv)
         self.draw_panel(cv)
-        text, attr = (self.msg, self.msg_attr) if self.msg else self.hint()
+        text, attr = self.sentence(self.hint)
         cv.put(1, ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
-        if self.buf:
-            keys = [("Enter", "send"), ("Esc", "cancel"), ("Backspace", "erase")]
+        if self.my_turn():
+            keys = self.keys("move", "sow")
         elif self.me >= 0 and self.playing():
-            keys = [("Arrows", "move"), ("Enter", "sow"), ("T", "talk"), ("R", "resign"),
-                    ("?", "help"), ("Esc", "menu")]
+            keys = self.keys("look")
         else:
-            keys = [("T", "talk"), ("?", "help"), ("Esc", "menu")]
-        status_bar(cv, keys)
+            keys = self.keys()
+        self.keys_line(cv, keys)
         return cv
 
     def draw_frame(self, cv):
@@ -402,7 +401,7 @@ class AnsiMancala(MancalaBase, AnsiGame):
         v, bx, by = self.v, self.BX, self.BY
         bottom, top = seats_shown(self.me)
         started = bool(v and v["rows"])
-        showcur = self.me >= 0 and self.playing()
+        showcur = self.me >= 0 and self.playing() and self.lit()
         self.draw_frame(cv)
         for c in range(PITS):
             hi = showcur and c + 1 == self.cur
@@ -421,67 +420,31 @@ class AnsiMancala(MancalaBase, AnsiGame):
         for s, x in ((top, bx + 1), (bottom, bx + 37)):
             cv.put(x, by + 3, "store", "0;36;40")
             cv.put(x, by + 4, ("%d" % store(v, s)).center(5), A_PIT)
-        for i, line in enumerate(LEGEND.get(v["rules"], LEGEND["kalah"])):
-            cv.put(bx, by + 12 + i, line[:43], A_DIM)
 
     def draw_panel(self, cv):
-        g, v = self.g, self.v
-        px = self.PX
-        pw = COLS - 1 - px
-        inner = pw - 4
-        box(cv, g, px, 2, pw, 19, A_BORDER, "Players", tattr=A_HEAD)
+        v = self.v
         started = bool(v and v["rows"])
+        players = []
         for i in (0, 1):
-            y = 3 + i
-            tomove = self.playing() and v["turn"] == i
-            empty = i >= len(self.names) or self.names[i] == "-"
-            cv.put(px + 2, y, g["ptr"] if tomove else " ", A_YELLOW)
-            label = ("(empty seat)" if empty else self.names[i]) + (" (you)" if i == self.me else "")
-            cnt = "store %2d" % store(v, i) if started else ""
-            cv.put(px + 4, y, label[:pw - 7 - len(cnt)], A_BRIGHT if tomove else A_DIM if empty else A_TEXT)
-            if cnt:
-                cv.put(px + pw - 2 - len(cnt), y, cnt, A_BRIGHT if tomove else A_TEXT)
-        rule(cv, g, px, 5, pw, A_BORDER)
-        if not started:
-            turn, tattr = "Waiting for an opponent", A_YELLOW
-        elif self.over:
-            turn, tattr = self.over, A_YELLOW
-        elif v["turn"] < 0:
-            turn, tattr = v["status"] or "Game over", A_YELLOW
-        elif self.my_turn():
-            turn, tattr = "Your move", A_YELLOW
-        else:
-            turn, tattr = "%s to move" % self.name(v["turn"]), A_TEXT
-        cv.put(px + 2, 6, turn[:inner], tattr)
-        c = self.clock()
-        if c:
-            seat, left, limit = c
-            urgent = seat == self.me and left < 60
-            clock = "Clock: %s left of %s" % (fmt_secs(left), turn_text(limit))
-            cv.put(px + 2, 7, clock[:inner], A_RED if urgent else A_TEXT)
-        elif self.turn_secs and not self.over:
-            cv.put(px + 2, 7, ("Time per turn: %s" % turn_text(self.turn_secs))[:inner], A_DIM)
-        if started:
-            cv.put(px + 2, 8, rules_line(v)[:inner], A_DIM)
-        rule(cv, g, px, 9, pw, A_BORDER, "Log", tattr=A_HEAD)
-        self.draw_log(cv, px + 2, inner)
+            n = store(v, i) if started else 0
+            players.append((i, None, "%d in store" % n))
+        self.draw_panel_parts(cv, self.PX, 2, COLS - 1 - self.PX, players, [rules_line(v) + "."] if started else [])
 
     def hint(self):
         if not (self.v and self.v["rows"]):
-            return ("Table %s starts when someone joins: telnet, the web (port 6500) or the native protocol."
-                    % self.tid, A_DIM)
+            return self.waiting_hint()
         if self.over or self.v["turn"] < 0:
-            return "%s. Esc goes back to the menu." % (self.over or self.v["status"] or "Game over"), A_YELLOW
+            return self.over_hint(self.v["status"] or "Game over")
         if self.me < 0:
-            return "Watching. T talks to the table, Esc goes back to the menu.", A_DIM
+            return self.watch_hint()
         if self.my_turn():
             n = pit(self.v, self.me, self.cur)
             if str(self.cur) in self.v["moves"]:
-                return "Your move. Pit %d: Enter or Space sows its %s." % (self.cur, _plural(n)), A_TEXT
+                return "Your turn. Press Enter to sow the %s in pit %d." % (_plural(n), self.cur), A_TEXT
             if n == 0:
-                return "Your move. Pit %d is empty; pick a pit with seeds." % self.cur, A_DIM
-            return "Your move. Pit %d does not reach the other side, which you must feed." % self.cur, A_DIM
-        return ("Waiting for %s. Leaving or logging off never resigns." % self.name(self.v["turn"]), A_DIM)
+                return "Your turn. Pit %d is empty, so pick a pit with seeds." % self.cur, A_DIM
+            return "Your turn. Pit %d doesn't reach the other side, and you must feed it." % self.cur, A_DIM
+        return self.their_hint(self.v["turn"])
 
     def cursor_at(self):
         if self.me >= 0 and self.playing():
@@ -493,24 +456,26 @@ class AnsiMancala(MancalaBase, AnsiGame):
     async def on_click(self, value):
         if value[0] == "pit" and self.me >= 0 and self.playing():
             self.cur = value[1]
-            if self.my_turn() and str(self.cur) in self.v["moves"]:
-                return await self.sow()         # a click on a legal pit sows it
+            return await self.sow()             # a click does what Enter does there
         return None
 
     def on_arrow(self, k):
-        if self.v and self.v["rows"] and k in ("LEFT", "RIGHT"):
-            self.cur = (self.cur - 1 + (1 if k == "RIGHT" else -1)) % PITS + 1
+        if self.v and self.v["rows"]:           # every arrow goes along your pits: Up and Down as Right and Left
+            self.cur = (self.cur - 1 + (1 if k in ("RIGHT", "UP") else -1)) % PITS + 1
 
     async def on_enter(self):
         return await self.sow()
 
+    async def hotkey(self, k):
+        if k.isdigit():
+            if self.v and self.v["rows"]:
+                self.cur = int(k)
+            return None
+        return await super().hotkey(k)
+
     async def sow(self):
-        if self.me < 0:
-            return self.say("You are watching this table.")
-        if not self.playing():
-            return self.say(self.over or "The game has not started yet.")
         if not self.my_turn():
-            return self.say("It is %s's move." % self.name(self.v["turn"]))
+            return self.say(self.not_yours())
         err = await self.move(str(self.cur))
         if err:
             self.say(err, A_RED)
@@ -521,20 +486,12 @@ class PlainMancala(MancalaBase, PlainGame):
     """Mancala for plain terminals: the board printed line by line, typed pit numbers at a prompt."""
 
     BOARD_KINDS = ("SOW", "SWEEP", "JOIN", "LEAVE", "START", "END")
-    HELP_TEXT = (" A pit number, 1 to 6, sows that pit of yours (the bottom row, counted\n"
-                 " from the left; your store is on the right). say <text> talks to the\n"
-                 " table. resign gives up (it asks first). menu goes back to the menu;\n"
-                 " the game goes on and leaving never resigns. redraw or Enter shows\n"
-                 " the board again.")
 
     def lines(self):
         v, me = self.v, self.me
-        you = "you are watching" if me < 0 else "you play the bottom row"
-        out = ["", "== Mancala (%s), table %s: %s ==" % (self.rules_name(), self.tid, you)]
+        out = [""] + self.plain_header()
         if not v["rows"]:
-            return out + ["", "Waiting for an opponent.",
-                          "The game starts when someone joins table %s from telnet or the web" % self.tid,
-                          "(port 6500). Type menu to go back; the table stays open."]
+            return out + self.plain_waiting()
         bottom, top = seats_shown(me)
         legal = set(v["moves"]) if self.my_turn() else set()
 
@@ -543,21 +500,6 @@ class PlainMancala(MancalaBase, PlainGame):
             return (" %2d*" if seat == me and str(p) in legal else " %2d ") % n
         tops = range(PITS, 0, -1)
         bots = range(1, PITS + 1)
-        side = {}
-        for i, s in enumerate((top, bottom)):
-            mark = ">" if self.playing() and v["turn"] == s else " "
-            where = "top" if s == top else "bottom"
-            side[1 + i] = "%s %-12s %-6s store %2d" % (mark, self.name(s), where, store(v, s))
-        if self.over or v["turn"] < 0:
-            side[3] = (self.over or v["status"] or "Game over")[:31]
-        elif self.my_turn():
-            side[3] = "Your move: a pit with a *."
-        else:
-            side[3] = "%s to move." % self.name(v["turn"])
-        if me >= 0 and not self.over:
-            side[4], side[5] = "Type a pit (1-6) to sow it, or", "say <text>, resign, menu, help."
-        else:
-            side[4] = "Type say <text>, menu or help."
         board = ["          " + "".join("  %d  " % p for p in tops),
                  "    +" + "----+" * 8,
                  "    |    |" + "".join(cell(top, p) + "|" for p in tops) + "    |",
@@ -565,19 +507,11 @@ class PlainMancala(MancalaBase, PlainGame):
                  "    |    |" + "".join(cell(bottom, p) + "|" for p in bots) + "    |",
                  "    +" + "----+" * 8,
                  "          " + "".join("  %d  " % p for p in bots)]
-        for i, row in enumerate(board):
-            out.append((row.ljust(47) + side.get(i, "")).rstrip())
-        out.append(" %s. Sown counterclockwise (bottom row: left to right)." % rules_line(v))
-        if not self.over:
-            out.append(" " + clock_text(v, self.names))
-        for l in self.log[-4:]:
-            out.append(" " + l[:78])
-        return out
+        side = self.side_text([(s, None, "%d in store" % store(v, s)) for s in (top, bottom)],
+                              [rules_line(v) + ".", "Your pits are the bottom row." if me >= 0 else ""])
+        return out + self.beside(board, side, 47) + self.plain_log()
 
-    def prompt(self):
-        if self.my_turn():
-            return "Your move (a pit, like %s) > " % min(self.v["moves"], key=int)
-        return "> "
-
+    def turn_prompt(self):
+        return "Your turn. Type a pit such as /%s." % min(self.v["moves"], key=int)
 
 AnsiScreen, PlainScreen = AnsiMancala, PlainMancala

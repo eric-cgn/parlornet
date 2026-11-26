@@ -13,7 +13,7 @@ A game is four new files and nothing else. None of them is shared with another g
 
 `<game>` is the type word: `reversi`, `gridwords`, `cannonfire`. The plugin's `INFO` type, the spec's file name, the module's file name and the start of its `KEY` all use it.
 
-With the plugin and the module in place, the game appears with no other edit in the web lobby (a Start button), the telnet menu (a "Start a new ... table" row and the game picker; one entry per game, whatever its rulesets), the welcome page's Games list, the Games page (`/games.htm`), the game's own page (`/games/<type>.htm`), the docs site's Clients page, and ParlorNet Play's game chooser (marked unfinished until Play has a module for it).
+With the plugin and the module in place, the game appears with no other edit in the web lobby (a Start button), the telnet lobby (the game picker that N opens; one entry per game, whatever its rulesets), the welcome page's Games list, the Games page (`/games.htm`), the game's own page (`/games/<type>.htm`), the docs site's Clients page, and ParlorNet Play's game chooser (marked unfinished until Play has a module for it).
 
 Do not edit `adapters/web.py`, `adapters/telnet.py` or `adapters/common.py` for a game. In `web.py`, leave `GAMES` (the planned games in build order) and `GAME_ABOUT` (the planned games' text) as they are; once the module exists, its `NAME`, `PLAYERS` and `ABOUT` are used instead and the row keeps its place. The game's frontends need nothing from the module. Every browser and telnet program is listed for every game, and a period client (one that reaches a server extension) goes in `PERIOD` in `adapters/clients.py`, with the game's type in its `games`.
 
@@ -46,7 +46,7 @@ The module imports what it needs from `adapters.telnet` (the screen framework), 
 | `ORDER` | `1` | The place in the build order (README.md): Reversi 1, Backgammon 2, Grid Words 3, Cannon Fire 4, Dots and Boxes 5, Five in a Row 6, Mancala 7, Checkers 8, Naval Combat 9, Rummy Tile Classic 10. Menus, the lobby and the tables list games in this order. |
 | `PLAYERS` | `"2"` | Players as text: `"2"` or `"2-4"` (the Games table uses the core's numbers when it hosts the game). |
 | `ABOUT` | `(about, [rules])` | For `/games.htm`. `about`: two or three sentences in ParlorNet's own words on what the game is. `rules`: one plain sentence or two per ruleset and option this server supports, from the type spec. Plain ASCII text, generic names only: never a trademark (Othello, Scrabble, Battleship, Rummikub, Kalah, Scorched Earth...); the games page test checks some of these. |
-| `RULE_NAMES` | (none: one ruleset) | Optional. `{ruleset: display name}` for a game with several rulesets (Mancala: `{"kalah": "store rules", "oware": "Oware rules"}`). When the plugin lists more than one ruleset, the web lobby's form has a rules select and the telnet menu asks with a picker, both showing these names (the ruleset word with a capital when a name is missing), and the first ruleset in the plugin's list is the default. A game whose plugin takes more than two players gets a players select and picker the same way, sent as `players=n` on `NEW`. |
+| `RULE_NAMES` | (none: one ruleset) | Optional. `{ruleset: display name}` for a game with several rulesets (Mancala: `{"kalah": "store rules", "oware": "Oware rules"}`). When the plugin lists more than one ruleset, the web lobby's form has a rules select and the telnet lobby asks with a picker, both showing these names (the ruleset word with a capital when a name is missing), and the first ruleset in the plugin's list is the default. A game whose plugin takes more than two players gets a players select and picker the same way, sent as `players=n` on `NEW`. |
 
 ### The view and the events
 
@@ -126,48 +126,52 @@ HTML 3.2 rules, as for every page here (the test helpers check them):
 
 A game has two screen classes, built on the framework in `adapters/telnet.py`:
 
-- `AnsiScreen`, a subclass of `telnet.AnsiGame`: the full screen for the `pc`, `utf8` and `ansi` modes, with arrows, Enter, hotkeys and the mouse.
+- `AnsiScreen`, a subclass of `telnet.AnsiGame`: the full screen for the `pc`, `utf8` and `ansi` modes, with arrows, Enter, shortcut letters, the command line and the mouse.
 - `PlainScreen`, a subclass of `telnet.PlainGame`: the board printed line by line for the `plain` mode, with typed moves.
 
-Reversi puts what both share in a base class (`ReversiBase(telnet.GameBase)`: `parse`, `describe`, `move_word`), then `class AnsiReversi(ReversiBase, AnsiGame)` and `class PlainReversi(ReversiBase, PlainGame)`, and ends with `AnsiScreen, PlainScreen = AnsiReversi, PlainReversi`.
+Reversi puts what both share in a base class (`ReversiBase(telnet.GameBase)`: `parse`, `describe`, `move_word`, the help text and the last move), then `class AnsiReversi(ReversiBase, AnsiGame)` and `class PlainReversi(ReversiBase, PlainGame)`, and ends with `AnsiScreen, PlainScreen = AnsiReversi, PlainReversi`. The screens follow docs/design.md: two modes, one meaning per letter, the shared layout, offers and confirmations as dialogs, and help in two pages.
 
-`GameBase` keeps the table: `self.v` (the parsed view), `self.names`, `self.me` (the player's seat, -1 when watching), `self.log`, `self.over` (the end text, once the game ends), `self.tid`. It does the core requests (`refresh`, `pull`, `move(token)`, `staged("UND" or "END", what)`, `chat`, `resign`) and answers `playing()`, `my_turn()` and `clock()`. Override in the shared base:
+`GameBase` keeps the table: `self.v` (the parsed view), `self.names`, `self.me` (the player's seat, -1 when watching), `self.log`, `self.over` (the end text, once the game ends), `self.last` (the last move as a sentence), `self.tid`. It does the core requests (`refresh`, `pull`, `move(token)`, `staged("UND" or "END", what)`, `chat`, `resign`), runs the commands every table takes (`run_command`), and answers `playing()`, `my_turn()` and `clock()`. Set or override in the shared base:
 
 | Hook | Reversi's |
 |---|---|
 | `parse` | `staticmethod(parse_view)` |
+| `GAME` | the game's name, for the title bar and help: `NAME` |
 | `describe(text)` | its `describe_event`, then `telnet.describe_event` for the shared events |
-| `move_word(cmd, words)` | a typed command to the move it stands for, or None: `cmd if SQUARE_RE.match(cmd) else None`. `cmd` is the first word in lower case, `words` the whole line's words as typed; return several tokens space-separated for a multi-token move. |
-| `play_word(word)` | (the default: `self.move(word)`.) Backgammon's sends `undo` and `end` as `UND` and `END` and answers a resignation offer. |
+| `move_word(cmd, words)` | Whether a typed line is a move here, as the move it stands for, or None: `cmd if SQUARE_RE.match(cmd) else None`. `cmd` is the first word in lower case, `words` the whole line's words as typed. Telnet uses it only for its hints: the sentence line while a move is typed, and plain mode's answer to a move typed without its slash. A typed move such as `/d3` runs on the server with every other command line (`CMD`), where the plugin's `typed` reads it (docs/plugins.md). |
+| `COMMANDS`, `MOVE_EXAMPLE` | The game's own commands, `{name: what the sentence line says while it is typed}`, with the shared names (docs/design.md, The actions), and a typed move to show, as `/d3`. One name for each action, with no other words for it. |
+| `game_command(cmd, args)` | A command that is more than a move, such as Grid Words' `/colors`: True when done. |
+| `play_word(word)` | A move the board's keys make (the default: `self.move(word)`). Backgammon's sends `undo` and `end` as `UND` and `END`, and its drop asks first. |
+| `offer()` | An offer waiting for this player's answer, such as a double or a draw offer, or None. The full screen opens it as a dialog with Accept and Decline, and plain mode asks at the prompt. |
+| `last_move(text)`, `view_last()` | An event as the last-move sentence ("ann placed a disc on d3 and flipped 2."; `self.actor(seat)` says "You" for the player), and the same from the view alone where it carries the last move. |
+| `HELP_MOVING`, `HELP_KEYS`, `HELP_COMMANDS`, `HELP_REFERENCE`, `reference()` | Help's two pages. Page 1 has Moving, Keys for the game, Commands and Every game, and page 2 is the reference, ending with the commands every table takes and the practice game. At most 17 lines a page and 70 columns a line. |
 | `playing()`, `my_turn()` | (the defaults.) Override when "my turn" needs more than `turn` and `moves`, as Backgammon's phases do. |
 | `on_event(text)` | Called for every new event; Backgammon keeps the last roll. |
-
-The typed commands `menu` (and `m`, `leave`, `back`, `quit`, `q`, `exit`), `redraw` (`r`, `refresh`), `help` (`?`), `say` (`chat`) and `resign` come first, so a move word cannot be one of them.
 
 `AnsiScreen` draws the whole screen in `compose()`, which returns a `telnet.Canvas`; the framework sends only the cells that changed. The hooks:
 
 | Hook | Reversi's |
 |---|---|
-| `compose()` | `title_bar`, the board, the panel (`box`, `rule`, players, whose turn, the clock, then `draw_log`), the hint or message on row 21, `input_line` on row 22, `status_bar` on row 23. While the game has not started, `draw_waiting(cv, x, y)` puts the "Waiting for an opponent" box over the board. |
+| `compose()` | `title_bar(cv, g, self.title_text())`, the board, the panel by `draw_panel_parts` (the players with their score, then the turn, the clock, the last move and the game's facts, then the chat and log), row 20 for the game, the sentence line on row 21 from `self.sentence(self.hint)`, `input_line` on row 22, and `keys_line(cv, self.keys(...))` on row 23. While the game has not started, `draw_waiting(cv, x, y)` puts a box over the board. |
+| `hint()` | The sentence line: `waiting_hint()`, `over_hint()`, `watch_hint()` and `their_hint(seat)` say the shared sentences, and the game says what Enter does on your turn and names the shortcuts that apply, with `self.kn(letter, command)` for a key that may be a movement letter. |
+| `keys(arrows, enter, actions, cancel)` | The keys line's slots in the shared order. actions is `[(letter, label, command)]`, in the order of docs/design.md. |
 | `cursor_at()` | Where the terminal's cursor sits (on the cursor square), or None. |
 | `snap()` | After a new view: put the cursor somewhere useful (on a legal square when it becomes the player's move). Remember `self.was_my_turn`. |
 | `on_arrow(k)` | `UP`, `DOWN`, `LEFT`, `RIGHT` move the cursor. |
-| `on_enter()` | Enter or Space with nothing typed: place a disc on the cursor square. |
-| `on_click(value)` | A mouse click on a hot area: `cv.hot_area(x, y, w, h, ("sq", col, row))` while drawing makes the cells clickable, and the click comes back as that tuple. Status bar items are clickable already (as their keys). |
-| `on_escape()` | Esc with nothing typed. The default leaves for the menu; Backgammon first puts a picked-up checker back. |
-| `HOTKEYS`, `hotkey(k)` | Letters taken as commands when the input line is empty. The default handles `r` (resign, asks first), `t` (talk) and `?` (help); a game adds its own letters to `HOTKEYS` and handles them, calling `super().hotkey(k)` for the rest. A letter followed at once by more typing counts as typing. With letter movement keys (IJKL, ESDF, WASD or HJKL, the session's choice) the four letters always move the cursor, so a hotkey with one of those letters is pressed as `:` then the letter; the status bar shows such a key as `:d` by itself, and hints name keys with `self.kn("D")` (`D`, or `:d`). |
-| `typing()` | True while every letter types even on an empty line, so movement letters do not move. The default is False; Grid Words returns True once a word's start is set. |
-| `typed_move(word)` | A typed move: the default plays it, shows an error in red and snaps. |
-| `TITLE`, `HELP` | The help box's title and lines (at most 13 lines of at most 50 columns). |
-| `LOG_TOP`, `LOG_ROWS` | Where `draw_log` writes the log. |
+| `on_enter()` | Enter or Space in game mode: place a disc on the cursor square. |
+| `on_click(value)` | A mouse click on a hot area: `cv.hot_area(x, y, w, h, ("sq", col, row))` while drawing makes the cells clickable, and the click comes back as that tuple. Keys line items are clickable already (as their keys). A click does what Enter does on that place. |
+| `on_escape()` | Esc in game mode. The default leaves for the lobby; Backgammon first puts a picked-up checker back. |
+| `HOTKEYS`, `hotkey(k)` | The game's shortcut keys. The default handles `r` (the server's `/resign`, which asks first), `t` (the chat screen) and `?` (help); a game adds its own letters to `HOTKEYS`, each with its one meaning from `telnet.SHORTCUTS`, and handles them, calling `super().hotkey(k)` for the rest. Any other letter does nothing and says so. With letter movement keys (IJKL, ESDF, WASD or HJKL, the session's choice) the four letters always move the cursor, and a shortcut on one of them is given as its command. |
+| `typed_reset()` | Before a command line runs on the server: put down a pick in progress, since the board may change. Backgammon drops a picked-up checker, and Grid Words leaves entry mode. A key whose action the server asks about first, such as P to pass in Grid Words, sends its command with `shared("pass")`, so the dialog has the server's words. |
+| `LOG_TOP`, `LOG_ROWS` | Where `draw_log` writes the log (`draw_panel_parts` sets them). |
 
-The `PlainScreen` hooks are `lines()` (the screen as a list of lines; the board, a side column, the clock and the last four log lines), `prompt()` (Reversi's: `Your move (like d3) > `), `HELP_TEXT` (what `help` prints) and `BOARD_KINDS` (the events that reprint the board; others are printed as a line).
+The `PlainScreen` hooks are `lines()` (the screen as a list of lines: `plain_header()`, the board with `side_text(players, facts)` beside it by `beside`, and `plain_log()`), `turn_prompt()` (Reversi's: `Your turn. Type a square such as /d3.`) and `BOARD_KINDS` (the events that reprint the board; others are printed as a sentence).
 
 ### Telnet: fitting 80x24 in every glyph mode
 
 The screen is 80 columns by 24 rows and must fit in every mode:
 
-- Row 0 is the title bar, rows 1 to 20 the board and the panel, row 21 the hint or message, row 22 the input line, row 23 the status bar (79 columns: the last cell of the screen is never written, so nothing scrolls). Writing outside the canvas sets `cv.clipped`, and the tests fail on it.
+- Row 0 is the title bar, rows 1 to 19 the board and the panel, row 20 the game's own line, row 21 the sentence line, row 22 the command line, row 23 the keys line (79 columns: the last cell of the screen is never written, so nothing scrolls). Writing outside the canvas sets `cv.clipped`, and the tests fail on it.
 - Work out the budget first. Reversi: 4 columns per cell and 2 rows per board row with grid lines, falling back to 1 row per board row when `2n + 1` would pass 17 rows; the panel takes what is left on the right (`max(40, board right edge + 3)` to column 78). Backgammon: a 47-column board, the panel from column 49. A 15 by 15 board at 3 columns a cell is 47 columns with its frame and 17 rows; a 19 by 19 one has no room for grid lines between rows.
 - Names are up to 12 characters, and the tests use 12-letter names: cut every text to its space (`text[:inner]`).
 - The modes are `pc` (CP437 characters, sent as CP437), `utf8` (the same shapes in Unicode), `ansi` (ASCII with color), `plain` (ASCII, no escape codes). `self.g` is the mode's frame and disc set (`telnet.glyph_set`). For the game's own pieces keep a table per mode like `bg_glyphs(mode)`: in `pc` and `utf8` only characters that exist in CP437 (box drawing, blocks, `·`, `»`, `■`), in `ansi` and `plain` ASCII only. Pieces must differ in shape, not only in color (`(O)` and `(X)`), so monochrome terminals and `plain` work.
@@ -194,7 +198,7 @@ class Screens(unittest.TestCase):
                 ...                            # what should be on the screen, and the MOV requests sent
 ```
 
-- `ansi_screens(tc, module, view_lines, me, keys)` draws the full screen in `pc`, `utf8` and `ansi` with the keys pressed (as the telnet reader reports them: `"UP"`, `"ENTER"`, `"ESC"`, single characters, `("CLICK", x, y)`; `"WAIT"` after a letter makes it a hotkey) and checks every screen: 24 rows of at most 80 columns, nothing clipped or scrolled, every character in the mode's character set. It returns each mode's screens as text and the requests sent to the core.
+- `ansi_screens(tc, module, view_lines, me, keys)` draws the full screen in `pc`, `utf8` and `ansi` with the keys pressed (as the telnet reader reports them: `"UP"`, `"ENTER"`, `"ESC"`, single characters, `("CLICK", x, y)`) and checks every screen: 24 rows of at most 80 columns, nothing clipped or scrolled, every character in the mode's character set. It returns each mode's screens as text and the requests sent to the core.
 - `plain_screen(tc, module, view_lines, me)` checks the plain screen (80 columns, ASCII) and returns its text.
 - `web_page(tc, module, view_lines, seat)` checks the web parts against the HTML 3.2 rules above (every image is the module's or its board image, at most four, every map area well formed) and returns the HTML.
 - `board_image(tc, module, view_lines, seat, sel)` draws the board image and checks it: a GIF that decodes to the canvas's size and pixels, every area inside it and leading to a page `/click.htm` may answer, with a move `MOVE_RE` takes or a `sel` that `SEL_RE` takes. It returns the canvas: `used` lists the tiles drawn with their places, `words` the text, `areas` the map, so a test can check what the board shows without reading pixels.
@@ -217,5 +221,5 @@ CI runs only the fast tests (`PARLOR_TESTS=fast`). Mark a game's whole games thr
   - `KEY`, `NAME`, `ORDER`, `PLAYERS`, `ABOUT`.
   - `parse_view` (rows, counts, turn, moves, clock, status) and `describe_event` (`PUT` only; `PASS` and `END` are shared).
   - `MOVE_RE`, `SEL_RE = None`, `images()` (four 32x32 squares), `board_image` (the squares drawn on one canvas with the letters and numbers, an outline round each disc, an area per legal square linked to `/move.htm`) and `web_parts` (the board by `board_html`, the two players with their disc counts, the hint "click a yellow dot").
-  - `HELP`, `ReversiBase`, `AnsiReversi` (geometry, `snap`, `compose`, `draw_board`, `draw_panel`, `hint`, `cursor_at`, then the key hooks), `PlainReversi` (`lines`, `prompt`, `HELP_TEXT`, `BOARD_KINDS`) and `AnsiScreen, PlainScreen`.
+  - `ReversiBase` (the help text, `move_word`, `last_move`), `AnsiReversi` (geometry, `snap`, `compose`, `draw_board`, `draw_panel`, `hint`, `cursor_at`, then the key hooks), `PlainReversi` (`lines`, `turn_prompt`, `BOARD_KINDS`) and `AnsiScreen, PlainScreen`.
 - Tests: the plugin and the protocol in `tests/test_core.py`; the screens in `tests/test_adapters.py` (`TelnetScreens`: every board size in every mode and seat, `test_plain_board`); a whole game by web and by telnet there too.

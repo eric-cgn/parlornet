@@ -16,11 +16,14 @@ MODES = ("pc", "utf8", "ansi")
 
 class ScreenCore:
     """Stands in for the core behind a game screen: GAM lists every game module, LST the one table,
-    VUE answers with the view lines given; every request is kept in reqs."""
+    VUE answers with the view lines given; every request is kept in reqs. CMD runs the shared commands
+    (parlord/commands.py, as the core does) with these requests, as the player me; a typed move is no
+    command here unless a test gives typed(words), the game's reading of it."""
 
     def __init__(self, key, lines, names=("ann", "bob"), tid="3"):
         from adapters import games
         self.lines, self.reqs = lines, []
+        self.me = names[0] if names else "ann"
         self.auth, self.label = "password", "Password"    # as CoreClient has them, from the server's greeting
         self.gam = ["GAM %s standard %s 2 2" % (m.KEY, m.NAME.replace(" ", "_")) for m in games.all_games()]
         self.tabs = ["TAB %s %s standard %d/2 playing %s turn=300" % (tid, key, len(names), ",".join(names))]
@@ -36,18 +39,37 @@ class ScreenCore:
             return self.lines, "OK"
         if verb == "SIN":
             return [], "OK 0"
+        if verb == "CMD":
+            return await self.cmd(text)
         return [], "OK"
+
+    async def cmd(self, text):
+        """CMD [table] [YES] /line, as the core answers it (fake_cmd)."""
+        from test_adapters import fake_cmd
+        return await fake_cmd(self.req, text, self.me, self.tabs, self.gam, getattr(self, "typed", None))
+
+
+def reads_typed(plugin, state, seat, rules="standard"):
+    """A prepare(screen) for ansi_screens and plain_screen: the core's CMD reads a typed move with the game's own
+    plugin (its op_typed) over state, as the core does (docs/plugins.md, typed)."""
+    async def typed(words):
+        return plugin.op_typed({"op": "typed", "rules": rules, "state": state, "seat": seat, "words": words})
+
+    def prepare(g):
+        g.s.core.typed = typed
+    return prepare
 
 
 def session(io, core, mode, name=LONG):
     """A telnet Session for tests, signed in as name."""
+    if isinstance(core, ScreenCore):
+        core.me = name
     return T.Session(io, core, mode, name)
 
 
 def ansi_screens(tc, module, lines, me=0, keys=(), names=(LONG, LONG.upper()), log=True, prepare=None):
     """Draw the module's full screen in every ANSI mode with the view lines given, as seat me (-1
-    watches), pressing keys (as TelnetIO reports them; "WAIT" is a pause, so the key before it counts as
-    a hotkey). Checks every screen shown: 24 rows of at most 80 columns, nothing drawn off the canvas, in
+    watches), pressing keys (as TelnetIO reports them). Checks every screen shown: 24 rows of at most 80 columns, nothing drawn off the canvas, in
     the bottom-right cell or that scrolls, and only characters the mode's character set has. Returns
     {mode: (every screen's text joined, the requests sent to the core)}. prepare(screen), if given, runs
     before the first screen (to set state the view does not carry)."""
@@ -162,7 +184,7 @@ def plain_screen(tc, module, lines, me=0, names=(LONG, LONG.upper()), prepare=No
     g.log = ["x" * 120] * 6
     if prepare:
         prepare(g)
-    out = g.lines() + [g.prompt()]
+    out = g.lines() + g.full_prompt().split("\n")
     for l in out:
         tc.assertLessEqual(len(l), 80, l)
         l.encode("ascii")

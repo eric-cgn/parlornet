@@ -407,7 +407,7 @@ class WithAServer(unittest.TestCase):
             c.until("Press Enter")
             c.send("\r\n")
             c.until("Your tables")
-            c.send("new reversi bot 5m\r\n")                # a table with the bot in the other seat
+            c.send("invite bot reversi\r\n")               # a private table with the bot in the other seat
 
             async def check(game, names):
                 o = await Native.connect(self.core, "telwatch")
@@ -419,13 +419,14 @@ class WithAServer(unittest.TestCase):
                     await until(found, "%s for %s" % (names, game))
                 finally:
                     o.close()
-            self.run_async(check("reversi/1", ["telly", "bot"]))
-            c.send("menu\r\n")
+            c.until("Reversi, table")
+            c.until("bot sat down")                          # a private table: telly sees the bot sit down
+            c.send("/leave\r\n")
             c.until("Your tables")
-            c.send("new dotsandboxes standard 3p 5m\r\n")
-            c.until("Waiting for an opponent")
-            c.send("bot\r\n")                               # at the table: invite one
-            c.until("Invited bot")
+            c.send("open dotsandboxes\r\n")
+            c.until("Waiting for a second player")
+            c.send("/invite bot\r\n")                       # at the table: invite one
+            c.until("You invited the bot to table")
             self.run_async(check("dotsandboxes/1", ["telly", "bot"]))
         finally:
             c.close()
@@ -439,12 +440,14 @@ class WithAServer(unittest.TestCase):
             c.send("fully\r\n")
             c.until("Press Enter")
             c.send("\r\n")
+            c.until("Would you like a two-minute practice game", screen=True)
+            c.send("n")
             c.until("Your tables", screen=True)
-            c.send("new mancala kalah 5m\r\n")
-            c.until("Type bot for a bot", screen=True)
-            for ch in "bot\r":
+            c.send("/open mancala kalah 5m\r")
+            c.until("Type /invite bot to play the bot.", screen=True)
+            for ch in "/invite bot\r":
                 c.send(ch)
-            c.until("Invited bot", screen=True)
+            c.until("You invited the bot to table", screen=True)
         finally:
             c.close()
 

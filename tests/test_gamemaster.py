@@ -1415,7 +1415,7 @@ class WithAServer(WebPlayers, unittest.TestCase):
         tel.until("Press Enter")
         c.send("\r\n")
         tel.until("Your tables")
-        c.send("new gridwords classic 2p bot 1h\r\n")
+        c.send("invite bot gridwords classic 2p 1h\r\n")
         tab = self.gm_table(w, "gwback", "gridwords/1")
         tid = tab["id"]
         w.until_event(tid, r" START")
@@ -1427,11 +1427,11 @@ class WithAServer(WebPlayers, unittest.TestCase):
         word = next(x for x in sorted(words, key=len, reverse=True)
                     if 2 <= len(x) <= 7 and all(x.count(ch) <= letters.count(ch) for ch in set(x)))
         tel.until("table %s" % tid)
-        c.send(typed("gridwords/1", "PLAY %d 8 H %s" % (9 - len(word), word)) + "\r\n")
+        c.send("/" + typed("gridwords/1", "PLAY %d 8 H %s" % (9 - len(word), word)) + "\r\n")
         _, seq = w.until_event(tid, r" PLAY 0 ")
         view = self.my_turn(w, tid, 0)                  # the bot played; the second: an exchange
         rack = next(l[2:] for l in view if l.startswith("R "))
-        c.send("exchange %s\r\n" % rack[:2])
+        c.send("/exchange %s\r\n" % rack[:2])
         w.until_event(tid, r" EXCH 0 ", seq)
         view = self.my_turn(w, tid, 0)
         before = self.record(w, tid)
@@ -1474,7 +1474,7 @@ class WithAServer(WebPlayers, unittest.TestCase):
         tel.until("Press Enter")
         c.send("\r\n")
         tel.until("Your tables")
-        c.send("new gridwords english 2p bot 1h\r\n")
+        c.send("invite bot gridwords english 2p 1h\r\n")
         tab = self.gm_table(w, "gweng", "gridwords/1")
         tid = tab["id"]
         self.assertEqual(tab["rules"], "english")
@@ -1486,7 +1486,7 @@ class WithAServer(WebPlayers, unittest.TestCase):
         word = next(x for x in sorted(words, key=len, reverse=True)
                     if 2 <= len(x) <= 7 and all(x.count(ch) <= letters.count(ch) for ch in set(x)))
         tel.until("table %s" % tid)
-        c.send(typed("gridwords/1", "PLAY %d 8 H %s" % (9 - len(word), word)) + "\r\n")
+        c.send("/" + typed("gridwords/1", "PLAY %d 8 H %s" % (9 - len(word), word)) + "\r\n")
         w.until_event(tid, r" PLAY 0 ")
         view = self.my_turn(w, tid, 0)                  # the bot has played too
         before = self.record(w, tid)

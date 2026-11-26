@@ -8,7 +8,8 @@
   var W = 16, H = 11.6, FIELD_L = 0.5, BAR_L = 6.5, BAR_R = 7.6, TRAY_L = 13.85, TRAY_R = 15.45;
   var TOP = 0.5, BOT = 11.1, PLEN = 4.6, R = 0.46, CH = 0.2;
   var COL = {felt: "#1f5a47", pointA: "#eadcc0", pointB: "#183a2f", wood: "#5b3b23", wood2: "#6d4a2d",
-             tray: "#163d31", seat: ["#f4efe5", "#b3261e"], rim: ["#cfc6b4", "#7e1a14"], label: "#e6c98f"};
+             tray: "#163d31", seat: ["#f4efe5", "#b3261e"], rim: ["#cfc6b4", "#7e1a14"], ink: ["#2a2420", "#f4efe5"],
+             label: "#e6c98f"};
   var CUBE_FACE = {1: 1, 64: 1, 2: 2, 4: 3, 32: 4, 16: 5, 8: 6};
 
   function ease(t) { return t < 0 ? 0 : t > 1 ? 1 : 1 - Math.pow(1 - t, 3); }
@@ -30,10 +31,11 @@
     function column(p) { var d = disp(p); return d <= 12 ? 12 - d : d - 13; }
     function colX(c) { return c < 6 ? FIELD_L + c + 0.5 : BAR_R + (c - 6) + 0.5; }
     function isTop(p) { return disp(p) >= 13; }
-    // A point or the bar squeezes a tall stack closer together, down to half a checker apart (MAX checkers);
-    // past that it shows MAX - 1 and +n in the last place for the rest, as the other clients do.
+    // A point or the bar squeezes a tall stack closer together, down to half a checker apart (MAX checkers).
+    // Past that it draws MAX, and the last one shows how many checkers it stands for: itself and the ones
+    // hidden under it (docs/design.md, "Stacks of pieces").
     var MAX = 9;
-    function shown(key, n) { return key.indexOf("off") === 0 || n <= MAX ? n : MAX - 1; }
+    function shown(key, n) { return key.indexOf("off") === 0 || n <= MAX ? n : MAX; }
     function spacing(n) { n = Math.min(n, MAX); return n <= 5 ? 2 * R : Math.min(2 * R, (PLEN - 2 * R) / (n - 1)); }
     function stackPos(key, i, n) {
       // the i-th place (0 at the edge) of a stack of n
@@ -389,43 +391,48 @@
             items.push({t: "quad", x: (TRAY_L + TRAY_R) / 2, y: own === viewer() ? (H / 2 + BOT) / 2 + 0.1 : (TOP + H / 2) / 2, z: 0.02, w: TRAY_R - TRAY_L - 0.1, h: BOT - H / 2 - 0.3, shape: "round", color: "#ffd27a", alpha: t === kbd ? 0.5 : 0.28});
           } else {
             var tk = "p" + to, n = count(m, tk), pos = stackPos(tk, n, n + 1);
-            items.push({t: "quad", x: pos.x, y: pos.y, z: 0.01, w: 2 * R, h: 2 * R, shape: "dot", color: "#ffd27a", alpha: t === kbd ? 0.95 : 0.6});
+            if (n >= MAX)             // a full stack: the checker lands on its last one, so a ring goes round that
+              items.push({t: "quad", x: pos.x, y: pos.y, z: CH + 0.01, w: 2 * R * 1.25, h: 2 * R * 1.25, shape: "ring", color: "#ffd27a", alpha: t === kbd ? 0.95 : 0.6});
+            else
+              items.push({t: "quad", x: pos.x, y: pos.y, z: 0.01, w: 2 * R, h: 2 * R, shape: "dot", color: "#ffd27a", alpha: t === kbd ? 0.95 : 0.6});
           }
         });
       }
-      var animating = false, targets = {};
-      if (mine && sel) movesFrom(sel).forEach(function (t) { targets[t.split("-")[1]] = true; });
+      var animating = false;
+      function checker(st, pos, z, num) {
+        // one checker, or a slab in the tray; num, when not 0, is the count painted on it
+        if (pos.slab) {
+          items.push({t: "box", x: pos.x, y: pos.y, z: 0, w: 1.15, h: 0.25, d: 0.3, r: 0.1, color: COL.seat[st.seat]});
+          return;
+        }
+        items.push({t: "shadow", x: pos.x, y: pos.y, r: R * (1 + z * 0.15), alpha: 0.75 - Math.min(0.4, z * 0.3)});
+        var d = {t: "disc", x: pos.x, y: pos.y, z: z, r: R, h: CH, a: COL.seat[st.seat], mark: "rings", markInk: COL.rim[st.seat]};
+        if (num) { d.text = String(num); d.ink = COL.ink[st.seat]; }
+        items.push(d);
+      }
       stacks(m).forEach(function (st) {
-        var k = shown(st.key, st.n);
+        // The top checker, while it flies in or is dragged away, is drawn apart from the rest of its stack, and
+        // the count on the last checker drawn counts only the rest.
+        var place = stackPos(st.key, shown(st.key, st.n) - 1, st.n), lift = null, a = arrivals[st.key];
+        if (a) {
+          var t = (now - a.start) / a.dur;
+          if (t >= 1) { delete arrivals[st.key]; }
+          else {
+            animating = true;
+            var e = ease(Math.max(0, t));
+            lift = {x: a.x + (place.x - a.x) * e, y: a.y + (place.y - a.y) * e, z: Math.sin(Math.PI * Math.max(0, t)) * 1.1, slab: place.slab};
+          }
+        }
+        if (drag && drag.from && ((drag.from === "bar" && st.key === "bar" + api.seat()) || st.key === "p" + drag.from) &&
+            Math.hypot(drag.x - drag.sx, drag.y - drag.sy) > 0.3) {
+          lift = {x: drag.x, y: drag.y, z: 0.7};
+        }
+        var rest = lift ? st.n - 1 : st.n, k = shown(st.key, rest);
         for (var i = 0; i < k; i++) {
-          var pos = stackPos(st.key, i, st.n), z = pos.z || 0, top = i === k - 1;
-          var a = top ? arrivals[st.key] : null;
-          if (a) {
-            var t = (now - a.start) / a.dur;
-            if (t >= 1) { delete arrivals[st.key]; }
-            else {
-              animating = true;
-              var e = ease(Math.max(0, t));
-              pos = {x: a.x + (pos.x - a.x) * e, y: a.y + (pos.y - a.y) * e, slab: pos.slab};
-              z = Math.sin(Math.PI * Math.max(0, t)) * 1.1;
-            }
-          }
-          if (drag && drag.from && top && ((drag.from === "bar" && st.key === "bar" + api.seat()) || st.key === "p" + drag.from) &&
-              Math.hypot(drag.x - drag.sx, drag.y - drag.sy) > 0.3) {
-            pos = {x: drag.x, y: drag.y}; z = 0.7;
-          }
-          if (pos.slab) {
-            items.push({t: "box", x: pos.x, y: pos.y, z: 0, w: 1.15, h: 0.25, d: 0.3, r: 0.1, color: COL.seat[st.seat]});
-          } else {
-            items.push({t: "shadow", x: pos.x, y: pos.y, r: R * (1 + z * 0.15), alpha: 0.75 - Math.min(0.4, z * 0.3)});
-            items.push({t: "disc", x: pos.x, y: pos.y, z: z, r: R, h: CH, a: COL.seat[st.seat], mark: "rings", markInk: COL.rim[st.seat]});
-          }
+          var pos = stackPos(st.key, i, st.n);
+          checker(st, pos, pos.z || 0, i === k - 1 && k < rest ? rest - k + 1 : 0);
         }
-        if (k < st.n) {               // +n in the last place: the checkers not drawn (yellow where the picked one may go)
-          var lp = stackPos(st.key, MAX - 1, st.n), target = st.key.charAt(0) === "p" && targets[st.key.slice(1)];
-          items.push({t: "tile", x: lp.x, y: lp.y, z: (lp.z || 0) + CH, w: 0.8, h: 0.8, d: 0.06,
-                      color: target ? "#ffd27a" : COL.label, ink: "#2a2420", text: "+" + (st.n - k)});
-        }
+        if (lift) checker(st, lift, lift.z, 0);
       });
       // the dice
       var dv = dice.vals || [], dt = dice.dur ? (now - dice.start) / dice.dur : 1;

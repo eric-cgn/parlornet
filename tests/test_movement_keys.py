@@ -121,33 +121,28 @@ class Boards(unittest.TestCase):
                                      (module.KEY, moves, letter))
 
     def test_every_hotkey_is_reached(self):
-        """A hotkey that is not a movement letter works as it always did; one that is: : then the letter, at
-        once or with Enter. The arrows-only mode is unchanged."""
+        """A shortcut that is not a movement letter works by its key. One that is a movement letter shows on the
+        keys line as its command, and a click on that item gives the shortcut."""
         for module in G.all_games():
             for moves in ["arrows"] + SETS:
                 for h in module.AnsiScreen.HOTKEYS:
+                    if module.AnsiScreen.move_of(board(module, moves), h):
+                        continue
                     g = board(module, moves)
                     got = record_hotkeys(g)
-                    if g.move_of(h):
-                        press(g, ":", h)                    # nothing follows: the key
-                    else:
-                        press(g, h)
+                    press(g, h)
                     self.assertEqual(got, [h], (module.KEY, moves, h))
-                    g = board(module, moves)
-                    got = record_hotkeys(g)
-                    press(g, ":", h, "ENTER")               # Enter follows at once: the line :h, run
-                    self.assertEqual((got, g.buf), ([h], ""), (module.KEY, moves, h))
 
-    def test_typed_commands_after_colon(self):
-        """: opens the command line on every board in every mode: text starting with a movement letter
-        types, and the command runs without the colon."""
+    def test_typed_commands_after_slash(self):
+        """/ opens the command line on every board in every mode: text starting with a movement letter types,
+        and the command runs."""
         for module in G.all_games():
             for moves in SETS:
                 g = board(module, moves)
-                press(g, ":", *"say hello", "ENTER")
+                press(g, "/", *"say hello", "ENTER")
                 self.assertIn("CHT 3 hello", g.s.core.reqs, (module.KEY, moves))
                 g = board(module, moves, keys=["n"])
-                press(g, ":", *"resign", "ENTER")       # asks first: no
+                press(g, "/", *"resign", "ENTER")       # asks first: no
                 self.assertNotIn("RES 3", g.s.core.reqs)
                 self.assertTrue(any("Resign this game?" in "\n".join(scr) for scr in g.io.screens), module.KEY)
 
@@ -163,49 +158,40 @@ class Boards(unittest.TestCase):
         g = board(navalcombat, "wasd")
         bar = g.screen()[0].lines()[23]
         self.assertIn("WASD move", bar)
-        self.assertIn(":d turn", bar)
-        self.assertIn(":a random", bar)
-        self.assertIn("Esc menu", bar)                  # still fits
-        self.assertIn(":d turn", g.screen()[0].lines()[20])
-        g = board(navalcombat, "ijkl")
-        self.assertIn("D turn", g.screen()[0].lines()[23])
-        # a click on ":d" is the D key, not a movement
-        g = board(navalcombat, "wasd")
+        self.assertIn("G random", bar)
+        self.assertIn("Esc lobby", bar)                 # still fits
+        # under ESDF, Backgammon's D shows as its command, and a click on it is the D key, not a movement
+        g = board(backgammon, "esdf")
+        g.v.update(phase="roll", moves=["roll", "double"], turn=0, dice=[])
         cv = g.screen()[0]
+        self.assertIn("/double", cv.lines()[23])
+        self.assertIn("or type /double to double to 2.", cv.lines()[21])
         g.s.painter.prev = cv
         got = record_hotkeys(g)
-        x = cv.lines()[23].index(":d")
-        press(g, ("CLICK", x, 23))
+        press(g, ("CLICK", cv.lines()[23].index("/double"), 23))
         self.assertEqual(got, ["d"])
-        # the help box: the letters first, then the game's own help; on two pages when they do not fit
+        # help: the game's own on page 1, and the letters first on page 2
         for module in G.all_games():
             for moves in SETS:
-                g = board(module, moves, keys=["x", "x", "x"])     # Grid Words has a page of letter points
+                g = board(module, moves, keys=[" ", "ESC"])        # the letters are on page 2
                 asyncio.run(g.help())
                 text = "\n".join("\n".join(scr) for scr in g.io.screens)
                 up, down, left, right = LETTERS[moves].upper()
-                self.assertIn("%s up, %s left, %s down, %s right" % (up, left, down, right), text, module.KEY)
-                self.assertIn("type : first", text)
-                self.assertIn(module.AnsiScreen.HELP[0], text)
-                taken = [c for c in moves if c in module.AnsiScreen.HOTKEYS]
-                for c in taken:
-                    self.assertIn(":" + c, text.split("type : first")[1], (module.KEY, moves))
-        g = board(backgammon, "esdf", keys=["x", "x"])
-        asyncio.run(g.help())
-        self.assertIn("The E and D keys: type :e or :d.", "\n".join("\n".join(s) for s in g.io.screens))
+                self.assertIn("%s moves up, %s left, %s down and %s right, and the arrows work too." % (up, left, down,
+                                                                                                     right), text, module.KEY)
+                self.assertIn(module.AnsiScreen.HELP_MOVING[0], text)
         g = board(reversi, "arrows")
         self.assertEqual(g.keys_help(), [])
 
-    def test_hints_name_the_colon_keys(self):
+    def test_hints_name_the_commands(self):
         from adapters.games import backgammon, checkers
         g = board(checkers, "wasd")
-        g.v["phase"] = "draw"
-        self.assertEqual(g.kn("A"), ":a")
-        self.assertEqual(g.kn("N"), "N")
+        self.assertEqual(g.kn("d", "draw"), "type /draw")
+        self.assertEqual(g.kn("u", "undo"), "U")
         g = board(backgammon, "ijkl")
-        self.assertEqual(g.kn("D"), "D")
+        self.assertEqual(g.kn("d", "double"), "D")
         g = board(backgammon, "esdf")
-        self.assertEqual(g.kn("D"), ":d")
+        self.assertEqual(g.kn("d", "double"), "type /double")
 
 
 class GridWords(unittest.TestCase):
@@ -215,39 +201,35 @@ class GridWords(unittest.TestCase):
             word = (LETTERS.get(moves) or "word").upper()         # every movement letter in the word
             for case in (str.upper, str.lower):
                 g = board(gridwords, moves)
+                g.v["rack"] = list(word) + ["E", "_"]               # the word's letters are on the rack
                 g.cur = (8, 8)
                 press(g, "ENTER")                                   # a start, across, on h8
                 self.assertEqual(g.start, (8, 8, "H"))
                 press(g, *case(word))
-                self.assertEqual(g.buf, case(word), moves)
+                self.assertEqual(g.word, word, moves)
                 self.assertEqual(g.cur, (8, 8))                     # nothing moved
                 self.assertEqual("".join(g.pending()[(8 + i, 8)] for i in range(4)), word)
                 press(g, "ENTER")
                 self.assertIn("MOV 3 PLAY 8 8 H %s" % word, g.s.core.reqs, moves)
-            g = board(gridwords, moves)                              # no start: : opens the line
-            press(g, ":", *"h8 d %s" % word.lower(), "ENTER")
-            self.assertIn("MOV 3 PLAY 8 8 V %s" % word, g.s.core.reqs, moves)
-            g = board(gridwords, moves)                              # a start and : together
+            g = board(gridwords, moves)                              # no start: / opens the line
+            press(g, "/", *"h8 d %s" % word.lower(), "ENTER")              # typed, it runs on the server
+            self.assertIn("CMD 3 /h8 d %s" % word.lower(), g.s.core.reqs, moves)
+            g = board(gridwords, moves)                              # a start, then the word typed after /
             g.cur = (3, 4)
-            press(g, "ENTER", ":", *word, "ENTER")
-            self.assertIn("MOV 3 PLAY 3 4 H %s" % word, g.s.core.reqs, moves)
+            press(g, "ENTER", "/", *word, "ENTER")                       # sent with the start it plays from
+            self.assertIn("CMD 3 /c4 across %s" % word, g.s.core.reqs, moves)
 
     def test_start_then_letters_and_status(self):
         from adapters.games import gridwords
         g = board(gridwords, "hjkl")
         press(g, "l")
         self.assertEqual(g.cur, (9, 8))
-        self.assertEqual(g.hint()[0], "Your move. Press Enter on a square to start a word there.")
-        self.assertEqual(g.pass_hint(), gridwords.PASS_HINT)
-        g.s.moves = "esdf"                                          # E moves up: exchange needs its :
-        self.assertEqual(g.pass_hint(), "Type pass to skip your turn, or type :exchange and the letters to swap them.")
-        self.assertIn(g.pass_hint(), g.screen()[0].lines()[22])
-        g.s.moves = "hjkl"
+        self.assertEqual(g.hint()[0], "Your turn. Press Enter where your word starts, P to pass or X to exchange.")
         press(g, "ENTER", "ESC")                                    # Esc clears the start: letters move again
         press(g, "h")
-        self.assertEqual((g.cur, g.buf), ((8, 8), ""))
+        self.assertEqual((g.cur, g.buf, g.word), ((8, 8), "", ""))
         press(g, "ENTER")
-        self.assertIn("Arrow keys move", g.screen()[0].lines()[23])
+        self.assertIn("Letters lay tiles", g.screen()[0].lines()[23])
 
 
 class Menu(unittest.TestCase):
@@ -267,7 +249,7 @@ class Menu(unittest.TestCase):
             self.assertEqual((m.sel, m.buf, got), (2, "", []), moves)
             bar = m.screen()[0].lines()[23]
             self.assertIn("%s pick" % moves.upper(), bar)
-            self.assertIn("Q quit", bar)
+            self.assertIn("N new table", bar)
 
     def test_watch_key_under_wasd(self):
         m = menu("wasd")
@@ -275,13 +257,7 @@ class Menu(unittest.TestCase):
         m.sel = 0
         asyncio.run(m.on_key("w"))
         self.assertEqual((got, m.sel), ([], 0))                     # W is up here (already at the top)
-        asyncio.run(m.on_key(":"))
-        asyncio.run(m.on_key("w"))
-        self.assertEqual(got, ["w"])
-        self.assertIn(":w watch", m.screen()[0].lines()[23])
-        m = menu("wasd")
-        m.sel = next(i for i, it in enumerate(m.items) if it[0] == "table" and it[1]["id"] == "40")
-        self.assertIn(":w watches", m.describe())
+        self.assertNotIn("W watch", m.screen()[0].lines()[23])
 
     def test_picker(self):
         for moves in SETS:
@@ -289,28 +265,29 @@ class Menu(unittest.TestCase):
             m = menu(moves, keys=[down, right.upper(), down, up, "ENTER"])
             i = asyncio.run(m.choose("Pick", ["One of four"], ["a", "b", "c", "d"], 0))
             self.assertEqual(i, 2, moves)
-            self.assertTrue(any("%s and Enter, or 1-4" % moves.upper() in "\n".join(s) for s in m.io.screens))
+            self.assertTrue(any("Pick one with %s and Enter, or 1 to 4." % moves.upper() in "\n".join(s)
+                                for s in m.io.screens))
             m = menu(moves, keys=["DOWN", "ENTER"])                 # the arrows still work
             self.assertEqual(asyncio.run(m.choose("Pick", ["x"], ["a", "b"], 0)), 1)
 
 
 class Setting(unittest.TestCase):
     def test_options_key_sets_it_for_the_session(self):
-        m = menu("arrows", keys=["WAIT", "DOWN", "DOWN", "DOWN", "ENTER"])
+        m = menu("arrows", keys=["DOWN", "DOWN", "DOWN", "ENTER"])
         self.assertEqual(m.move_set(), "")
-        asyncio.run(m.on_key("o"))
+        asyncio.run(m.command("/keys"))
         self.assertEqual(m.s.moves, "wasd")
-        self.assertIn("Movement keys: WASD, kept for next time", m.msg)
+        self.assertIn("You move the cursor with WASD now, and it is kept for next time.", m.msg)
         self.assertTrue(any("Movement keys" in "\n".join(s) and "HJKL (vi)" in "\n".join(s) for s in m.io.screens))
         # a table opened later in the session has the same keys
         from adapters.games import reversi
         g = reversi.AnsiScreen(m.s, "3", reversi.KEY, 0)
         self.assertEqual(g.move_set(), "wasd")
-        # typed, too: options (or keys); back to the arrows
+        # back to the arrows
         m.io.keys = ["1"]
         asyncio.run(m.command("keys"))
         self.assertEqual((m.s.moves, m.move_set()), ("arrows", ""))
-        self.assertEqual(m.msg, "Movement keys: the arrows only.")
+        self.assertEqual(m.msg, "You move the cursor with the arrows only now.")
         # a session made without a choice has the arrows only (main_session passes the kept one)
         self.assertEqual(T.Session(FakeIO("pc"), FakeCore(TABS), "pc", LONG).moves, "arrows")
         self.assertEqual(T.Session(FakeIO("pc"), FakeCore(TABS), "pc", LONG, "nonsense").moves, "arrows")
@@ -322,11 +299,11 @@ class Setting(unittest.TestCase):
             self.assertFalse(T.arrows_for_ttype(tt), tt)
 
     def test_help_lists_the_options_key(self):
-        m = menu("ijkl", keys=["x", "x"])
+        m = menu("ijkl", keys=["ESC"])
         asyncio.run(m.help())
         text = "\n".join("\n".join(s) for s in m.io.screens)
-        self.assertIn("O  options: letter keys that move the cursor", text)
-        self.assertIn("I up, J left, K down, L right", text)
+        self.assertIn("/machine and /keys change your settings.", text)
+        self.assertIn("I moves up, J left, K down and L right, and the arrows work too.", text)
 
 
 class SplitArrows(unittest.TestCase):
@@ -355,41 +332,42 @@ class Login(TelnetBase):
         c.send("new\r\n")
         c.until("Name you want")
         c.send("nina\r\n")
-        out = c.until("Press Enter for the menu, or K and Enter to choose movement keys.")
+        out = c.until("Press Enter for the lobby, or K and Enter to choose movement keys.")
         self.assertIn("Your terminal may not send arrow keys", out)
         c.send("k\r\n")
         c.until("4) WASD       W up, A left, S down, D right")
         c.until("Choice [1]: ")
         c.send("2\r\n")
+        c.until("Would you like a two-minute practice game", screen=True)
+        c.send("n")
         c.until("IJKL pick", screen=True)
-        c.until("Choose a table with IJKL or the arrows", screen=True)
-        self.hint_says(c, "Reversi")
-        c.send("k")                                         # down
-        self.hint_says(c, "Backgammon")
-        c.send("i")                                         # up
-        self.hint_says(c, "Reversi")
+        c.send("n")                                         # the game picker: the letters move in it too
+        c.until("Which game do you want to play?", screen=True)
+        c.until("Pick one with IJKL and Enter", screen=True)
         c.close()
 
     def test_kept_for_the_next_sign_in(self):
         """IJKL chosen with O, log off, sign in again: IJKL is active."""
         c = Client(self.tel_port)
         self.login(c, "ivy", "1")
-        c.send("o")
+        c.send("/keys\r")
         c.until("The choice is kept for your next visit.", screen=True)
         c.send("\x1b[B\r")                                 # down to IJKL, Enter
-        c.until("Movement keys: IJKL, kept for next time.", screen=True)
-        c.send("q")
-        c.until("Log off?", screen=True)
+        c.until("You move the cursor with IJKL now, and it is kept for next time.", screen=True)
+        c.send("/quit\r")
+        c.until("Sign out?", screen=True)
         c.send("y")
         c.until("Bye.")
         c.close()
         c = Client(self.tel_port)
-        out = self.login(c, "ivy", "1", new=False)
-        self.assertIn("Movement keys: IJKL, as you chose before", out)
-        c.until("IJKL pick", screen=True)
-        self.hint_says(c, "Reversi")
-        c.send("k")                                         # down
-        self.hint_says(c, "Backgammon")
+        c.display = "1"
+        c.until("Login")
+        c.send("ivy\r\n")
+        out = c.until("Press Enter for the lobby")
+        self.assertIn("You move the cursor with IJKL, as you chose before.", out)
+        c.send("\r\n")
+        c.until("IJKL pick", screen=True)                     # and the practice game is not offered again
+        self.assertNotIn("practice game to learn", c.vt.text())
         c.close()
 
     def hint_says(self, c, text):
@@ -404,9 +382,11 @@ class Login(TelnetBase):
         c.send("new\r\n")
         c.until("Name you want")
         c.send("otto\r\n")
-        out = c.until("Press Enter for the menu.")
+        out = c.until("Press Enter for the lobby.")
         self.assertNotIn("movement keys", out)
         c.send("\r\n")
+        c.until("Would you like a two-minute practice game", screen=True)
+        c.send("n")
         c.until("Arrows pick", screen=True)
         c.close()
 

@@ -226,9 +226,12 @@ def typed(key, tok, tiles=None):
         f = tok.split()
         if f[0] == "PLAY":
             sq, d, letters = gridwords_typed(tok, tiles or {})
-            return "%s %s %s" % (sq, "a" if d == "H" else "d", letters)
+            return "%s %s %s" % (sq, "across" if d == "H" else "down", letters)
         return "pass" if f[0] == "PASS" else "exchange %s" % f[1]
     if game == "cannonfire":
+        f = tok.split()
+        if f[0] == "MOVE":
+            return "drive %s %s" % ("left" if f[1] == "L" else "right", f[2])
         return tok.lower()
     return tok
 
@@ -283,7 +286,7 @@ class TelnetFE:
         self.tc, self.mode, self.full = tc, mode, mode != "plain"
         self.moves = moves                  # letter movement keys (a key of T.MOVE_SETS), or the arrows
         self.down = T.MOVE_SETS[moves][1][1] if moves else DOWN
-        self.cmd = ":" if moves else ""     # a typed line starts with : where letters move the cursor
+        self.cmd = "/"                      # every typed command starts with the slash
 
     # -- the connection
     def connect(self, p):
@@ -294,12 +297,20 @@ class TelnetFE:
             c.send(p.name + "\r\n")
             self.raw_until(c, "Press Enter")
             c.send("\r\n")
+        if self.full:                                   # the first sign-in offers the practice game once
+            end = time.time() + WAIT
+            while "Your tables" not in c.vt.text() and "practice game to learn" not in c.vt.text():
+                if c.closed or time.time() > end:
+                    raise AssertionError("no lobby:\n%s" % self.dump(c))
+                c.pump()
+            if "practice game to learn" in c.vt.text():
+                c.send("n")
         self.see(c, "Your tables")
-        if self.moves:                                  # the menu's O: the movement keys (kept for the player)
-            c.send("o")
+        if self.moves:                                  # /keys: the movement keys (kept for the player)
+            c.send("/keys\r")
             self.see(c, "Letters that move the cursor")
             c.send(str(T.MOVE_ORDER.index(self.moves) + 1))
-            self.see(c, "Movement keys: %s, kept for next time" % self.moves.upper())
+            self.see(c, "You move the cursor with %s now" % self.moves.upper())
         p.c = c
 
     def raw_until(self, c, text, timeout=WAIT):
@@ -343,9 +354,9 @@ class TelnetFE:
         return c.vt.lines()[21]
 
     def select(self, c, *needles):
-        """The full-screen menu: reload, then the arrow keys down the rows until the hint line says it."""
-        c.send("r")
-        self.see(c, "Refreshed.")
+        """The full-screen lobby: reload, then the arrow keys down the rows until the sentence line says it."""
+        c.send("/list\r")
+        self.settle(c)
         c.send(HOME)
         self.settle(c)
         for _ in range(40):
@@ -363,7 +374,7 @@ class TelnetFE:
         c = p.c
         if not self.full:
             end = time.time() + WAIT
-            while ("table %s:" % tid).encode() not in c.raw[-4000:]:
+            while not re.search(("table %s[.,]" % tid).encode(), c.raw[-4000:]):
                 if c.closed or time.time() > end:
                     raise AssertionError("not at table %s%s:\n%s" % (tid, " (connection closed)" if c.closed
                                                                       else "", self.dump(c)))
@@ -381,42 +392,44 @@ class TelnetFE:
         c = p.c
         lo, hi, rulesets = g["min"], g["max"], g["rulesets"]
         word = g["key"].split("/")[0]
-        if self.full:
-            self.select(c, "a new %s table" % g["name"])
+        if typed_form and n == lo:              # the shared /open GAME, run on the server: its first rules
+            if not self.full:
+                self.mark(c)
+            c.send(self.cmd + "open %s\r%s" % (word, "" if self.full else "\n"))
+        elif self.full:
+            c.send("n")                                 # N: the game, the rules, the players, the time, whom
+            self.see(c, "Which game do you want to play?")
+            c.send(self.down * list(k for k in T.RENDERERS).index(g["key"]))
             c.send("\r")
             if len(rulesets) > 1:
-                self.see(c, "Which rules?")
+                self.see(c, "Which rules do you want?")
                 c.send("\r")
             if hi > lo:
                 self.see(c, "How many players?")
                 c.send(self.down * (n - lo))
                 c.send("\r")
-            self.see(c, "Time per turn")
+            self.see(c, "How long is each turn?")
             c.send("\r")
-        else:
+            self.see(c, "Whom do you want to play?")
+            c.send(self.down + "\r")                    # anyone who joins
+        else:                                   # /open alone asks the questions
             self.mark(c)
-            if typed_form:
-                c.send("new %s %s5m\r\n" % (word, "%dp " % n if hi > lo else ""))
-                if len(rulesets) > 1:
-                    self.raw_until(c, "Rules (")
-                    c.send("\r\n")
-            else:
-                c.send("new\r\n")
-                self.raw_until(c, "Game (")
-                c.send(word + "\r\n")
-                if len(rulesets) > 1:
-                    self.raw_until(c, "Rules (")
-                    c.send("\r\n")
-                if hi > lo:
-                    self.raw_until(c, "Players (")
-                    c.send("%d\r\n" % n)
-                self.raw_until(c, "Time per turn")
+            c.send("open\r\n")
+            self.raw_until(c, "Which game?")
+            c.send(word + "\r\n")
+            if len(rulesets) > 1:
+                self.raw_until(c, "Which rules?")
                 c.send("\r\n")
+            if hi > lo:
+                self.raw_until(c, "How many players?")
+                c.send("%d\r\n" % n)
+            self.raw_until(c, "How long is each turn?")
+            c.send("\r\n")
 
     def join(self, p, tid):
         c = p.c
         if self.full:
-            self.select(c, "Table %s:" % tid, "Enter sits down")
+            self.select(c, "at table %s." % tid, "waits")
             c.send("\r")
         else:
             self.mark(c)
@@ -426,47 +439,45 @@ class TelnetFE:
         """What the menu offers for a running table: resume for a seated player, watch for anyone else."""
         c = p.c
         if self.full:
-            self.select(c, "Table %s:" % tid)
-            # "the game" goes where the players' programs need the room (adapters/telnet.py with_clients)
-            want = "Enter goes back to your game" if seated else "Enter or W watches"
-            self.tc.assertIn(want, self.hint(c))
+            self.select(c, "table %s." % tid)
+            want = "your game" if seated else "play at table %s." % tid
+            self.tc.assertIn(want.lower(), self.hint(c).lower())
         else:
             self.settle(c)                      # what the menu printed before is in
             self.mark(c)
             start = c.mark
             c.send("list\r\n")
-            self.raw_until(c, "Commands:")
+            self.raw_until(c, "/help for the commands.")
             out = c.raw[start:c.mark].decode("latin-1")
             rows = [l for l in out.split("\n") if re.match(r"\s+%s\s" % tid, l)]
             if not rows and not seated:         # the plain list shows the first 12 other tables only
-                self.tc.assertEqual(len(re.findall(r"\n\s+\d+\s.*(join|watch) \d+", out.split("Other tables:")[1])),
+                self.tc.assertEqual(len(re.findall(r"\n\s+\d+\s.*/(join|watch) \d+", out.split("Other tables:")[1])),
                                     12, out)
                 return
             row = rows[-1]
             if seated:
                 self.tc.assertRegex(row, r"(your|their) move")
             else:
-                self.tc.assertIn("watch %s" % tid, row)
+                self.tc.assertIn("/watch %s" % tid, row)
 
     def refused_join(self, p, tid):
         """A stranger asks for a seat at the running table: told why, still connected, at the menu."""
         c = p.c
         self.mark(c)
         c.send(self.cmd + "join %s\r\n" % tid)
-        self.see(c, "already playing")
-        self.see(c, "watch %s" % tid)
+        self.see(c, "Table %s has no open seat for you." % tid)     # the server's words
         self.tc.assertFalse(c.closed)
 
     def watch(self, p, tid):
         c = p.c
         if self.full:
-            self.select(c, "Table %s:" % tid, "watches")
+            self.select(c, "play at table %s." % tid)
             c.send("\r")
-            self.see(c, "watching")                     # the title bar says so on every game's screen
+            self.see(c, "You are watching")             # the sentence line says so on every game's screen
         else:
             self.mark(c)
             c.send("watch %s\r\n" % tid)
-            self.raw_until(c, "you are watching")
+            self.raw_until(c, "You are watching")
 
     def unwatch(self, p):
         self.back_to_menu(p)
@@ -476,10 +487,10 @@ class TelnetFE:
         self.mark(c)
         if self.full:
             c.send(ESC)
-            self.see(c, "Main menu")
+            self.see(c, "Lobby")
             self.see(c, "Your tables")
         else:
-            c.send("menu\r\n")
+            c.send("/leave\r\n")
             self.raw_until(c, "Your tables")
 
     def act(self, p, key, tid, tok):
@@ -488,6 +499,12 @@ class TelnetFE:
         c.send(self.cmd + "redraw\r")       # the screen catches up first, as a player's would
         tiles = p.view(tid)[1]["tiles"] if key.startswith("gridwords/") else None
         c.send(self.cmd + typed(key, tok, tiles) + "\r")
+        if tok == "PASS":                   # passing asks first
+            c.send("y" if self.full else "y\r")
+        elif tok == "END" and key.startswith("rummytile/"):     # ending a turn that won't count asks first
+            self.settle(c)
+            if "End your turn?" in (c.vt.text() if self.full else c.raw[c.mark:].decode("latin-1")):
+                c.send("y" if self.full else "y\r")
 
     def snapshot(self, p):
         self.settle(p.c, 0.02)
@@ -1099,7 +1116,7 @@ class TelnetKeepsTheLine(unittest.TestCase):
         from adapters.games import reversi
         core = ScreenCore(reversi.KEY, ["V reversi/1 1", "W 0"], names=("ann", "bob"))
         s = session(FakeIO("plain"), core, "plain", name="zed")
-        self.assertEqual(asyncio.run(s.enter("3", sit=True)), "Table 3 is already playing; type watch 3 to watch it.")
+        self.assertEqual(asyncio.run(s.enter("3", sit=True)), "Table 3 is already playing. Type /watch 3 to watch it.")
         self.assertNotIn("JON 3", core.reqs)
         with self.assertRaises(EOFError):             # the number alone opens it to watch (FakeIO runs out)
             asyncio.run(s.enter("3"))

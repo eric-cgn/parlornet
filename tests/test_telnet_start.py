@@ -270,7 +270,7 @@ class Clock(unittest.TestCase):
             cv, _ = menu.screen()
             top = "".join(cv.ch[0])
             self.assertTrue(top.rstrip().endswith("ann %s 1h 5m" % s.g["v"]), top)
-            self.assertIn("Main menu", top)
+            self.assertIn("Lobby", top)
 
     def test_redrawn_only_when_the_minute_changes(self):
         s, menu = self.menu("pc", time.time() - 61)
@@ -310,7 +310,7 @@ class Clock(unittest.TestCase):
         s = T.Session(io, Core(), "plain", "ann")
         s.since = time.time() - 12 * 60
         asyncio.run(T.PlainMenu(s).relist())
-        header = next(l for l in io.vt.lines() if l.startswith("== ParlorNet main menu"))
+        header = next(l for l in io.vt.lines() if l.startswith("== ParlorNet lobby"))
         self.assertTrue(header.endswith("= ann | 12m"), header)
         self.assertLessEqual(len(header), 79)
 
