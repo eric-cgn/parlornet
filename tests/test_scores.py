@@ -315,7 +315,7 @@ class ChatCommands(Helpers):
 
 
 TELNET_LOGIN = ((b"new", "Name you want"), (b"tess", "Choose a password"), (b"tess-Pass-word", "again"),
-                (b"tess-Pass-word", "Choice"), (b"4", "Press Enter"), (b"", "Commands:"))
+                (b"tess-Pass-word", "Press Enter"), (b"", "Commands:"))
 
 
 class WebAndTelnet(Stack):

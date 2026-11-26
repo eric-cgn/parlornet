@@ -293,8 +293,8 @@ class Service(Stack):
         s.sendall(b"T")
         self.read_until(s, "Login", got)
         for send, wait in ((b"new\r\n", "Name you want"), (b"tty\r\n", "Choose a password"),
-                           (b"tty-Pass-word\r\n", "Type it again"), (b"tty-Pass-word\r\n", "Choice ["),
-                           (b"4\r\n", "Press Enter"), (b"\r\n", "Your tables"),
+                           (b"tty-Pass-word\r\n", "Type it again"), (b"tty-Pass-word\r\n", "Press Enter"),
+                           (b"\r\n", "Your tables"),
                            (b"new reversi 5m\r\n", "Waiting for an opponent"), (b"bot\r\n", "Your move (like"),
                            (b"d3\r\n", "tty plays d3")):
             s.sendall(send)

@@ -2,9 +2,9 @@
 
 A client of the native protocol (adapters/common.py). The screen is 80x24.
 Display modes, picked from the terminal type the client reports (telnet
-TTYPE) and confirmed in a menu:
+TTYPE), or from a menu:
 
-    pc     ANSI color and IBM PC (CP437) characters (the default)
+    pc     ANSI color and IBM PC (CP437) characters (ANSI and BBS terminals)
     utf8   ANSI color and the same characters in Unicode (xterm and friends)
     ansi   ANSI color, ASCII only (VT100 class)
     plain  no escape codes; line by line, moves are typed
@@ -27,12 +27,16 @@ the command line: there every letter types, and `:` then a hotkey letter does
 what that key does (:d for D in WASD). The choice is kept with the player
 (the core's per-extension data, PRF) and comes back at the next sign-in.
 
-It opens with ParlorNet's title (adapters/title.py), PARLOR over NET in block
-letters, as a page of its own until Enter, in the display mode the terminal
-type suggests. Before the login prompt it shows the server's message of the
+It starts by asking for the terminal type. For a few seconds one line says
+that Enter opens the display menu. Without Enter it goes on in the mode the
+terminal type suggests, or in plain when the terminal names none. Then comes
+ParlorNet's title (adapters/title.py), PARLOR over NET in block letters, as a
+page of its own until Enter. Before the login prompt it shows the server's message of the
 day. At the prompt a name signs in; "new" makes a new account (the name
 wanted, then the server's sign-up steps). A name with no account says so and
-points to "new".
+points to "new". Passwords are never echoed (TelnetIO.read_secret). The ANSI
+screens show how long the player has been signed in at the right end of the
+title bar, and the plain menu shows it in its header line.
 
     python3 -m adapters.telnet --core 127.0.0.1:6501 --port 6502 --host 0.0.0.0
 """
@@ -74,6 +78,9 @@ COLS, ROWS = 80, 24
 HOTKEY_WAIT = 0.3       # a hotkey letter followed this quickly by more typing is typing
 POLL_SECS = 2.0         # game screen: ask the core for new events this often
 MENU_SECS = 15.0        # menu: reload the table list this often
+DETECT_SECS = 3.0       # the start: how long telnet waits for the terminal type, and for Enter to open the menu
+ECHO_WAIT = 0.5         # before a password: how long telnet waits for the client to agree to stop echoing
+START_TEXT = "Press Enter to choose a terminal type."      # 38 columns, so it fits a 40-column screen
 CLEAR = "\x1b[0m\x1b[2J\x1b[H"
 MODES = {"pc": "IBM PC characters, ANSI color", "utf8": "Unicode characters, ANSI color",
          "ansi": "ASCII characters, ANSI color", "plain": "plain text, no color, typed moves"}
@@ -173,6 +180,11 @@ class TelnetIO:
         self.ttype_event = asyncio.Event()
         self.will_ttype = asyncio.Event()
         self.server_echo = False
+        self.echo_answer = asyncio.Event()  # set when the client answers DO or DONT ECHO
+        self.echo_acks = 0          # DONT ECHO answers still to come for a WONT ECHO sent (not new answers)
+        self.talks_telnet = False   # the client has sent a telnet command (it answers negotiation)
+        self.ansi = False           # the display mode takes escape codes (set by main_session)
+        self.since = None           # when the player signed in, for the time connected (set by main_session)
         self.size = None            # (cols, rows) when the client reports it (NAWS); else 80x24 is assumed
         self.on_input = None        # called for each key the player sends (CoreClient.user_input: activity)
 
@@ -200,6 +212,37 @@ class TelnetIO:
             await self._pump_until(self.ttype_event, wait)
         return self.ttype
 
+    async def detect(self, secs=None):
+        """The start: ask for the terminal type and the window size, and say on one line that Enter opens
+        the display menu. It waits secs in all, so the player has time to press Enter, and returns True if
+        Enter came. Anything else typed meanwhile is dropped."""
+        secs = DETECT_SECS if secs is None else secs
+        self.raw(bytes([IAC, DO, TTYPE, IAC, DO, NAWS]))
+        self.write(START_TEXT + "\n")
+        await self.flush()
+        end, asked = time.time() + secs, False
+        while "ENTER" not in self.keys:
+            if self.will_ttype.is_set() and not self.ttype_event.is_set() and not asked:
+                self.raw(bytes([IAC, SB, TTYPE, 1, IAC, SE]))
+                await self.flush()
+                asked = True
+            left = end - time.time()
+            if left <= 0:
+                break
+            try:
+                data = await asyncio.wait_for(self.r.read(512), left)
+            except asyncio.TimeoutError:
+                break
+            if not data:
+                raise EOFError
+            self._feed(data)
+        chose = "ENTER" in self.keys
+        self.keys.clear()
+        if asked and not self.ttype_event.is_set():     # a type on its way gets a moment more
+            await self._pump_until(self.ttype_event, 1.0)
+            self.keys.clear()
+        return chose
+
     async def _pump_until(self, event, wait):
         end = time.time() + wait
         while not event.is_set() and time.time() < end:
@@ -224,6 +267,7 @@ class TelnetIO:
                 else:
                     self._byte(b)
             elif self.state == 1:
+                self.talks_telnet = True
                 if b in (DO, DONT, WILL, WONT):
                     self.cmd = b
                     self.state = 2
@@ -243,8 +287,12 @@ class TelnetIO:
                     self.ttype_event.set()
                 elif b == ECHO and self.cmd == DO:
                     self.server_echo = True
+                    self.echo_answer.set()
+                elif b == ECHO and self.cmd == DONT and self.echo_acks:
+                    self.echo_acks -= 1             # the client agrees to a WONT ECHO sent before
                 elif b == ECHO and self.cmd == DONT:
                     self.server_echo = False
+                    self.echo_answer.set()
                 self.state = 0
             elif self.state == 3:
                 if b == IAC:
@@ -395,6 +443,33 @@ class TelnetIO:
                     self.write("*" if secret else k)
                     await self.flush()
 
+    async def read_secret(self, maxlen=72):
+        """A secret line, such as a password. Telnet never writes what is typed back: it asks the client to
+        leave the echo to it (WILL ECHO) and then shows a star for each key. A client that keeps echoing
+        on an ANSI screen has the typed text hidden (SGR 8, concealed). The client echoes again afterwards
+        (WONT ECHO) unless the screen was in character mode before."""
+        asked = not self.server_echo
+        if asked:
+            self.echo_answer.clear()
+            self.raw(bytes([IAC, WILL, ECHO]))
+            await self.flush()
+            if self.talks_telnet:
+                await self._pump_until(self.echo_answer, ECHO_WAIT)
+        hide = self.ansi and not self.server_echo
+        if hide:
+            self.write("\x1b[8m")
+            await self.flush()
+        try:
+            return await self.readline(maxlen, secret=True)
+        finally:
+            if hide:
+                self.write("\x1b[0m")
+            if asked and self.server_echo:
+                self.raw(bytes([IAC, WONT, ECHO]))
+                self.server_echo = False
+                self.echo_acks += 1
+            await self.flush()
+
 
 # ---- text helpers (also used by adapters/web.py) -------------------------------
 
@@ -405,6 +480,13 @@ def fmt_secs(s):
     if s >= 3600:
         return "%dh %02dm" % (s // 3600, s % 3600 // 60)
     return "%d:%02d" % (s // 60, s % 60)
+
+
+def connected_text(secs):
+    """How long the player has been connected, in whole minutes as the 8-bit clients show it: 0m, 12m,
+    then 1h 5m from an hour on."""
+    m = max(0, int(secs)) // 60
+    return "%dh %dm" % (m // 60, m % 60) if m >= 60 else "%dm" % m
 
 
 def clock_text(v, names):
@@ -613,17 +695,29 @@ def rule(cv, g, x, y, w, attr, title="", tattr=None):
 
 
 def title_bar(cv, g, text, right=""):
+    """The top line: ParlorNet, the screen's name, the right-hand text, and at the right end the time
+    connected (DRAWING_CLOCK) when the screen is drawn for a session. The time changes once a minute, so
+    redrawing it costs only the few cells that change."""
     cv.put(0, 0, " " * COLS, A_TITLE)
     cv.put(1, 0, "ParlorNet", A_TITLE_HI)
     cv.put(11, 0, g["v"] + " " + text, A_TITLE)
-    right = right[:COLS - 16 - len(text)]
-    cv.put(COLS - 1 - len(right), 0, right, A_TITLE)
+    end = COLS - 1          # the right-hand text ends just before this column
+    on = DRAWING_CLOCK.get()
+    if on:
+        cv.put(COLS - 1 - len(on), 0, on, A_TITLE)
+        end -= len(on) + 3
+        if right:
+            cv.put(end + 1, 0, g["v"], A_TITLE)
+    right = right[:max(0, end - 15 - len(text))]
+    cv.put(end - len(right), 0, right, A_TITLE)
 
 
 STATUS_KEYS = {"Enter": "ENTER", "Esc": "ESC", "Backspace": "BS"}
 # The movement keys of the screen being composed (a key of MOVE_SETS, "" for arrows only): set by
 # AnsiView.screen() around compose(), so every game's status bar shows the keys that apply.
 DRAWING_MOVES = contextvars.ContextVar("parlornet_moves", default="")
+# The time connected for the title bar (connected_text), set the same way: "" draws none.
+DRAWING_CLOCK = contextvars.ContextVar("parlornet_clock", default="")
 
 
 def status_bar(cv, items):
@@ -715,24 +809,47 @@ class Painter:
 
     @staticmethod
     def _parts(attr):
+        """An attribute's parts: bold, reverse video, and the foreground and background colors as their
+        SGR codes (None for the default). Colors are 30-37 and 40-47, the bright 90-97 and 100-107, and
+        38;5;n and 48;5;n from the 256-color palette."""
         codes = attr.split(";") if attr else []
-        bold = "1" in codes
-        fg = next((c for c in codes if len(c) == 2 and c[0] == "3"), None)
-        bg = next((c for c in codes if len(c) == 2 and c[0] == "4"), None)
-        return bold, fg, bg
+        bold = rev = False
+        fg = bg = None
+        i = 0
+        while i < len(codes):
+            c = codes[i]
+            if c in ("38", "48") and i + 2 < len(codes) and codes[i + 1] == "5":
+                if c == "38":
+                    fg = ";".join(codes[i:i + 3])
+                else:
+                    bg = ";".join(codes[i:i + 3])
+                i += 3
+                continue
+            if c == "1":
+                bold = True
+            elif c == "7":
+                rev = True
+            elif len(c) == 2 and c[0] in "39":
+                fg = c
+            elif (len(c) == 2 and c[0] == "4") or (len(c) == 3 and c[:2] == "10"):
+                bg = c
+            i += 1
+        return bold, rev, fg, bg
 
     def _sgr(self, out, attr):
         """Switch to attr, sending only what changes when nothing has to be
-        turned off (turning bold off portably takes a full reset)."""
+        turned off. Turning bold or reverse video off portably takes a full reset."""
         if attr == self.attr:
             return
-        b0, f0, g0 = self._parts(self.attr) if self.attr is not None else (True, None, None)
-        b1, f1, g1 = self._parts(attr)
-        if not attr or (b0 and not b1) or (f0 and not f1) or (g0 and not g1):
+        b0, r0, f0, g0 = self._parts(self.attr) if self.attr is not None else (True, True, None, None)
+        b1, r1, f1, g1 = self._parts(attr)
+        if not attr or (b0 and not b1) or (r0 and not r1) or (f0 and not f1) or (g0 and not g1):
             out.append("\x1b[%sm" % (attr or "0"))
         else:
-            out.append("\x1b[%sm" % ";".join(c for c, on in (("1", b1 and not b0), (f1, f1 != f0),
-                                                              (g1, g1 != g0)) if on))
+            codes = [c for c, on in (("1", b1 and not b0), ("7", r1 and not r0), (f1, f1 != f0), (g1, g1 != g0))
+                     if on]
+            if codes:       # an empty list would be ESC [ m, which resets everything
+                out.append("\x1b[%sm" % ";".join(codes))
         self.attr = attr
 
     def _goto(self, out, x, y):
@@ -854,16 +971,16 @@ class AnsiView:
                                                    " or ".join(":" + c.lower() for c in taken)))
         return out
 
-    async def help_box(self, title, lines):
+    async def help_box(self, title, lines, foot=None):
         """A help box, with the movement letters first when the session has them (on a second page when
-        they do not fit)."""
+        they do not fit). The foot, if given, goes under the last page, as when another page follows."""
         extra = self.keys_help()
         if extra and len(lines) + 1 + len(extra) <= HELP_ROWS:
             lines = extra + [""] + list(lines)
         elif extra:
             await self.message(title, lines)
             title, lines = "Movement keys", extra
-        await self.message(title, lines)
+        await self.message(title, lines, foot)
 
     async def char_key(self, k):
         """A printable key: on an empty line, or right after :, a hotkey letter acts (unless more typing
@@ -900,10 +1017,13 @@ class AnsiView:
 
     def screen(self):
         token = DRAWING_MOVES.set(self.move_set())      # the status bar shows the session's keys
+        since = getattr(self.s, "since", None)
+        clock = DRAWING_CLOCK.set(connected_text(time.time() - since) if since else "")
         try:
             cv = self.compose()
         finally:
             DRAWING_MOVES.reset(token)
+            DRAWING_CLOCK.reset(clock)
         pos = (min(3 + len(self.buf), COLS - 2), ROWS - 2) if self.buf else self.cursor_at()
         if self.overlay:
             pos = self.overlay(cv) or pos
@@ -1012,6 +1132,10 @@ class AnsiView:
                 self.overlay = lambda cv: popup(cv, self.g, title, lines, field="*" * len(text) if secret else text,
                                                 buttons=[(" Enter  OK ", "ENTER"), (" Esc  cancel ", "ESC")])
                 await self.show()
+                if secret and not getattr(self.io, "server_echo", True):
+                    self.io.write("\x1b[8m")       # a client that echoes by itself shows nothing it echoes
+                    self.s.painter.attr = None      # and the next screen starts with a full reset
+                    await self.io.flush()
                 k = await self.io.readkey()
                 if isinstance(k, tuple):
                     k = self.hit(k)
@@ -1032,8 +1156,8 @@ class AnsiView:
         await self.show()
         return text
 
-    async def message(self, title, lines):
-        self.overlay = lambda cv: popup(cv, self.g, title, lines, foot="Press any key (or click).")
+    async def message(self, title, lines, foot=None):
+        self.overlay = lambda cv: popup(cv, self.g, title, lines, foot=foot or "Press any key (or click).")
         await self.show()
         try:
             await self.io.readkey()
@@ -1275,7 +1399,8 @@ class PlainMenu(MenuBase):
         mine = [t for t in tabs if me in t["names"]]
         others = [t for t in tabs if me not in t["names"]]
         self.say("")
-        self.say(("== ParlorNet main menu " + "=" * 56)[:78 - len(me)] + " " + me)
+        tail = "%s | %s" % (me, connected_text(time.time() - self.s.since))      # the time connected
+        self.say(("== ParlorNet main menu " + "=" * 56)[:78 - len(tail)] + " " + tail)
         self.say("Your tables:")
         for t in mine:
             opp = [n for n in t["names"] if n != me]
@@ -1337,7 +1462,7 @@ class PlainMenu(MenuBase):
             done = await answer_asks(self.io, self.s.core, ask)
         except CoreError as e:
             return await self.notice("Can't: " + no_wait(str(e)))
-        await self.notice("Your password is changed; you are signed out everywhere else." if done
+        await self.notice("Your password is changed. You are signed out everywhere else." if done
                           else "Your password is not changed.")
 
     async def ask_turn(self, game):
@@ -1715,7 +1840,7 @@ class AnsiMenu(MenuBase, AnsiView):
                 return self.say("Your password is not changed.", A_DIM)
             try:
                 await self.s.core.aut(ask.field, value)
-                return self.say("Your password is changed; you are signed out everywhere else.", A_GREEN)
+                return self.say("Your password is changed. You are signed out everywhere else.", A_GREEN)
             except NeedAuth as again:
                 ask = again
             except CoreError as e:
@@ -1889,6 +2014,20 @@ class GameBase:
     def my_turn(self):
         return self.me >= 0 and self.playing() and self.v["turn"] == self.me and bool(self.v["moves"])
 
+    async def tick(self):
+        """Called each time the screen's loop wakes, with or without a key: a game's timed steps (the
+        Backgammon countdowns). Nothing by default."""
+        return None
+
+    def tick_in(self):
+        """Seconds until tick() has something to do, or None. The loop wakes no later than that."""
+        return None
+
+    async def key_seen(self, k):
+        """Called with each key before the screen handles it. True means the key is used up (as Esc is when
+        it stops a Backgammon countdown)."""
+        return False
+
     def clock(self):
         c = self.v and self.v.get("clock")
         if not c or self.over:
@@ -2041,18 +2180,20 @@ class AnsiGame(GameBase, AnsiView):
         await self.show()
         polled = time.time()
         while True:
-            k = await self.key(1.0)
+            k = await self.key(min(1.0, self.tick_in() or 1.0))
             if k is None:
                 if time.time() - polled >= POLL_SECS:
                     polled = time.time()
                     if await self.pull():
                         await self.refresh()
                         self.snap()
+                await self.tick()
                 await self.show()
                 continue
             self.msg = ""
-            if await self.on_key(k) == "menu":
+            if not await self.key_seen(k) and await self.on_key(k) == "menu":
                 return None
+            await self.tick()
             await self.show()
 
     async def on_key(self, k):
@@ -2179,7 +2320,7 @@ class PlainGame(GameBase):
         await self.draw()
         buf = ""
         while True:
-            k = await self.io.readkey(timeout=POLL_SECS)
+            k = await self.io.readkey(timeout=min(POLL_SECS, self.tick_in() or POLL_SECS))
             if k is None:
                 new = await self.pull()
                 if any(kind in self.BOARD_KINDS for kind, _ in new):
@@ -2187,6 +2328,9 @@ class PlainGame(GameBase):
                     await self.draw()
                 elif any(d for _, d in new):
                     await self.notice("\n".join(" " + d for _, d in new if d))
+                await self.tick()
+                continue
+            if await self.key_seen(k):
                 continue
             if k == "ENTER":
                 line, buf = buf.strip(), ""
@@ -2194,6 +2338,7 @@ class PlainGame(GameBase):
                     self.io.write("\n")
                 if await self.command(line) == "menu":
                     return None
+                await self.tick()
             elif k == "BS":
                 if buf:
                     buf = buf[:-1]
@@ -2277,6 +2422,7 @@ class Session:
         self.painter = Painter() if self.ansi else None
         self.games = []
         self.invites = []           # my invitations (IVL), loaded with the tables
+        self.since = getattr(io, "since", None) or time.time()     # signed in: the time connected counts from here
 
     async def load(self):
         """-> (tables, {table id: (seat to move, secs left, turn secs, when)})
@@ -2482,7 +2628,7 @@ async def answer_asks(io, core, ask, login=False):
             io.write("%s\n" % line)
         io.write("%s (or press Enter to stop): " % ask.label)
         await io.flush()
-        value = await io.readline(secret=ask.secret)
+        value = await (io.read_secret() if ask.secret else io.readline())
         if not value:
             if login and ask.new and not ask.cred:
                 io.write("Your password is not chosen yet. Sign in again with the password from the email "
@@ -2635,9 +2781,8 @@ async def ask_moves(io):
 
 
 async def title_page(io, mode, ticket=None):
-    """ParlorNet's title (adapters/title.py) as a page of its own, in the display mode the terminal type
-    suggests (plain when it names none), until Enter. False if the window is smaller than 80x24, which
-    has no title page; None if no Enter came."""
+    """ParlorNet's title (adapters/title.py) as a page of its own, in the display mode chosen at the start,
+    until Enter. False if the window is smaller than 80x24, which has no title page; None if no Enter came."""
     if io.size and (io.size[0] < COLS or io.size[1] < ROWS):
         return False
     io.charset = CHARSET[mode]
@@ -2656,14 +2801,38 @@ async def title_page(io, mode, ticket=None):
     return True
 
 
+async def pick_display(io, guess):
+    """The display menu, opened by Enter at the start: a sample line in each mode, the detected one first
+    in line as the default (plain when the terminal named no type). Returns the mode chosen."""
+    default = guess or "plain"
+    io.write("\nChoose how ParlorNet draws your screen.\nPick the first line whose sample looks right.\n")
+    if io.ttype:
+        io.write("Your terminal says it is %s.\n" % io.ttype)
+    for i, m in enumerate(ORDER, 1):
+        io.write("  %d) %-36s" % (i, MODES[m]))
+        if guess != "plain":
+            sample = SAMPLE.get(m, SAMPLE["pc"])
+            io.raw(sample.encode(CHARSET[m] if m != "plain" else "ascii"))
+        io.write("%s\n" % ("   <- default" if m == default else ""))
+    io.write("Choice [%d]: " % (ORDER.index(default) + 1))
+    await io.flush()
+    choice = (await asyncio.wait_for(io.readline(), LOGIN_SECS)).strip()
+    return ORDER[int(choice) - 1] if choice in ("1", "2", "3", "4") else default
+
+
 async def main_session(io, args, ticket=None, title_first=True):
-    """A telnet session: the title page (unless title_first is False, as for the RSCARDS service's text
-    games), the message of the day, the sign-in, the display, then the menu and the tables."""
-    ttype = await io.negotiate()
+    """A telnet session: the start (the terminal type, with Enter for the display menu), the title page
+    (unless title_first is False, as for the RSCARDS service's text games), the message of the day, the
+    sign-in, then the menu and the tables. With no Enter at the start the display is the one the terminal
+    type suggests, or plain when it names none."""
+    chose = await io.detect()
+    ttype = io.ttype
     guess = mode_for_ttype(ttype)
     try:
         async with asyncio.timeout(LOGIN_TOTAL_SECS):
-            titled = await title_page(io, guess or "plain", ticket) if title_first else False
+            mode = await pick_display(io, guess) if chose else guess or "plain"
+            io.ansi = mode != "plain"
+            titled = await title_page(io, mode, ticket) if title_first else False
             if titled is None:
                 return
             if not titled:
@@ -2673,7 +2842,7 @@ async def main_session(io, args, ticket=None, title_first=True):
             for l in framed_motd(motd) or ([] if titled else ["ParlorNet: %s" % TAGLINE]):
                 io.write("%s\n" % l)
             io.write("\n")
-            if ttype:
+            if ttype and not chose:         # the display menu said it already
                 io.write("Your terminal says it is %s.\n" % ttype)
             signed = await sign_in(io, args, ticket)
     except TimeoutError:
@@ -2683,19 +2852,8 @@ async def main_session(io, args, ticket=None, title_first=True):
     if signed is None:
         return
     core, name = signed
+    io.since = time.time()
     try:
-        default = guess or "pc"
-        io.write("\nDisplay (pick the first line whose sample looks right):\n")
-        for i, m in enumerate(ORDER, 1):
-            io.write("  %d) %-36s" % (i, MODES[m]))
-            if guess != "plain":
-                sample = SAMPLE.get(m, SAMPLE["pc"])
-                io.raw(sample.encode(CHARSET[m] if m != "plain" else "ascii"))
-            io.write("%s\n" % ("   <- default" if m == default else ""))
-        io.write("Choice [%d]: " % (ORDER.index(default) + 1))
-        await io.flush()
-        choice = (await io.readline()).strip()
-        mode = ORDER[int(choice) - 1] if choice in ("1", "2", "3", "4") else default
         io.charset = CHARSET[mode]
         if mode != "plain":
             io.char_mode()
@@ -2704,7 +2862,7 @@ async def main_session(io, args, ticket=None, title_first=True):
         io.write("\nHello, %s.\n" % name)
         io.write("To play the bot, start a table and type bot while you wait for an opponent.\n")
         if offer:
-            io.write("Your terminal may not send arrow keys; letters can move the cursor instead.\n")
+            io.write("Your terminal may not send arrow keys. Letters can move the cursor instead.\n")
         moves = await load_moves(core) if mode != "plain" else "arrows"
         if moves != "arrows":
             io.write("Movement keys: %s, as you chose before (O in the menu changes them).\n" % moves.upper())

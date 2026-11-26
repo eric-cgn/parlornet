@@ -392,7 +392,7 @@ class Craters(Stack):
         tid = nat.req("NEW cannonfire classic seed=2026")[-1].split()[1]
         self.assertEqual(nat.req("JON %s" % tid)[-1], "OK 0")
         self.assertEqual(pia.act("/join.htm?t=%s" % tid)[0], 302)
-        tel = Client(self.tel_port)
+        tel = Client(self.tel_port, display="4")
         self.addCleanup(tel.close)
         tel.until("Login")
         tel.send("new\r\n")
@@ -402,8 +402,6 @@ class Craters(Stack):
         tel.send("tim-Pass-word\r\n")
         tel.until("Type it again")
         tel.send("tim-Pass-word\r\n")
-        tel.until("Choice [")
-        tel.send("4\r\n")                                   # plain text
         tel.until("Press Enter")
         tel.send("\r\n")
         tel.until("Your tables")

@@ -5,6 +5,7 @@ MOV, which UND takes back and END finishes. The game words roll, double,
 take, drop, accept and reject are moves too.
 """
 import re
+import time
 
 from ..telnet import (A_AXIS, A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_SEL, A_TEXT, A_YELLOW, COLS, ROWS,
                       AnsiGame, Canvas, GameBase, PlainGame, clock_text, fmt_secs, rule, status_bar, title_bar,
@@ -481,15 +482,93 @@ async def load_home(core):
     return await load(BG_HOME_PREF, BG_HOMES, BG_HOMES[0]) if load else BG_HOMES[0]
 
 
+AUTO_SECS = 5       # the countdowns: the roll, and sending a finished move, come this many seconds later
+
+
+def seconds(n):
+    return "1 second" if n == 1 else "%d seconds" % n
+
+
 class BgBase(GameBase):
-    """Backgammon, shared by the full-screen and the plain screen."""
+    """Backgammon, shared by the full-screen and the plain screen.
+
+    Two countdowns save keys, on this side only (the server's turn clock is not touched). At the start of
+    your turn the dice are rolled for you after AUTO_SECS, and once nothing is left to play (every die
+    used, or no legal step left) your move is sent after AUTO_SECS. Any key stops a countdown, and Esc
+    (Enter in plain mode, whose lines come in at Enter) does nothing else, so the turn waits as before.
+    A countdown that was stopped, or that ran, does not start again until the turn moves on."""
 
     BACKLOG = 24
+    now = staticmethod(time.monotonic)      # the countdowns' clock (tests set their own)
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
         self.rolled = None          # (seat, die, die) from the latest ROLL event
         self.bg = bg_glyphs(sess.mode)
+        self.auto = None            # a running countdown: ("roll" or "end", when it acts)
+        self.auto_held = None       # the countdown stopped (or run) for this part of the turn
+
+    # ---- the countdowns -----------------------------------------------------------
+    def auto_kind(self):
+        """What a countdown would do now: "roll" at the start of your turn, "end" once nothing is left to
+        play, or None (not your turn, or the game is over)."""
+        if self.over or not (self.v and self.v.get("rows")):
+            return None
+        ph = self.phase()
+        if ph == "roll" and "roll" in self.v["moves"]:
+            return "roll"
+        if ph == "move" and not self.steps():
+            return "end"
+        return None
+
+    def paused(self):
+        """No countdown runs while something else is open (the full screen's typed line or a box)."""
+        return False
+
+    def auto_secs(self):
+        """The whole seconds the countdown still shows."""
+        return max(0, int(-(-(self.auto[1] - self.now()) // 1)))
+
+    def tick_in(self):
+        if not self.auto:
+            return None
+        left = self.auto[1] - self.now()
+        return max(0.05, left % 1 or 1.0) if left > 0 else 0.05
+
+    async def tick(self):
+        kind = self.auto_kind()
+        if kind is None:
+            self.auto = self.auto_held = None
+            return
+        if kind == self.auto_held or self.paused():
+            self.auto = None
+            return
+        if not self.auto or self.auto[0] != kind:
+            self.auto = (kind, self.now() + AUTO_SECS)
+            return await self.auto_started()
+        if self.now() >= self.auto[1]:
+            self.auto, self.auto_held = None, kind
+            await self.auto_run(kind)
+
+    async def auto_started(self):
+        return None
+
+    async def auto_run(self, kind):
+        raise NotImplementedError
+
+    async def key_seen(self, k):
+        """A key stops a running countdown. Esc only stops it (in plain mode Enter, as lines come at Enter)."""
+        if not self.auto:
+            return False
+        kind, self.auto = self.auto[0], None
+        self.auto_held = kind
+        if k in self.STOP_KEYS:
+            await self.auto_stopped(kind)
+            return True
+        return False
+
+    async def auto_stopped(self, kind):
+        return None
 
     parse = staticmethod(parse_view)
 
@@ -802,7 +881,8 @@ class AnsiBackgammon(BgBase, AnsiGame):
         if steps:
             line = "Steps: " + " ".join(steps)
             cv.put(1, 20, line if len(line) <= COLS - 2 else line[:COLS - 5] + "...", A_DIM)
-        text, attr = (self.msg, self.msg_attr) if self.msg else self.hint()
+        text, attr = (self.auto_text(), A_YELLOW) if self.auto else (self.msg, self.msg_attr) if self.msg \
+            else self.hint()
         cv.put(1, ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
         ph = self.phase()
@@ -896,6 +976,29 @@ class AnsiBackgammon(BgBase, AnsiGame):
             return "%s: Enter picks up a checker; it can go to %s." % (tok, ", ".join(self.targets(tok))), A_TEXT
         return "Nothing of yours to move from %s. Checkers that can move: %s." % (
             tok, ", ".join(self.froms())), A_DIM
+
+    # ---- the countdowns (BgBase) ----------------------------------------------------
+    STOP_KEYS = ("ESC",)
+
+    def auto_text(self):
+        n = seconds(self.auto_secs())
+        if self.auto[0] == "end":
+            return "Sending your move in %s. Press Esc to change it." % n
+        if "double" in self.v["moves"]:
+            return "Rolling in %s. Press Esc to double or wait." % n
+        return "Rolling in %s. Press Esc to wait." % n
+
+    def paused(self):
+        return bool(self.buf) or self.overlay is not None
+
+    async def auto_run(self, kind):
+        self.sel = None
+        await self.play(kind)
+
+    async def auto_stopped(self, kind):
+        if kind == "roll":
+            return self.say("The dice wait for you. Press Enter when you want to roll.", A_TEXT)
+        return self.say("Your move waits. Press %s to send it, or U to take a step back." % self.kn("E"), A_TEXT)
 
     def cursor_at(self):
         if self.me >= 0 and self.playing():
@@ -1087,6 +1190,26 @@ class PlainBackgammon(BgBase, PlainGame):
         for l in self.log[-4:]:
             out.append(" " + l[:78])
         return out
+
+    # ---- the countdowns (BgBase): one line, no redraw ---------------------------------
+    STOP_KEYS = ("ENTER", "ESC")
+
+    async def auto_started(self):
+        if self.auto[0] == "end":
+            text = "Sending your move in %s. Press Enter to change it." % seconds(AUTO_SECS)
+        elif "double" in self.v["moves"]:
+            text = "Rolling in %s. Type double, or press Enter to wait." % seconds(AUTO_SECS)
+        else:
+            text = "Rolling in %s. Press Enter to wait." % seconds(AUTO_SECS)
+        await self.notice(" " + text)
+
+    async def auto_run(self, kind):
+        err = await self.act(kind)
+        await (self.notice(err) if err else self.draw())
+
+    async def auto_stopped(self, kind):
+        await self.notice(" Type roll when you want to roll." if kind == "roll" else
+                          " Type end to send your move, or undo to take a step back.")
 
     def prompt(self):
         ph = self.phase()

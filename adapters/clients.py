@@ -1484,9 +1484,11 @@ def telnet_body(host=HOST, auth=None):
             h2("setup", "Setting up") +
             ul([text("Connect to `{host}`, port `6502` (`telnet {host} 6502`).", host),
                 "Set the terminal type to ANSI or VT100. Your program reports it to the server, and xterm-class "
-                "terminals also get UTF-8 and the mouse. A menu then shows a sample line in each display, <tt>pc</tt> (color and CP437 "
-                "characters), <tt>utf8</tt>, <tt>ansi</tt> (color, ASCII only) and <tt>plain</tt>. Pick the one "
-                "that looks right.",
+                "terminals also get UTF-8 and the mouse. ParlorNet picks the display from that type, and a program "
+                "that reports none gets <tt>plain</tt>. To choose for yourself, press Enter while the first line "
+                "says &quot;Press Enter to choose a terminal type.&quot; A menu then shows a sample line in each "
+                "display, <tt>pc</tt> (color and CP437 characters), <tt>utf8</tt>, <tt>ansi</tt> (color, ASCII "
+                "only) and <tt>plain</tt>. Pick the one that looks right.",
                 "Make the window 80 columns by 24 rows. A smaller window is asked to grow.",
                 "Backspace and Delete both erase, arrow keys move (or letters, below), and Ctrl-L redraws the "
                 "screen.",

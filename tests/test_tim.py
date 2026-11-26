@@ -221,7 +221,7 @@ class TelnetTime(TelnetBase):
         self.assertIn("how long you have been connected", a.until("quit "))
         a.close()
         b = Client(self.tel_port)
-        self.login(b, "tom", "")                    # full screen
+        self.login(b, "tom", "1")                    # full screen
         b.send("time\r")
         b.until("Server time", screen=True)
         b.close()
