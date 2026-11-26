@@ -24,6 +24,7 @@ a turn whatever is left afloat, and each seat's view carries the other fleet onc
 lines), because GameMaster's rulebook works out the hits on the other grid itself.
 """
 import json
+import re
 import random
 import sys
 
@@ -445,8 +446,76 @@ def op_say(req):
     return {"say": ""}
 
 
+# ---- a typed command line (the core's typed request; docs/plugins.md) ----------------------------------
+
+INFO["typed"] = True
+TYPED_SQUARE_RE = re.compile(r"^[a-z][0-9]{1,2}\Z")
+TYPED_PLACE_RE = re.compile(r"^[a-z][0-9]{1,2}-[a-z][0-9]{1,2}\Z")
+ACROSS_WORDS = ("across", "a", "right", "h", "horizontal")
+DOWN_WORDS = ("down", "d", "v", "vertical")
+TYPED_WORDS = {"random": ("random", "place your ships at random"), "ready": ("ready", "ready your fleet"),
+               "undo": ("undo", "take back the last ship"), "reset": ("clear", "take back every ship"),
+               "clear": ("clear", "take back every ship")}
+
+
+def typed_placement(st, seat, words):
+    """A start square and a direction (across when none is typed) -> the reply that places the next ship
+    of the fleet there, or {} when the direction is not one."""
+    across = True
+    if len(words) == 2:
+        if words[1] in DOWN_WORDS:
+            across = False
+        elif words[1] not in ACROSS_WORDS:
+            return {}
+    pos = parse_sq(words[0], st["n"])
+    if pos is None:
+        return {"error": "There is no square %s on the grid." % words[0]}
+    ships, fleet = st["ships"][seat], st["fleet"]
+    if st["ready"][seat]:
+        return {"error": "Your fleet is ready, so it can no longer change."}
+    if len(ships) >= len(fleet):
+        return {"error": "Every ship is placed. Type /ready when your fleet is ready, or /undo to move the last one."}
+    length = fleet[len(ships)]
+    x, y = pos
+    ex, ey = (x + length - 1, y) if across or length == 1 else (x, y + length - 1)
+    if ex >= st["n"] or ey >= st["n"]:
+        return {"error": "From %s %s, the next ship runs off the grid because it is %d squares long." % (
+            words[0], "across" if across else "down", length)}
+    token = "%s-%s" % (sq_name(x, y), sq_name(ex, ey))
+    return {"move": [token], "what": "place a ship at %s" % token}
+
+
+def op_typed(req):
+    """The words typed after a slash at the table -> what the core does with them. While the fleets are
+    placed, /a1 across or /a1 down (across when no direction is typed) places the next ship from a1, and
+    /a1-e1 places it from end to end. /random, /ready and /undo do what they say, and /reset or /clear
+    takes back every ship. Placing goes on at the same time for both players. While shooting, a square
+    such as /e5 fires there."""
+    st, seat = req["state"], req.get("seat", -1)
+    words = [w.lower() for w in req.get("words") or []]
+    if not words:
+        return {}
+    placing = st["phase"] == "place"
+    if len(words) == 1 and words[0] in TYPED_WORDS:
+        token, what = TYPED_WORDS[words[0]]
+        reply = {"move": [token], "what": what}
+    elif len(words) == 1 and TYPED_PLACE_RE.match(words[0]):
+        reply = {"move": [words[0]], "what": "place a ship at %s" % words[0]}
+    elif len(words) <= 2 and TYPED_SQUARE_RE.match(words[0]):
+        if placing:
+            return typed_placement(st, seat, words)
+        if len(words) != 1:
+            return {}
+        reply = {"move": [words[0]], "what": "fire at %s" % words[0]}
+    else:
+        return {}
+    if not placing and seat != st["turn"]:
+        return {"error": "It's not your turn."}
+    return reply
+
+
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply,
-       "result": op_result, "say": op_say}
+       "result": op_result, "say": op_say, "typed": op_typed}
 
 
 def main():

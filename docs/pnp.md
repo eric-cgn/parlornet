@@ -2,7 +2,7 @@
 
 This guide is for people writing their own frontend for ParlorNet: a program that connects to a parlor (a ParlorNet server) and lets a player sign in, find a table and play. It covers the native protocol, PARLORNET/1, in two parts:
 
-- **Part 1, the server protocol**: what every frontend needs whatever the game: connecting, signing in, the lobby, tables, moves, events, the turn clock, chat and errors.
+- **Part 1, the server protocol**: what every frontend needs whatever the game: connecting, signing in, the lobby, tables, moves, events, the turn clock, chat, commands and errors.
 - **Part 2, the games**: one chapter for each of the ten games this server hosts: what the view lines mean, how to write a move, the events, what is hidden from whom, and a short game.
 
 [protocol.md](protocol.md) is the protocol's reference, [accounts.md](accounts.md) the sign-in dialog's, and each game's type spec in [types/](types/) is the full contract for that game. This guide teaches the protocol with examples; where it leaves something out, those documents have it.
@@ -120,7 +120,7 @@ A> LST
 A< OK
 ```
 
-`BYE` ends the connection (`OK`, then the server closes it). A connection that sends nothing for 15 minutes gets `ERR IDLE closing` and is closed. Closing the connection, or losing it, does not leave a table or resign a game.
+`BYE` ends the connection (`OK`, then the server closes it). A connection that sends nothing for 15 minutes gets `ERR IDLE closing` and is closed. A connection has 5 minutes to sign in, counted from connecting or from signing out, whatever it sends in that time. After that it gets `ERR IDLE closing: sign in within 5 minutes of connecting` and is closed. Once signed in, it may stay in the lobby or at a table as long as it keeps talking to the server. Closing the connection, or losing it, does not leave a table or resign a game.
 
 ### Signing in
 
@@ -619,6 +619,84 @@ Every table has a time per turn (`turn=` on `NEW`). The clock of the seat to mov
 ### Chat
 
 `CHT table text` sends a line of chat to a table where the player is seated or watching. The server keeps printable ASCII only and at most 56 characters, and adds the event `CHT seat text` (`-` for a watcher's seat). The reply is `OK` alone: the sender sees their own line with the next events, like everyone else.
+
+### Commands
+
+A frontend's command line, where the player types `/who`, `/invite bot` or a move such as `/d3`, needs no code of its own for each command. `CMD [table] /line` sends the line as it was typed, with the table it was typed at, and the server runs it. The reply is `INF text` lines to show as they are, plain sentences of at most 74 characters, then `OK`. A command that has nothing to say, such as a typed move that was played or a line said with `/say`, answers `OK` alone. What it did at the table comes as events with the next `SIN` or `WAT`, because `CMD` leaves the connection's event cursors alone. A refusal is a sentence like any other, so a frontend shows every reply the same way. `ERR` comes only for a request the server can't take, such as a line without its slash or a table that isn't there.
+
+A command that ends a turn, a game or the session asks first. The reply is then `DLG kind [table]` and the dialog's words as `INF` lines. Show them in your confirmation dialog, with Yes and No and No highlighted. Yes sends `CMD table YES /kind`, and No sends nothing. The kinds are `resign`, `pass`, `end` and `quit`. Nothing a player types can confirm, because the command line always sends its slash first. No command answers an offer either. Your dialogs for a double, a draw offer or an invitation send `MOV`, `JON` or `UNV` themselves.
+
+The commands are those of [chat-commands.md](chat-commands.md), and [protocol.md](protocol.md) (Commands) lists what they do at a table. Keep your command line to 60 characters, so the request fits its 80 bytes with any table number.
+
+```pnp commands
+A> PARLORNET/1
+A< PARLORNET/1 parlornet AUTH=none SIGNUP=none
+A> HELO ann
+A< OK -
+B> PARLORNET/1
+B< PARLORNET/1 parlornet AUTH=none SIGNUP=none
+B> HELO bob
+B< OK -
+# In the lobby, the line goes as typed. Here /open needs a game.
+A> CMD /open
+A< INF Type /open and a game, such as /open backgammon. The games are backgammon,
+A< INF cannonfire, checkers, dotsandboxes, fiveinarow, gridwords, mancala,
+A< INF navalcombat, reversi and rummytile.
+A< OK
+A> CMD /open reversi
+A< INF Your table 1 is open: anyone can join it. /close closes it.
+A< OK
+# At ann's open table, the command runs there.
+A> CMD 1 /invite bob
+A< INF You invited bob to table 1.
+A< OK
+# An invitation is answered in its dialog, which sends JON.
+B> CMD /accept ann
+B< INF An invitation or an offer is answered in its own dialog, not from the
+B< INF command line.
+B< OK
+B> JON 1
+B< OK 1
+# A typed move that is played has nothing to say.
+A> CMD 1 /d3
+A< OK
+# What it did comes as events, as after any request.
+A> SIN 1
+A< EVT 1 1 JOIN 0 ann
+A< EVT 1 2 INVITE - bob
+A< EVT 1 3 JOIN 1 bob
+A< EVT 1 4 START
+A< EVT 1 5 TURN 0
+A< EVT 1 6 PUT 0 d3 FLP d4
+A< EVT 1 7 TURN 1
+A< OK 7
+# A refusal is a sentence like any other.
+A> CMD 1 /f5
+A< INF It's not your turn.
+A< OK
+B> CMD 1 /a1
+B< INF You can't play a1. That square flips nothing.
+B< OK
+B> CMD 1 /say well played
+B< OK
+# Resigning asks first, with DLG and the dialog's words.
+B> CMD 1 /resign
+B< DLG resign 1
+B< INF Resign this game? ann wins. Leaving the table never resigns.
+B< OK
+# The dialog's Yes sends the confirmed form.
+B> CMD 1 YES /resign
+B< INF You resigned table 1.
+B< OK
+A> CMD /who
+A< INF Online: ann, bob.
+A< OK
+# The line starts with its slash.
+A> CMD who
+A< ERR SYNTAX CMD [table] [YES] /command
+A> CMD 9 /who
+A< ERR NOTABLE no such table
+```
 
 ### Keeping a little data
 

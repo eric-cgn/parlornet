@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from adapters import telnet, title  # noqa: E402
 from adapters.telnet import TelnetIO  # noqa: E402
 
-BUDGET = 1400       # bytes, in any mode: about 6 seconds at 2400 baud
+BUDGET = {"plain": 1400, "ansi": 1300, "pc": 1300, "utf8": 1800}   # bytes: 5 to 7.5 seconds at 2400 baud
 ENCODING = {"plain": "ascii", "ansi": "ascii", "pc": "cp437", "utf8": "utf-8"}
 
 
@@ -24,15 +24,23 @@ def expected():
     return [r.ljust(80) for r in rows]
 
 
+class Cell:
+    """A character on the screen and how it was drawn: fg is 30-37 (90-97 with bold) or ("256", n); rev is
+    reverse video and ul underline; drawn is False where nothing was written."""
+
+    def __init__(self, ch=" ", fg=None, bg=None, rev=False, ul=False, drawn=False):
+        self.ch, self.fg, self.bg, self.rev, self.ul, self.drawn = ch, fg, bg, rev, ul, drawn
+
+
 class Screen:
-    """Just enough of an ANSI terminal for the page: CR, LF, clear, home, cursor forward and colors. Each
-    cell is (character, foreground, background); a foreground of 30-37 with bold is reported as 90-97."""
+    """Just enough of an ANSI terminal for the page: CR, LF, clear, home, cursor forward and colors (the 16,
+    the 256, bold, underline and reverse video)."""
 
     def __init__(self, text):
-        self.cells = [[(" ", None, None)] * 80 for _ in range(24)]
+        self.cells = [[Cell() for _ in range(80)] for _ in range(24)]
         self.x = self.y = 0
         fg = bg = None
-        bold = False
+        bold = rev = ul = False
         for tok in re.split(r"(\x1b\[[0-9;]*[A-Za-z]|\r|\n)", text):
             if tok == "\r":
                 self.x = 0
@@ -42,41 +50,58 @@ class Screen:
             elif tok.startswith("\x1b["):
                 args, f = tok[2:-1], tok[-1]
                 if f == "J":
-                    self.cells = [[(" ", None, None)] * 80 for _ in range(24)]
+                    self.cells = [[Cell() for _ in range(80)] for _ in range(24)]
                 elif f == "H":
                     self.x = self.y = 0
                 elif f == "C":
                     self.x += int(args or 1)
                 elif f == "m":
-                    for p in [int(a) if a else 0 for a in args.split(";")]:
+                    ps = [int(a) if a else 0 for a in args.split(";")]
+                    i = 0
+                    while i < len(ps):
+                        p = ps[i]
                         if p == 0:
                             fg = bg = None
-                            bold = False
+                            bold = rev = ul = False
                         elif p == 1:
                             bold = True
+                        elif p == 4:
+                            ul = True
+                        elif p == 7:
+                            rev = True
                         elif 30 <= p <= 37:
                             fg = p
+                        elif p == 38 and ps[i + 1] == 5:
+                            fg = ("256", ps[i + 2])
+                            i += 2
                         elif 40 <= p <= 47 or 100 <= p <= 107:
                             bg = p
+                        else:
+                            raise AssertionError("unexpected SGR %d" % p)
+                        i += 1
                 else:
                     raise AssertionError("unexpected escape %r" % tok)
             else:
                 for ch in tok:
                     assert self.x < 80, "a line longer than 80"
-                    self.cells[self.y][self.x] = (ch, fg + 60 if bold and fg else fg, bg)
+                    shade = fg + 60 if bold and isinstance(fg, int) else fg
+                    self.cells[self.y][self.x] = Cell(ch, shade, bg, rev, ul, True)
                     self.x += 1
 
     def text(self):
-        return ["".join(c[0] for c in row) for row in self.cells]
+        return ["".join(c.ch for c in row) for row in self.cells]
 
 
 class Page(unittest.TestCase):
     def test_each_mode_draws_the_grid(self):
+        """Each block in its row's color: in pc a full and a left half block; in utf8 a square in the row's
+        256 color with a gap on its right and bottom (reverse video and underline, with the right one eighth
+        block, or a space at the end of a run, where the empty cell beside it is the gap); in ansi "##"."""
         want = expected()
         for mode in ("plain", "ansi", "pc", "utf8"):
             with self.subTest(mode=mode):
                 data = title.page(mode).encode(ENCODING[mode])
-                self.assertLessEqual(len(data), BUDGET)
+                self.assertLessEqual(len(data), BUDGET[mode])
                 self.assertNotIn(b"\xff", data)                  # nothing telnet would have to double
                 text = data.decode(ENCODING[mode])
                 if mode == "plain":
@@ -90,18 +115,32 @@ class Page(unittest.TestCase):
                 self.assertEqual(scr.y, 23)                       # ends on the last line, which has no line end
                 for y in range(21):
                     for x in range(80):
-                        ch, fg, bg = scr.cells[y][x]
-                        if want[y][x] == "#":
-                            band = (title.WARM if y < 11 else title.COOL)[(y - 1) % 10]
-                            if mode == "utf8":                   # a space in the row's color as its background
-                                self.assertEqual((ch, bg), (" ", band + 10), (x, y))
-                            else:
-                                self.assertEqual((ch, fg), ("█" if mode == "pc" else "#", band), (x, y))
+                        c = scr.cells[y][x]
+                        if want[y][x] != "#":
+                            self.assertFalse(c.drawn and (c.ch != " " or c.rev or c.bg), (x, y))
+                            continue
+                        warm = y < 11
+                        r = (y - 1) % 10
+                        right = (x - want[y].index("#")) % 2 == 1      # the block's second character
+                        if mode == "utf8":
+                            band = ("256", (title.WARM256 if warm else title.COOL256)[r])
+                            last = right and (x + 1 == 80 or want[y][x + 1] != "#")
+                            ch = " " if not right or last else "\u2595"
+                            self.assertEqual((c.ch, c.fg, c.bg, c.rev, c.ul), (ch, band, None, True, True), (x, y))
                         else:
-                            self.assertEqual((ch, bg), (" ", None), (x, y))
+                            band = (title.WARM if warm else title.COOL)[r]
+                            ch = ("\u258c" if right else "\u2588") if mode == "pc" else "#"
+                            self.assertEqual((c.ch, c.fg, c.bg, c.rev, c.ul), (ch, band, None, False, False), (x, y))
                 self.assertEqual(scr.text()[21].strip(), title.CAPTION)
                 self.assertEqual(scr.text()[23].strip(), "Press Enter")
                 self.assertTrue(text.endswith("\x1b[0m"))
+
+    def test_the_rows_colors(self):
+        """The C64's colors a row: the 16 in pc and ansi, the 256 in utf8."""
+        self.assertEqual(title.WARM, (93, 93, 91, 91, 33, 33, 31, 31, 33))
+        self.assertEqual(title.COOL, (97, 92, 96, 96, 94, 94, 35, 35, 34))
+        self.assertEqual(title.WARM256, (227, 227, 210, 210, 166, 166, 131, 131, 94))
+        self.assertEqual(title.COOL256, (231, 120, 87, 87, 105, 105, 165, 165, 21))
 
     def test_the_plain_page(self):
         lines = title.page("plain").split("\r\n")

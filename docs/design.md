@@ -191,7 +191,7 @@ The last move is said in one sentence and marked on the board. The server writes
 
 | What | How it reads |
 |---|---|
-| the time connected | "0m" in the first minute, then "42m", then "1h 3m" from an hour on |
+| the time signed in | "0m" in the first minute, then "42m", then "1h 3m" from an hour on. It starts when sign-in completes, and no screen shows it before then. |
 | your clock | "You have 4:12 left." It shows in red, or in bold on a black and white screen, under a minute. |
 | another player's clock | "ann has 2:03 left." |
 | a clock from an hour up | "You have 1h 3m left." |
@@ -376,7 +376,7 @@ The steps are below in telnet's keys. The 8-bit program names its own keys in ea
 
 ### Full-screen text (telnet)
 
-- The screen has 24 rows. Row 0 is the title bar, with the game, the table and who you play with, as "Grid Words, table 12, with ann", and the time connected at the right. Rows 1 to 19 hold the board and the panel. Row 20 belongs to the game. Row 21 is the sentence line, row 22 is the command line and row 23 is the keys line.
+- The screen has 24 rows. Row 0 is the title bar, with the game, the table and who you play with, as "Grid Words, table 12, with ann", and the time signed in at the right. Rows 1 to 19 hold the board and the panel. Row 20 belongs to the game. Row 21 is the sentence line, row 22 is the command line and row 23 is the keys line.
 - The keys line lists the slots in the shared order, as "Arrows move  Enter pick  P pass  X exchange  ? help  / type  Esc lobby", with the key names lit. In command mode nothing is lit.
 - A player may choose WASD, ESDF, IJKL or HJKL for moving. A movement letter always moves, and a shortcut on the same letter shows as its command instead, as `/double`.
 - T or Tab opens the chat screen, where every line is said without `/say`, and a line that starts with `/` is a command.
@@ -385,7 +385,7 @@ The steps are below in telnet's keys. The 8-bit program names its own keys in ea
 
 ### 8-bit Hi-Res (the Apple IIe, IIgs and C64 program)
 
-- The screen is 40 columns. The title row holds the game, the table, the players and the time connected. Under the board come the message line, the status line and a row of buttons. The status line holds the first sentence and the clock, as "Your turn. You have 4m left." The message line holds the second sentence, refusals, the other player's last move as it arrives, and chat as it comes.
+- The screen is 40 columns. The title row holds the game, the table, the players and the time signed in. Under the board come the message line, the status line and a row of buttons. The status line holds the first sentence and the clock, as "Your turn. You have 4m left." The message line holds the second sentence, refusals, the other player's last move as it arrives, and chat as it comes.
 - The arrows hop the pointer from target to target. Return or Space clicks the target under the pointer, so the message line says what Return does there.
 - Shortcuts take OA, which is Open-Apple on the Apple II and the Commodore key on the C64. Plain letters type only in Grid Words' entry mode and on the command line.
 - `?` opens help, and on both machines `?` is Shift and the `/` key. Help is a full page drawn over the board. The program fetches the pages from the parlor.
@@ -399,7 +399,7 @@ The steps are below in telnet's keys. The 8-bit program names its own keys in ea
 
 ### The browser (ParlorNet Play)
 
-- The board fills the left, and the cards on the right hold the players with their clocks, the game's panel with its buttons, the notes and the chat. The sentence line sits over the board. The header shows the time connected after "Signed in as eric".
+- The board fills the left, and the cards on the right hold the players with their clocks, the game's panel with its buttons, the notes and the chat. The sentence line sits over the board. The header shows the time signed in after "Signed in as eric".
 - Touch, a mouse and the keyboard all work. A tap or click does what Enter does on the place you touch, and dragging moves pieces where a game allows it.
 - The letters work while the board has the keyboard. Tab moves between controls as it does in every browser. T moves the keyboard to the chat box, and `/` does the same with the slash typed. The chat box takes chat lines and `/` commands.
 - `?` opens a help dialog with the two pages. Esc cancels, and with nothing to cancel it goes back to the lobby. In full screen, the browser takes the first Esc to leave full screen. Full screen is the header's button, and no letter switches it.
@@ -443,10 +443,13 @@ Every frontend reaches the server through a protocol. ParlorNet's own frontends 
 | `MOV`, `CHK`, `UND`, `END`, `RES` | playing, checking, undoing, ending a turn and resigning |
 | `SIN`, `WAT` | what happened since you last looked, including chat |
 | `CHT` | a line said at the table |
+| `CMD` | a command line typed after the slash, at a table or in the lobby, run on the server with the lines to show, and the confirmation dialog for the commands that ask first |
 | `NOTE` | the table's notes |
-| `TIM` | the time connected, for frontends without a clock |
+| `TIM` | the time signed in, for frontends without a clock |
 | `PRF` | small settings kept with the player, such as the display choice and the answer to the practice game dialog |
 | `OUT`, `BYE` | signing out and closing |
+
+The server runs every command in one place, with `CMD` ([protocol.md](protocol.md), Commands). It has the names of [chat-commands.md](chat-commands.md), and a typed move goes to the game's own reading of it. Telnet's command line, Play's chat box, the web's Say form and the 8-bit command line all send their slash lines this way. A command that ends a turn or a game, such as `/resign` or `/pass`, answers with the dialog to open, and the dialog's Yes sends the confirmed form. No command answers an offer. The 8-bit program handles `/help`, `/leave` and `/practice` itself, because they open its own screens.
 
 The design also asks the server for these, which are decided and not yet in the protocol.
 
@@ -456,6 +459,5 @@ The design also asks the server for these, which are decided and not yet in the 
 - **Offers.** A view line says that an offer waits for your answer, with its dialog's words. Today each game shows its offers in its own view lines ([types/](types/)).
 - **Refusals in the player's terms.** Each game's `ERR ILLEGAL` reason is a sentence for the player, as in "You can't play d3. It flips no discs."
 - **Help pages.** A request returns a game's two help pages, with the keys left as slots for each frontend to fill.
-- **Commands.** A request carries a slash line for a table and answers with the lines to show. The server runs every command in one place, with the names of [chat-commands.md](chat-commands.md) and each game's own words. Telnet's command line, Play's chat box, the web's Say form and the 8-bit command line all send their slash lines this way. The 8-bit program handles `/help`, `/leave` and `/practice` itself, because they open its own screens.
 
 The practice game needs nothing from the server, because it never reaches it.
