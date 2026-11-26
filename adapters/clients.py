@@ -1471,7 +1471,7 @@ def browsers_body(host=HOST, auth=None):
 def telnet_body(host=HOST, auth=None):
     """telnet.html: what a telnet program needs, setting it up, signing in, then each program."""
     return (h1("Telnet programs") +
-            p("Every game can be played by telnet, on a full-screen menu and board. Each program below has its "
+            p("Every game can be played by telnet, on a full-screen lobby and board. Each program below has its "
               "own page with its history, setup notes and known quirks, and the %s lists them all."
               % a(FRONTENDS_PAGE, "Clients page")) +
             p(HOST_NOTE, 2) +
@@ -1494,14 +1494,20 @@ def telnet_body(host=HOST, auth=None):
                 "screen.",
                 "A terminal program on a serial line, with no network of its own, reaches the same port through "
                 "a WiFi modem or a login on a Unix machine (%s)." % a("/docs/serial.html", "Serial connections")]) +
+            h2("playing", "Playing") +
+            p("In game mode the arrows move, Enter plays, and each letter is a shortcut that means the same thing "
+              "in every game, such as <tt>R</tt> to resign. The <tt>/</tt> key opens the command line, where you "
+              "type a command such as <tt>/say hello</tt> or a move such as <tt>/d3</tt>. <tt>T</tt> opens the "
+              "chat, <tt>?</tt> opens help, and Esc cancels or goes back to the lobby. The line above the keys "
+              "always says what you can do now. A practice game in the lobby teaches the keys, and nothing you "
+              "do there reaches the parlor.") +
             h2("keys", "Movement keys") +
             p("If your telnet program sends no arrow keys, letters can move the cursor instead: IJKL, ESDF, WASD "
-              "or HJKL (as in vi). Choose them with <tt>O</tt> in the menu, or with <tt>K</tt> at the login&#39;s "
-              "last prompt (offered when your terminal type suggests no arrow keys). The arrows still work. Those "
-              "four letters then always move. To type a command or word that starts with one of them, press "
-              "<tt>:</tt> first (<tt>:join 3</tt>). For a key whose letter is one of them, press <tt>:</tt> and "
-              "then the letter (<tt>:d</tt>). The choice lasts until you log off. Each program&#39;s page says whether "
-              "it sends arrow keys.") +
+              "or HJKL (as in vi). Choose them with <tt>/keys</tt> in the lobby, or with <tt>K</tt> at the "
+              "login&#39;s last prompt (offered when your terminal type suggests no arrow keys). The arrows still "
+              "work. Those four letters then always move, and a shortcut on one of them shows as its command, "
+              "such as <tt>/double</tt>. The choice is kept for your next visit. Each program&#39;s page says "
+              "whether it sends arrow keys.") +
             h2("signin", "Signing in") + signin_html("telnet", auth, host) +
             programs("programs", "The programs", TELNETS))
 

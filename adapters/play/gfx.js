@@ -12,7 +12,9 @@
 //                                                  from the board up, its surface and a band of that
 //                                                  depth below it color a, the rest b, down to -bottom;
 //                                                  key names the heights (a new key, a new mesh)
-//   {t: "disc", x, y, z, r, h, a, b, flip, axis}   a disc or checker: top color a, bottom b; flip turns it
+//   {t: "disc", x, y, z, r, h, a, b, flip, axis, mark, markInk, text, ink}   a disc or checker: top color a,
+//                                                  bottom b; flip turns it; mark "rings" draws rings on its top
+//                                                  in markInk; text is a short number on its top in ink
 //   {t: "tile", x, y, z, w, h, d, color, ink, text, sub, subInk, lift}   a lettered tile; or with paint(ctx, w, h)
 //                                                  and key (naming what it paints), a face of the game's own
 //   {t: "die", x, y, z, s, q, face, ink, kind}     a die (kind "cube": the doubling cube), q a quaternion
@@ -509,11 +511,19 @@ var PNGfx = (function () {
       }
       model = mul(model, scale(it.r, it.r, it.h));
       var top = null;
-      if (it.mark) top = this.texture("mark:" + it.mark + it.markInk, function () {
+      if (it.mark || it.text) top = this.texture("mark:" + [it.mark, it.markInk, it.text, it.ink].join("|"), function () {
         var c = canvas(256, 256), x = c.getContext("2d");
-        x.strokeStyle = it.markInk; x.lineWidth = 7; x.globalAlpha = 0.55;
-        x.beginPath(); x.arc(128, 128, 78, 0, Math.PI * 2); x.stroke();
-        x.globalAlpha = 0.35; x.beginPath(); x.arc(128, 128, 44, 0, Math.PI * 2); x.stroke();
+        if (it.mark) {
+          x.strokeStyle = it.markInk; x.lineWidth = 7; x.globalAlpha = 0.55;
+          x.beginPath(); x.arc(128, 128, 78, 0, Math.PI * 2); x.stroke();
+          x.globalAlpha = 0.35;
+          if (!it.text) { x.beginPath(); x.arc(128, 128, 44, 0, Math.PI * 2); x.stroke(); }
+          x.globalAlpha = 1;
+        }
+        if (it.text) {
+          x.fillStyle = it.ink; x.textAlign = "center"; x.textBaseline = "middle";
+          x.font = "700 " + (it.text.length > 1 ? 96 : 120) + "px " + FONT; x.fillText(it.text, 128, 136);
+        }
         return c;
       });
       this.draw(this.meshes.disc, model, {a: it.a, b: it.b, tex: top, texWhere: top ? 1 : 0, spec: it.spec == null ? 0.45 : it.spec, shine: 60});
@@ -645,6 +655,13 @@ var PNGfx = (function () {
       x.beginPath(); x.arc(0, 0, it.r, 0, Math.PI * 2); x.fillStyle = rg; x.fill();
       x.lineWidth = it.r * 0.06; x.strokeStyle = shade(top, -0.35); x.stroke();
       if (it.mark) { x.globalAlpha = 0.5; x.strokeStyle = it.markInk; x.lineWidth = it.r * 0.06; x.beginPath(); x.arc(0, 0, it.r * 0.6, 0, Math.PI * 2); x.stroke(); x.globalAlpha = 1; }
+      if (it.text) {
+        // text at its own pixel size, not scaled: sharper
+        var dk = k * lift;
+        x.scale(1 / dk, 1 / dk);
+        x.fillStyle = it.ink; x.textAlign = "center"; x.textBaseline = "middle";
+        x.font = "700 " + Math.round(it.r * (it.text.length > 1 ? 0.75 : 0.95) * dk) + "px " + FONT; x.fillText(it.text, 0, it.r * 0.05 * dk);
+      }
       x.restore();
     } else if (it.t === "tile") {
       var w = it.w, h = it.h, lf = 1 + ((it.lift || 0) + (it.z || 0)) * 0.25;

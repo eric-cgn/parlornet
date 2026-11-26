@@ -218,24 +218,23 @@ class TelnetProfiles(Stack):
         self.assertIn("Your terminal says it is VT100.", self.menu_text)    # in the display menu
         self.until(s, "Login")
         for send, want in ((b"new", "Name you want"), (b"tess", "Choose a password"), (b"tess-Pass-word", "again"),
-                           (b"tess-Pass-word", "Press Enter"), (b"", "Commands:")):
+                           (b"tess-Pass-word", "Press Enter"), (b"", "or /help for the commands.")):
             s.sendall(send + b"\r\n")
             self.assertIn(want, self.until(s, want))
         s.sendall(b"machine Atari Mega ST\r\n")
         self.assertIn("Your preferred machine is now Atari Mega ST.", self.until(s, "Mega ST."))
-        s.sendall(b"profile\r\n")
-        out = self.until(s, "Atari Mega ST\r\n")
-        self.assertIn("Profile of tess:", out)
-        self.assertIn("Preferred machine: Atari Mega ST", out)
+        s.sendall(b"who tess\r\n")                    # the shared /who, run on the server
+        out = self.until(s, "Atari Mega ST.")
+        self.assertIn("tess: online, plays on Atari Mega ST.", out)
         # a game against ann on the web: tess's turn is recorded with the terminal type
         ann = Browser(self.web_port)
         ann.login("ann", "ann-Pass-word")
         tid = parse_qs(urlsplit(ann.act("/new.htm?g=reversi%2F1&turn=1h")[1]).query)["t"][0]
-        s.sendall(b"join %s\r\n" % tid.encode())
+        s.sendall(b"/join %s\r\n" % tid.encode())
         self.until(s, ">", 5)
         ann.act("/move.htm?t=%s&mv=d3" % tid)
         self.assertIn("ann plays d3", self.until(s, "ann plays d3"))     # tess's turn now
-        s.sendall(b"c3\r\n")
+        s.sendall(b"/c3\r\n")
         deadline = time.time() + 10
         while time.time() < deadline:
             page = ann.get("/activity.htm")[3]

@@ -50,6 +50,10 @@ Every console says what each player plays with, where their program said so ([pr
 | Awale, Write to group (typed with `!`) | `!list`, `!resign`, `!invite`, `!open`, `!join`, `!close`, `!accept`, `!decline`, `!who`, `!tables`, `!top`, `!score`, `!note`, `!motd`, `!time`, `!signin`, `!quit`, `!help` |
 | RSCARDS, the lobby's bottom line | `/list`, `/resume`, `/invite`, `/open`, `/join`, `/close`, `/accept`, `/decline`, `/who`, `/tables`, `/top`, `/score`, `/motd`, `/quit`, `/help`; `/invite` and `/open` make a table of the game whose name was clicked |
 | RSCARDS, a game's bottom line | `/list`, `/resign`, `/invite`, `/who`, `/tables`, `/top`, `/score`, `/note`, `/motd`, `/help`, `/quit` |
+| Telnet, the lobby's command line | the commands of the command request (below), run on the server, and telnet's own `/help`, `/resume`, `/watch`, `/password`, `/machine`, `/activity`, `/keys` and `/practice`. `/open` alone asks for the game, its rules, the players and the time per turn, as N does. In the plain lobby the slash may be left off |
+| Telnet, a table's command line and chat screen | the commands of the command request and a typed move such as `/d3`, run on the server at that table, and telnet's own `/help`, `/leave`, `/redraw`, `/practice` and the game's few commands for its screen, such as `/sort`. On the chat screen a line without a slash is said to the table |
+
+Telnet opens its command line with the `/` key, in the lobby and at every table, and sends each line with `CMD`. A table's offers, such as a double or a draw, and the questions that ask first, such as resigning, are dialogs on telnet with the server's words, so they are never answered from the command line.
 
 RSCARDS's consoles have no `/time`: RSCARDS front ends, like GameMaster, run on machines with clocks of their own, and nothing changes for them.
 
@@ -69,7 +73,6 @@ These services keep the commands their clients were written for, since the clien
 - DOoM (BobGrid, MUD clients): `invite`, `accept`, `decline`, `who`, as DOoM's help describes them. `invite bot` plays the bot.
 - IOS (Reversi The Eclipse): `match NAME`, `accept`, `decline`, `who`.
 - ICDS (xcheckers, telnet programs): `match NAME` (`match bot` plays the bot), `accept`, `decline`, `who`, `quit`, as on FICS. Lines that start with `/` take the shared commands as well: `/list`, `/resign`, `/invite`, `/open`, `/join`, `/close`, `/accept`, `/decline`, `/who`, `/top`, `/score`, `/note`, `/motd`, `/time`, `/quit` and `/help`.
-- The telnet menus: numbered menus and the keys they show. Typed `time` there shows the time signed in and the server's time, as `/time` does.
 - The web: buttons and forms.
 
 ## The command request

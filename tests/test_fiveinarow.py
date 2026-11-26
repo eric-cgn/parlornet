@@ -268,12 +268,13 @@ class Screens(unittest.TestCase):
                 self.assertIn(" 15 ", text)
                 if me == 0:
                     self.assertIn("MOV 3 h8", reqs, mode)               # the cursor starts on the center
-                    self.assertIn("Your move", text)
+                    self.assertIn("Your turn", text)
                 else:
                     self.assertFalse([r for r in reqs if r.startswith("MOV")], (mode, me))
             text = plain_screen(self, F, empty, me)
             self.assertIn("  8  . . . . . . . . . . . . . . .", text)
-            self.assertIn(("Your move (like h8) > " if me == 0 else "> "), text)
+            self.assertIn(("Your turn. Type a point such as /h8. > " if me == 0 else "You are watching. > " if me < 0
+                           else "Waiting for abcdefghijkl. > "), text)
 
     def test_twenty_by_twenty(self):
         """NetLuff's board: rows 1 to 20 on screen rows 2 to 21, so the hint moves to the line below; a click
@@ -283,7 +284,7 @@ class Screens(unittest.TestCase):
         for mode, (text, reqs) in shown.items():
             rows = text.split("\n")[:24]
             self.assertTrue(rows[21].startswith(" 20 "), (mode, rows[21]))
-            self.assertIn("Your move", rows[22], mode)
+            self.assertIn("Your turn", rows[22], mode)
             self.assertIn("MOV 3 t20", reqs, mode)
         self.assertEqual(F.pt("t20"), (19, 19))
         self.assertEqual(fp.parse_sq("t20", 20), 399)
@@ -328,7 +329,7 @@ class Screens(unittest.TestCase):
         shown = ansi_screens(self, F, MIDGAME, 0, keys=["RIGHT", "DOWN", "ENTER"])
         for mode, (text, reqs) in shown.items():
             self.assertFalse([r for r in reqs if r.startswith("MOV")], mode)
-            self.assertIn("h8 is taken", text)
+            self.assertIn("A stone is on h8 already", text)
         # a click on c2: 15 by 15 points sit 3 columns apart from column 5, rows from row 4
         shown = ansi_screens(self, F, MIDGAME, 0, keys=[("CLICK", 5 + 3 * 2, 4 + 1)])
         for mode, (text, reqs) in shown.items():
@@ -337,10 +338,10 @@ class Screens(unittest.TestCase):
         shown = ansi_screens(self, F, view(19, ["j10"], [], last="j10"), 0, keys=[("CLICK", 5 + 2 * 18, 2 + 18)])
         for mode, (text, reqs) in shown.items():
             self.assertIn("MOV 3 s19", reqs, mode)
-        # a typed point, in either case
-        shown = ansi_screens(self, F, MIDGAME, 0, keys=list("K11") + ["ENTER"])
+        # a typed point runs on the server (CMD), as typed
+        shown = ansi_screens(self, F, MIDGAME, 0, keys=["/"] + list("K11") + ["ENTER"])
         for mode, (text, reqs) in shown.items():
-            self.assertIn("MOV 3 k11", reqs, mode)
+            self.assertIn("CMD 3 /K11", reqs, mode)
         # not your turn, or watching: nothing is sent
         for me in (1, -1):
             for mode, (text, reqs) in ansi_screens(self, F, MIDGAME, me, keys=["ENTER", ("CLICK", 11, 5)]).items():
@@ -351,14 +352,14 @@ class Screens(unittest.TestCase):
             g.over = F.describe_event("END win 0 h4-h8", g.names)
         for me in (0, 1, -1):
             for mode, (text, reqs) in ansi_screens(self, F, FINISHED, me, keys=["ENTER"], prepare=over).items():
-                self.assertIn("Line h4 h5 h6 h7 h8", text)
+                self.assertIn("h4 h5 h6 h7", text)
                 self.assertIn("wins with five in a row", text)
                 self.assertFalse([r for r in reqs if r.startswith("MOV")])
                 self.assertIn("[X]" if mode == "ansi" else "[█]", text)
-            self.assertIn("Esc: menu", ansi_screens(self, F, FINISHED, me, prepare=over)["ansi"][0])  # fits row 21
+            self.assertIn("Game over.", ansi_screens(self, F, FINISHED, me, prepare=over)["ansi"][0])  # fits row 21
             text = plain_screen(self, F, FINISHED, me, prepare=over)
             self.assertIn("  8  . . . . . . .[X]. . . . . . .", text)
-            self.assertIn("Line h4 h5 h6 h7 h8", text)
+            self.assertIn("The line is h4 h5 h6 h7 h8.", text)
             self.assertTrue(text.endswith("> "))
 
     def test_plain_typed_move(self):
@@ -367,9 +368,9 @@ class Screens(unittest.TestCase):
         s = session(io, core, "plain")
         g = F.PlainScreen(s, "3", F.KEY, 0)
         g.names, g.v = ["ann", "bob"], g.parse(MIDGAME)
-        self.assertIn("Your move (like f7) > ", plain_screen(self, F, MIDGAME, 0))     # next to the last stone
+        self.assertIn("Your turn. Type a point such as /f7. > ", plain_screen(self, F, MIDGAME, 0))  # by the last stone
         asyncio.run(g.command("J9"))
-        self.assertIn("MOV 3 j9", core.reqs)
+        self.assertIn("CMD 3 /J9", core.reqs)
         g2 = F.PlainScreen(s, "3", F.KEY, -1)
         g2.names, g2.v = ["ann", "bob"], g2.parse(MIDGAME)
         core.reqs.clear()

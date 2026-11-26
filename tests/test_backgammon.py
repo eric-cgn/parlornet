@@ -407,7 +407,7 @@ class TelnetCountdowns(unittest.TestCase):
         self.t[0] += 60
         asyncio.run(g.tick())
         self.assertNotIn("END 3", core.reqs)
-        self.assertIn("Your move waits. Press E to send it, or U to take a step back.", self.line(g))
+        self.assertIn("Your move waits. Press Enter to send it, or U to undo a step.", self.line(g))
         g, core = self.screen("pc", "done")                 # undoing a step stops it as well
         asyncio.run(g.tick())
         self.assertFalse(asyncio.run(g.key_seen("u")))
@@ -422,7 +422,7 @@ class TelnetCountdowns(unittest.TestCase):
         asyncio.run(g.tick())
         said = "".join(g.io.out)
         self.assertEqual(said.count("Rolling in"), 1, said)
-        self.assertIn(" Rolling in 5 seconds. Type double, or press Enter to wait.\n", said)
+        self.assertIn(" Rolling in 5 seconds. Type /double, or press Enter to wait.\n", said)
         self.t[0] += 4
         asyncio.run(g.tick())
         self.assertIn("MOV 3 roll", core.reqs)
@@ -433,10 +433,96 @@ class TelnetCountdowns(unittest.TestCase):
         self.t[0] += 60
         asyncio.run(g.tick())
         self.assertNotIn("END 3", core.reqs)
-        self.assertIn("Type end to send your move", "".join(g.io.out))
+        self.assertIn("Type /end to send your move", "".join(g.io.out))
 
 
 ROWS_HINT = 21      # the full screen's hint line (ROWS - 3)
+
+
+class TelnetOffers(unittest.TestCase):
+    """A double comes as a dialog with Accept and Decline, answered inside it. Declining drops the double, which
+    ends the game, so it asks first. Esc puts the dialog away unanswered, and Enter brings it back. Plain mode
+    asks the same at its prompt. Pass means nothing in Backgammon."""
+
+    def screen(self, mode, keys=(), lines=None):
+        from test_adapters import BgFakeCore, BG_TABS, FakeIO, LONG, bg_lines
+        from adapters import telnet as T
+        from adapters.games import backgammon as G
+        core = BgFakeCore(BG_TABS, lines or bg_lines("take", 0))
+        io = FakeIO(mode, list(keys))
+        if mode == "plain":
+            io.out = []
+            io.write = io.out.append
+
+            async def readline():
+                return await io.readkey()
+            io.readline = readline
+        s = T.Session(io, core, mode, LONG)
+        g = (G.AnsiScreen if mode != "plain" else G.PlainScreen)(s, "3", G.KEY, 0)
+        g.names, g.turn_secs, g.v = [LONG, LONG[::-1]], 300, g.parse(core.lines)
+        g.s.bghome = "right"
+        return g, core
+
+    def press(self, g, *keys):
+        g.io.keys[:0] = list(keys)
+
+        async def go():
+            while g.io.keys:
+                await g.on_key(await g.io.readkey())
+        try:
+            asyncio.run(go())
+        except EOFError:
+            pass
+
+    def test_the_double_is_a_dialog(self):
+        g, core = self.screen("pc")
+        self.press(g, "ENTER")                      # the dialog starts on Accept
+        self.assertIn("MOV 3 take", core.reqs)
+        g, core = self.screen("pc")
+        self.press(g, "y")
+        self.assertIn("MOV 3 take", core.reqs)
+
+    def test_declining_asks_first(self):
+        g, core = self.screen("pc")
+        self.press(g, "n", "ESC")                   # Decline, then Esc: No, so nothing is sent
+        self.assertNotIn("MOV 3 drop", core.reqs)
+        g, core = self.screen("pc")
+        self.press(g, "RIGHT", "ENTER", "ENTER")    # Decline, then Enter on No: the safe answer
+        self.assertNotIn("MOV 3 drop", core.reqs)
+        g, core = self.screen("pc")
+        self.press(g, "n", "y")
+        self.assertIn("MOV 3 drop", core.reqs)
+        shown = "\n".join("\n".join(s) for s in g.io.screens)
+        self.assertIn("Drop the double? You lose 1 point and the game.", shown)
+
+    def test_esc_puts_it_away(self):
+        g, core = self.screen("pc")
+        self.press(g, "ESC")
+        self.assertFalse([r for r in core.reqs if r.startswith("MOV")])
+        self.assertIn("doubles to 2. Press Enter to answer.", g.screen()[0].lines()[ROWS_HINT])
+        self.press(g, "ENTER", "y")                 # Enter brings the dialog back
+        self.assertIn("MOV 3 take", core.reqs)
+
+    def test_no_command_answers_it(self):
+        for word in ("take", "drop", "accept", "decline", "pass"):
+            g, core = self.screen("pc", ["ESC"] * 3)          # an answer that needs a box is closed again
+            try:
+                asyncio.run(g.command(word))
+            except EOFError:
+                pass
+            self.assertFalse([r for r in core.reqs if r.startswith("MOV")], word)
+
+    def test_plain_asks_at_the_prompt(self):
+        g, core = self.screen("plain", ["n", "n"])
+        asyncio.run(g.line_in("n"))                 # decline, then no to dropping
+        self.assertNotIn("MOV 3 drop", core.reqs)
+        g, core = self.screen("plain", ["y"])
+        asyncio.run(g.line_in("n"))
+        self.assertIn("MOV 3 drop", core.reqs)
+        g, core = self.screen("plain")
+        asyncio.run(g.line_in("y"))
+        self.assertIn("MOV 3 take", core.reqs)
+        self.assertIn("Type Y to accept, or N to decline.", g.full_prompt())
 
 
 if __name__ == "__main__":

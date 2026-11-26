@@ -7,9 +7,10 @@ are numbered 1-32 in the standard way; each player sees the board from
 their own side (Black, seat 0, has it turned round), the numbers stay.
 """
 import re
+import textwrap
 
-from ..telnet import (A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_TEXT, A_YELLOW, COLS, ROWS, AnsiGame, Canvas,
-                      GameBase, PlainGame, clock_text, fmt_secs, rule, status_bar, title_bar, turn_text, wrap)
+from ..telnet import (A_BORDER, A_DIM, A_RED, A_TEXT, A_YELLOW, AnsiGame, COLS, Canvas, GameBase, PlainGame, ROWS,
+                      or_list, title_bar)
 from ..telnet import box, describe_event as describe_common
 from ..board import Canvas as Picture
 from ..web import a, board_html, esc, make_gif
@@ -319,23 +320,8 @@ A_LIGHT = "0;30;47"
 A_PIECE = ("0;30;", "0;1;37;")          # per seat; the square's background is added
 A_MARK = "0;1;33;"
 A_NUM = "0;30;"
-CK_HELP = [
-    "Arrow keys   move the cursor over the dark squares",
-    "Enter/Space  pick up a piece that can move, then",
-    "             put it down on a marked square",
-    "Mouse        click a piece, then where it goes",
-    "U  undo a step            E  end the turn",
-    "D  offer a draw           A/N  accept/decline one",
-    "T  talk                   R  resign (asks first)",
-    "Esc  back to the menu (the game goes on)",
-    "",
-    "Captures are compulsory, and a jump goes on while",
-    "the piece can jump again. Typed: 11-15, 15x22,",
-    "undo, end, draw, accept, reject, say <text>.",
-]
 STEP_RE = re.compile(r"^\d{1,2}([-x]\d{1,2})+\Z")
-WORDS = {"undo": "undo", "und": "undo", "end": "end", "done": "end", "draw": "draw", "accept": "accept",
-         "reject": "reject", "decline": "reject"}
+WORDS = {"undo": "undo", "end": "end", "draw": "draw"}
 
 
 def ck_glyphs(mode):
@@ -351,7 +337,29 @@ def ck_glyphs(mode):
 class CkBase(GameBase):
     """Checkers, shared by the full screen and the plain screen."""
 
+    HELP_MOVING = ["The arrows move over the dark squares. Enter picks up a piece,",
+                   "and Enter on a marked square moves it there. Esc puts it back.",
+                   "A jump goes on while the piece can jump again. When your move is",
+                   "complete, Enter ends your turn."]
+    HELP_KEYS = ["D offers your opponent a draw.",
+                 "U takes back your last step, and E ends your turn."]
+    HELP_COMMANDS = ["Press / to type one. /11-15 moves a piece, and /15x22 jumps.",
+                     "/draw, /undo and /end do what their keys do."]
+    HELP_REFERENCE = ["The squares",
+                      "The dark squares are numbered 1 to 32, as in the usual diagrams.",
+                      "Brackets mark the square the last piece moved to and the squares",
+                      "it jumped.",
+                      "",
+                      "The rules",
+                      "Captures are compulsory. A man that reaches the far row is crowned",
+                      "a king, and a king moves both ways. When nobody captures or moves",
+                      "a man for too many turns, the game is a draw."]
+
     BACKLOG = 16
+    GAME = NAME
+    MOVE_EXAMPLE = "/11-15"
+    COMMANDS = {"draw": "/draw offers your opponent a draw.", "undo": "/undo takes back your last step.",
+                "end": "/end ends your turn."}
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
@@ -386,6 +394,42 @@ class CkBase(GameBase):
     def targets(self, frm):
         return [(t, m) for f, t, m in self.steps() if f == frm]
 
+    def offer(self):
+        """A draw offer waiting for this player's answer (docs/design.md, Dialogs)."""
+        v = self.v
+        if not (v and v.get("rows")) or self.phase() != "draw" or v["offer"] is None:
+            return None
+        by = self.who(self.name(v["offer"]))
+        return (("draw", v["offer"]), "Draw offer", [
+            "%s offers a draw." % by, "If you accept, the game ends as a draw.", "If you decline, the game goes on."],
+            False, "accept", "reject", "%s offers a draw. Press Enter to answer." % by)
+
+    last_to, jumped = 0, ()     # the square the last piece moved to, and the squares it jumped
+
+    def last_move(self, text):
+        p = text.split()
+        k = p[0]
+        if k == "STEP" and len(p) == 4:
+            self.last_to, self.jumped, self.jump_path = int(p[3]), (), None
+            return "%s moved %s-%s." % (self.actor(p[1]), p[2], p[3])
+        if k == "JUMP" and len(p) == 5:
+            path = getattr(self, "jump_path", None)
+            if path and path[0] == p[1] and path[-1] == p[2]:
+                path.append(p[3])
+                self.jumped = tuple(self.jumped) + (int(p[4]),)
+            else:
+                path = self.jump_path = [p[1], p[2], p[3]]
+                self.jumped = (int(p[4]),)
+            self.last_to = int(p[3])
+            return "%s jumped %s." % (self.actor(p[1]), "x".join(path[1:]))
+        if k == "DRAW" and len(p) == 2:
+            return "%s offered a draw." % self.actor(p[1])
+        if k == "ACCEPT" and len(p) == 2:
+            return "%s accepted the draw." % self.actor(p[1])
+        if k == "REJECT" and len(p) == 2:
+            return "%s declined the draw." % self.actor(p[1])
+        return None
+
     def can_offer(self):
         v = self.v
         return (self.me >= 0 and self.playing() and v["phase"] in ("move", "done") and not v["path"]
@@ -404,47 +448,15 @@ class CkBase(GameBase):
         n = self.v["n"]
         return sq(n - 1 - dr, n - 1 - dc, n) if self.me == 0 else sq(dr, dc, n)
 
-    def counts_text(self, seat):
-        m, k = self.v["counts"][2 * seat], self.v["counts"][2 * seat + 1]
-        return "%s: %d m%sn, %d king%s" % (SIDES[seat], m, "a" if m == 1 else "e", k, "" if k == 1 else "s")
-
-    def seat_label(self, seat):
-        empty = seat >= len(self.names) or self.names[seat] == "-"
-        return ("(empty seat)" if empty else self.names[seat]) + (" (you)" if seat == self.me else ""), empty
-
-    def state_text(self):
-        """-> (whose turn and what to do, attribute)."""
-        v = self.v
-        if not v["rows"]:
-            return "Waiting for an opponent", A_YELLOW
-        if self.over or v["phase"] == "over":
-            return self.over or v["status"] or "Game over", A_YELLOW
-        t, mine = v["turn"], self.my_turn()
-        if v["phase"] == "draw":
-            if mine:
-                return "%s offers a draw: accept?" % self.name(v["offer"]), A_YELLOW
-            return "%s to answer the draw offer" % self.name(t), A_TEXT
-        if mine:
-            if v["phase"] == "done":
-                return "Your move: turn complete", A_YELLOW
-            if v["path"]:
-                return "Keep jumping from %d" % v["path"][-1], A_YELLOW
-            if any("x" in m for m in v["moves"]):
-                return "Your move: you must capture", A_YELLOW
-            return "Your move", A_YELLOW
-        if v["path"]:
-            return "%s is jumping" % self.name(t), A_TEXT
-        return "%s to move" % self.name(t), A_TEXT
-
     def side_note(self):
         """A draw offer, or how near the move limit is ('' if neither)."""
         v = self.v
         if not v["rows"] or not self.playing():
             return ""
         if v["offer"] is not None and v["phase"] != "draw":
-            return "%s offered a draw" % self.name(v["offer"])
+            return "%s offered a draw." % self.actor(v["offer"])
         if v["limit"] and v["quiet"] >= 10:
-            return "No capture or man move: %d/%d" % (v["quiet"], v["limit"])
+            return "No capture or man move has come for %d of %d turns." % (v["quiet"], v["limit"])
         return ""
 
     # ---- the board ----------------------------------------------------------
@@ -479,23 +491,22 @@ class CkBase(GameBase):
                     cv.put(x, y, " %s " % G["mark"], A_MARK + bg)
                 else:
                     cv.put(x, y, "     ", A_NUM + bg)
-                num = "%s%d%s" % (G["sel"][0], s, G["sel"][1]) if s == sel else str(s)
-                cv.put(x, y + 1, num.center(5), (A_MARK if s in froms or s in marks else A_NUM) + bg)
+                last = s == self.last_to or s in self.jumped        # the last move, on the board
+                num = "%s%d%s" % (G["sel"][0], s, G["sel"][1]) if s == sel else "[%d]" % s if last else str(s)
+                cv.put(x, y + 1, num.center(5), (A_MARK if s in froms or s in marks or last else A_NUM) + bg)
                 cv.hot_area(x, y, 5, 2, ("sq", s))
 
     # ---- game words ---------------------------------------------------------
     async def act(self, word):
         """A step, undo, end, draw, accept or reject -> an error text or None."""
-        if self.me < 0:
-            return "You are watching this table."
-        if not self.playing():
-            return self.over or "The game has not started yet."
+        if self.me < 0 or not self.playing():
+            return self.not_yours()
         if word == "draw":
             if not self.can_offer():
                 return "You can offer a draw when no turn is half played and no offer is waiting."
             return await self.move("draw")
         if not self.my_turn():
-            return "It is %s's turn." % self.name(self.v["turn"])
+            return self.not_yours()
         if word == "undo":
             return await self.staged("UND", "take that back")
         if word == "end":
@@ -515,9 +526,8 @@ class AnsiCheckers(CkBase, AnsiGame):
     """Checkers, full screen: the board on the left (a cursor, the pieces that can move, a picked piece
     and where it can go), players, whose turn, the clock and the log on the right."""
 
-    HOTKEYS = "uedanrt?"
+    HOTKEYS = "uedrt?"
     LOG_TOP, LOG_ROWS = 12, 7
-    TITLE, HELP = "Checkers", CK_HELP
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
@@ -544,9 +554,8 @@ class AnsiCheckers(CkBase, AnsiGame):
     def compose(self):
         cv = Canvas()
         g, v = self.g, self.v
-        right = "watching" if self.me < 0 else "you play %s %s" % (SIDES[self.me].lower(), self.ck["man"][self.me])
-        title_bar(cv, g, "Checkers %s table %s" % (g["v"], self.tid), right)
-        showcur = self.me >= 0 and self.playing()
+        title_bar(cv, g, self.title_text())
+        showcur = self.me >= 0 and self.playing() and self.lit()
         if v["rows"]:
             self.draw_board(cv, self.cur if showcur else 0, self.sel if showcur else 0)
         else:
@@ -555,29 +564,28 @@ class AnsiCheckers(CkBase, AnsiGame):
         self.draw_panel(cv)
         steps = self.steps()
         if steps:
-            line = "Moves: " + " ".join(m for _, _, m in steps)
+            line = "You can play %s." % ", ".join(m for _, _, m in steps)
             cv.put(1, 20, line if len(line) <= COLS - 2 else line[:COLS - 5] + "...", A_DIM)
         elif v["path"] and self.playing():
-            cv.put(1, 20, ("Jumped: " + "x".join(str(s) for s in v["path"]))[:COLS - 2], A_DIM)
-        text, attr = (self.msg, self.msg_attr) if self.msg else self.hint()
+            cv.put(1, 20, ("The piece has jumped %s." % "x".join(str(s) for s in v["path"]))[:COLS - 2], A_DIM)
+        text, attr = self.sentence(self.hint)
         cv.put(1, ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
         ph = self.phase()
-        tail = [("T", "talk"), ("R", "resign"), ("?", "help"), ("Esc", "menu")]
-        draw = [("D", "draw")] if self.can_offer() else []
-        if self.buf:
-            keys = [("Enter", "send"), ("Esc", "cancel"), ("Backspace", "erase")]
-        elif ph == "draw":
-            keys = [("A", "accept"), ("N", "decline")] + tail
+        draw = [("d", "draw", "draw")] if self.can_offer() else []
+        undo = [("u", "undo", "undo")] if v["path"] else []
+        if ph == "draw":
+            keys = self.keys("look", "answer")
         elif ph == "done":
-            keys = [("E", "end turn"), ("U", "undo")] + tail
+            keys = self.keys("look", "end turn", [("u", "undo", "undo"), ("e", "end turn", "end")])
         elif ph == "move":
-            keys = [("Arrows", "move"), ("Enter", "pick")] + ([("U", "undo")] if v["path"] else draw) + tail
+            keys = self.keys("move", "place" if self.sel else "pick", undo + draw,
+                             cancel=bool(self.sel) and not v["path"])
         elif self.me >= 0 and self.playing():
-            keys = [("Arrows", "look")] + draw + tail
+            keys = self.keys("look", None, draw)
         else:
-            keys = [("T", "talk"), ("?", "help"), ("Esc", "menu")]
-        status_bar(cv, keys)
+            keys = self.keys()
+        self.keys_line(cv, keys)
         return cv
 
     def draw_empty(self, cv):
@@ -592,71 +600,46 @@ class AnsiCheckers(CkBase, AnsiGame):
                 cv.put(BX + 1 + 5 * c, BY + 1 + y, "     ", "0;30;42" if (y // 2 + c) % 2 else A_LIGHT)
 
     def draw_panel(self, cv):
-        g, v = self.g, self.v
+        v = self.v
         px = BX + 5 * 8 + 3
-        pw = COLS - 1 - px
-        inner = pw - 4
-        box(cv, g, px, 1, pw, 19, A_BORDER, "Players", tattr=A_HEAD)
-        for i, seat in enumerate((self.top_seat(), 1 - self.top_seat())):
-            y = 2 + 2 * i
-            tomove = self.playing() and v["turn"] == seat
-            label, empty = self.seat_label(seat)
-            cv.put(px + 2, y, g["ptr"] if tomove else " ", A_YELLOW)
-            cv.put(px + 4, y, self.ck["man"][seat], A_PIECE[seat] + "42")
-            cv.put(px + 8, y, label[:inner - 6], A_BRIGHT if tomove else A_DIM if empty else A_TEXT)
-            if v["rows"]:
-                cv.put(px + 4, y + 1, self.counts_text(seat)[:inner - 2], A_DIM)
-        rule(cv, g, px, 6, pw, A_BORDER)
-        text, attr = self.state_text()
-        for i, line in enumerate(wrap(text, inner)[:2]):
-            cv.put(px + 2, 7 + i, line, attr)
+        players = []
+        for seat in (self.top_seat(), 1 - self.top_seat()):
+            n = v["counts"][2 * seat] + v["counts"][2 * seat + 1] if v["rows"] else 0
+            players.append((seat, (self.ck["man"][seat], A_PIECE[seat] + "42"), "%d piece%s" % (n, "" if n == 1 else "s")))
         note = self.side_note()
-        if note:
-            cv.put(px + 2, 9, note[:inner], A_TEXT)
-        c = self.clock()
-        if c:
-            seat, left, limit = c
-            clock = "Clock: %s left of %s" % (fmt_secs(left), turn_text(limit))
-            if len(clock) > inner:
-                clock = "Clock: %s left" % fmt_secs(left)
-            cv.put(px + 2, 10, clock[:inner], A_RED if seat == self.me and left < 60 else A_TEXT)
-        elif self.turn_secs and not self.over:
-            cv.put(px + 2, 10, ("Time per turn: %s" % turn_text(self.turn_secs))[:inner], A_DIM)
-        rule(cv, g, px, 11, pw, A_BORDER, "Log", tattr=A_HEAD)
-        self.draw_log(cv, px + 2, inner)
+        self.draw_panel_parts(cv, px, 1, COLS - 1 - px, players, [note] if note else [])
 
     def hint(self):
         v = self.v
         if not v["rows"]:
-            return ("Table %s starts when someone joins: telnet, the web (port 6500) or another client."
-                    % self.tid, A_DIM)
+            return self.waiting_hint()
         if self.over or v["phase"] == "over":
-            return "%s. Esc goes back to the menu." % (self.over or "Game over"), A_YELLOW
+            return self.over_hint(v["status"] or "Game over")
         if self.me < 0:
-            return "Watching. T talks to the table, Esc goes back to the menu.", A_DIM
+            return self.watch_hint()
         ph = self.phase()
         if not ph:
             if v["phase"] == "draw" and v["offer"] == self.me:
-                return "Waiting for %s to answer your draw offer." % self.name(v["turn"]), A_DIM
-            return "Waiting for %s to move. Leaving never resigns." % self.name(v["turn"]), A_DIM
+                return "You offered a draw. Waiting for %s." % self.who(self.name(v["turn"])), A_DIM
+            return self.their_hint(v["turn"])
         if ph == "draw":
-            return "%s offers a draw: %s accepts (the game ends drawn), N declines." % (
-                self.name(v["offer"]), self.kn("A")), A_TEXT
+            return self.offer()[6], A_YELLOW
         if ph == "done":
-            return "Turn complete: %s (or Enter) ends it, U takes back the last step." % self.kn("E"), A_TEXT
+            return "Your move is complete. Press Enter to end your turn, or %s to undo a step." % self.kn("u"), A_TEXT
         s = self.cur
+        must = any("x" in m for _, _, m in self.steps())
+        if v["path"]:
+            return "You must jump. Press Enter on a marked square.", A_TEXT
         if self.sel:
-            t = self.targets(self.sel)
-            if s in [x for x, _ in t]:
-                tok = dict(t)[s]
-                return "Enter plays %s.%s" % (tok, "" if v["path"] else " Esc puts the piece back."), A_TEXT
-            return "The piece on %d can go to %s: put the cursor there, press Enter." % (
-                self.sel, ", ".join(str(x) for x, _ in t)), A_TEXT
+            return "Press Enter on a marked square to move there, or Esc to put it back.", A_TEXT
+        draw = ", or %s to offer a draw" % self.kn("d", "draw") if self.can_offer() else ""
         if s in self.froms():
-            return "%d: Enter picks up this piece; it can go to %s." % (
-                s, ", ".join(str(x) for x, _ in self.targets(s))), A_TEXT
-        must = " (a capture is compulsory)" if any("x" in m for _, _, m in self.steps()) else ""
-        return "Pieces that can move%s: %s." % (must, ", ".join(str(f) for f in self.froms())), A_DIM
+            piece = "king" if (v["cells"][s - 1] if s <= len(v["cells"]) else "x").isupper() else "man"
+            return "%s Press Enter to pick up the %s on %d%s." % (
+                "You must jump." if must else "Your turn.", piece, s, draw), A_TEXT
+        if must:
+            return "You must jump. Press Enter on a piece that can jump.", A_TEXT
+        return "Your turn. You can move a piece from %s%s." % (or_list(str(f) for f in self.froms()), draw), A_DIM
 
     def cursor_at(self):
         if self.me >= 0 and self.playing():
@@ -688,21 +671,17 @@ class AnsiCheckers(CkBase, AnsiGame):
             self.cur = s
 
     def on_escape(self):
-        if self.sel and not self.v["path"]:
+        if self.v["path"] and self.my_turn():
+            return self.say("The jump must go on. Press Enter on a marked square.")
+        if self.sel:
             self.sel = 0
             return None
         return "menu"
 
     async def on_enter(self):
-        if self.me < 0:
-            return self.say("You are watching this table.")
-        if not self.playing():
-            return self.say(self.over or "The game has not started yet.")
         ph = self.phase()
         if not ph:
-            return self.say("It is %s's turn." % self.name(self.v["turn"]))
-        if ph == "draw":
-            return self.say("A draw is offered: %s accepts, N declines." % self.kn("A"))
+            return self.say(self.not_yours())
         if ph == "done":
             return await self.play("end")
         return await self.pick()
@@ -725,8 +704,7 @@ class AnsiCheckers(CkBase, AnsiGame):
         if self.sel:
             return self.say("The piece on %d can't go to %d." % (self.sel, s), A_RED)
         if any("x" in m for _, _, m in self.steps()):
-            return self.say("A capture is compulsory: pieces that can jump: %s." % ", ".join(
-                str(f) for f in self.froms()), A_RED)
+            return self.say("You must jump. A piece on %s can jump." % or_list(str(f) for f in self.froms()), A_RED)
         return self.say("No piece of yours can move from %d now." % s, A_RED)
 
     async def play(self, word):
@@ -735,9 +713,8 @@ class AnsiCheckers(CkBase, AnsiGame):
             self.say(err, A_RED)
         self.snap(stepped=True)
 
-    async def typed_move(self, word):
+    def typed_reset(self):
         self.sel = 0
-        await self.play(word)
 
     async def hotkey(self, k):
         ph = self.phase()
@@ -749,23 +726,12 @@ class AnsiCheckers(CkBase, AnsiGame):
             return await self.play("undo")
         if k == "e":
             if ph != "done":
-                return self.say("Finish the move first." if ph == "move" else "It is not your move.")
+                return self.say("Finish your move first." if ph == "move" else self.not_yours())
             return await self.play("end")
         if k == "d":
             if not self.can_offer():
                 return self.say("You can offer a draw when no turn is half played and no offer is waiting.")
-            if await self.confirm("Draw", ["Offer your opponent a draw? If they accept,",
-                                           "the game ends drawn."]):
-                return await self.play("draw")
-            return None
-        if k == "a":
-            if ph != "draw":
-                return self.say("There is no draw offer to accept.")
-            return await self.play("accept")
-        if k == "n":
-            if ph != "draw":
-                return self.say("There is no draw offer to decline.")
-            return await self.play("reject")
+            return await self.play("draw")
         return None
 
 
@@ -774,69 +740,41 @@ class PlainCheckers(CkBase, PlainGame):
 
     BOARD_KINDS = ("STEP", "JUMP", "CROWN", "UNDO", "DRAW", "ACCEPT", "REJECT", "TURN", "JOIN", "LEAVE", "START",
                    "END")
-    HELP_TEXT = (" A step like 11-15 moves a piece; a jump is like 15x22 (or 15x22x31 for\n"
-                 " several). Captures are compulsory and a jump goes on while it can.\n"
-                 " undo takes a step back, end finishes the turn. draw offers a draw;\n"
-                 " accept or reject answers one. say <text> talks to the table; resign\n"
-                 " gives up (it asks first). menu goes back; leaving never resigns.")
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
         self.ck = ck_glyphs("plain")
 
     def lines(self):
-        v, me, G = self.v, self.me, self.ck
-        you = "you are watching" if me < 0 else "you play %s %s" % (SIDES[me].lower(), G["man"][me])
-        out = ["", "== Checkers, table %s: %s ==" % (self.tid, you)]
+        v, G = self.v, self.ck
+        out = [""] + self.plain_header()
         if not v["rows"]:
-            return out + ["", "Waiting for an opponent.",
-                          "The game starts when someone joins table %s from telnet, the web" % self.tid,
-                          "(port 6500) or another client. Type menu to go back; the table stays open."]
+            return out + self.plain_waiting()
         cv = Canvas()
         self.draw_board(cv)
-        side = []
-        for seat in (self.top_seat(), 1 - self.top_seat()):
-            label, _ = self.seat_label(seat)
-            mark = ">" if self.playing() and v["turn"] == seat else " "
-            side += ["%s %s %s" % (mark, G["man"][seat], label), "    " + self.counts_text(seat)]
         x = BX + 5 * 8 + 4
-        side += [""] + wrap(self.state_text()[0], COLS - 1 - x)
+        players = []
+        for seat in (self.top_seat(), 1 - self.top_seat()):
+            n = v["counts"][2 * seat] + v["counts"][2 * seat + 1]
+            players.append((seat, G["man"][seat], "%d" % n))
         note = self.side_note()
-        if note:
-            side.append(note)
-        side += ["", "Men %s %s, kings %s %s." % (G["man"][0], G["man"][1], G["king"][0], G["king"][1])]
-        ph = self.phase()
-        if ph == "draw":
-            side.append("Type accept or reject.")
-        elif ph == "done":
-            side += ["Type end to finish the turn,", "or undo."]
-        elif ph == "move" and self.steps():
-            side.append("Type a step like %s%s" % (self.steps()[0][2], "," if self.v["path"] else "."))
-            if self.v["path"]:
-                side.append("or undo.")
-        if self.can_offer():
-            side.append("draw offers a draw.")
-        side.append("say <text>, resign, menu, help")
-        for i, l in enumerate(side):
+        facts = ([note] if note else []) + ["Men are %s and %s, and kings are %s and %s." % (
+            G["man"][0], G["man"][1], G["king"][0], G["king"][1])]
+        for i, l in enumerate(self.side_text(players, facts, COLS - 1 - x)):
             cv.put(x, BY + i, l[:COLS - 1 - x])
         out += cv.lines()[BY:BY + 18]
         if self.steps():
-            out += [" " + l for l in wrap("Moves: " + " ".join(m for _, _, m in self.steps()), 78)]
-        if not self.over:
-            out.append(" " + clock_text(v, self.names))
-        for l in self.log[-4:]:
-            out.append(" " + l[:78])
-        return out
+            out += [" " + l for l in textwrap.wrap("You can play %s." % ", ".join(m for _, _, m in self.steps()), 78)]
+        return out + self.plain_log()
 
-    def prompt(self):
+    def turn_prompt(self):
         ph = self.phase()
-        if ph == "draw":
-            return "Accept or reject the draw > "
         if ph == "done":
-            return "Turn complete: end or undo > "
+            return "Your move is complete. Type /end, or /undo."
         if ph == "move" and self.steps():
-            return "%s (like %s) > " % ("Keep jumping" if self.v["path"] else "Your move", self.steps()[0][2])
-        return "> "
-
+            if self.v["path"]:
+                return "You must jump. Type /%s." % self.steps()[0][2]
+            return "Your turn. Type a move such as /%s." % self.steps()[0][2]
+        return "Your turn."
 
 AnsiScreen, PlainScreen = AnsiCheckers, PlainCheckers

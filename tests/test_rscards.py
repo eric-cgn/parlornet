@@ -295,8 +295,8 @@ class Service(Stack):
         for send, wait in ((b"new\r\n", "Name you want"), (b"tty\r\n", "Choose a password"),
                            (b"tty-Pass-word\r\n", "Type it again"), (b"tty-Pass-word\r\n", "Press Enter"),
                            (b"\r\n", "Your tables"),
-                           (b"new reversi 5m\r\n", "Waiting for an opponent"), (b"bot\r\n", "Your move (like"),
-                           (b"d3\r\n", "tty plays d3")):
+                           (b"open reversi 5m\r\n", "Waiting for a second player"),
+                           (b"/invite bot\r\n", "Your turn. Type a square such as"), (b"/d3\r\n", "tty plays d3")):
             s.sendall(send)
             self.read_until(s, wait, got, 20)
         self.assertNotIn(b"\xff", got[0])

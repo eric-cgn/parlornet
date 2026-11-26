@@ -56,6 +56,11 @@ def clean(value):
 MOVE_KEYS_PREF = "movekeys"
 MOVE_KEYS = ("arrows", "ijkl", "esdf", "wasd", "hjkl")
 
+# Whether telnet has offered the practice game (adapters/telnet_practice.py) at a sign-in, kept with PRF so
+# the question comes once: "new" until it has been asked, then "asked".
+PRACTICE_PREF = "practice"
+PRACTICE_STATES = ("new", "asked")
+
 # Which side a Backgammon player's home board is drawn on (points 1-6 at the bottom right, or the mirror image
 # with them at the bottom left), kept with PRF by the telnet and web extensions (Play shares the web's).
 # Only the drawing changes: the moves and point numbers stay the same. A missing value is "right".

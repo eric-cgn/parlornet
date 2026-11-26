@@ -9,23 +9,31 @@ TTYPE), or from a menu:
     ansi   ANSI color, ASCII only (VT100 class)
     plain  no escape codes; line by line, moves are typed
 
-The ANSI modes are full screen: a menu and a board driven by the arrow keys,
-Enter and single keys listed in a status bar. Terminals that report the mouse
+The ANSI modes are full screen: the lobby and a board driven by the arrow keys,
+Enter and the shortcut letters listed on the keys line. Terminals that report the mouse
 (xterm and friends: DECSET 1000 with SGR 1006 coordinates) can click too. Screens are composed as a grid
 of cells and only the cells that changed are sent, so a cursor move or a
 clock tick costs a few bytes (usable at 2400 baud). No line feed is sent and
 the last cell of the screen is never written, so the screen never scrolls.
-Typed commands (join 1, say hi, d3 ...) still work: a hotkey letter followed
-at once by more typing counts as typing.
+
+Every screen has two modes. In game mode every key is a shortcut and nothing
+types. The / key opens command mode on row 22, where everything types: Enter
+runs the line, Esc clears it, Up and Down recall earlier lines, and the lit
+keys go dark. A line runs on the server with CMD (docs/protocol.md, Commands):
+the shared commands (/say, /invite, /time ...) and typed moves (/d3) get the
+server's words, and a command that asks first opens its dialog with them.
+Telnet keeps only its own screens (/help, /leave, /practice ...). T or Tab opens a
+table's chat screen, where a line is said to the table. ? opens help, and Esc
+cancels what is picked or open, and with nothing to cancel goes back to the
+lobby.
 
 Movement keys: terminals that send no arrow keys (or lose them) can move the
-cursor with letters instead, a choice of the session (O in the menu, or K at
+cursor with letters instead, a choice of the session (/keys in the lobby, or K at
 the login's last prompt): IJKL, ESDF, WASD or HJKL (vi). The arrows work in
-every choice. On an empty line the four letters, either case, move the cursor
-in the menu, the pickers and every board, and never act as hotkeys. `:` opens
-the command line: there every letter types, and `:` then a hotkey letter does
-what that key does (:d for D in WASD). The choice is kept with the player
-(the core's per-extension data, PRF) and comes back at the next sign-in.
+every choice. The four letters, either case, move the cursor in the lobby,
+the pickers and every board. A shortcut on one of them is given as its
+command (/double for D under WASD). The choice is kept with the player (the
+core's per-extension data, PRF) and comes back at the next sign-in.
 
 It starts by asking for the terminal type. For a few seconds one line says
 that Enter opens the display menu. Without Enter it goes on in the mode the
@@ -55,12 +63,12 @@ from . import declare
 from .common import (framed_motd, LOGIN_SECS, LOGIN_TOTAL_SECS, CLAIM_LEN, CoreClient, CoreError, Gate, claim_text,
                      keepalive, NeedAuth,
                      no_wait, describe_invite_event, err_text, group_games, parse_games, parse_invites,
-                     parse_reversi_view, parse_players, parse_tables, peer_addr, MOVE_KEYS_PREF, pending_invites,
-                     describe_integrity_event, parse_profile, parse_turns,
+                     parse_reversi_view, parse_players, parse_tables, peer_addr, MOVE_KEYS_PREF, PRACTICE_PREF,
+                     PRACTICE_STATES,
+                     describe_integrity_event, parse_turns,
                      turn_sentence, turn_time)
-from .common import SCORES_NOTE, parse_top, score_text
 from .common import CUT_ENDS, fit, parse_client, parse_clients
-from .chatcmd import note_lines, time_text
+from .chatcmd import note_lines
 from . import botflag
 from . import games
 from .webstyle import TAGLINE
@@ -75,7 +83,8 @@ PLAYERS_RE = re.compile(r"^(?:players=)?(\d{1,2})p\Z", re.I)    # a seat count t
 MAX_SESSIONS = 60
 IDLE_SECS = 1800
 COLS, ROWS = 80, 24
-HOTKEY_WAIT = 0.3       # a hotkey letter followed this quickly by more typing is typing
+ENTER_WAIT = 0.3        # after a Y or N answer, an Enter this soon is one typed out of habit
+PRACTICE_LINE = "Type /practice for a short lesson on these keys."
 POLL_SECS = 2.0         # game screen: ask the core for new events this often
 MENU_SECS = 15.0        # menu: reload the table list this often
 DETECT_SECS = 3.0       # the start: how long telnet waits for the terminal type, and for Enter to open the menu
@@ -94,10 +103,9 @@ TURNS = [("5m", "5 minutes"), ("15m", "15 minutes"), ("1h", "1 hour"), ("1d", "1
 TURN_DEFAULT = 3
 MOUSE_ON = "\x1b[?1000h\x1b[?1006h"     # report clicks, with SGR (extended) coordinates
 MOUSE_OFF = "\x1b[?1000l\x1b[?1006l"
-MENU_WORDS = ("menu", "m", "leave", "back", "quit", "q", "exit")
-BOT_HINT = "Type bot for a bot"      # in the waiting box: the typed command bot invites one (docs/bot.md)
 QUIT_WORDS = ("quit", "q", "bye", "exit", "logoff", "logout")
-SORRY = "Something went wrong; you are back at the menu."
+SORRY = "Something went wrong. You are back in the lobby."
+PLAIN_PRACTICE = "The practice game teaches the keys of the full screen, so plain mode doesn't have it."
 LINE_GONE = (EOFError, ConnectionError, TimeoutError, CoreError, OSError)   # the line or the core went away
 # Movement keys: the session's choice -> (its name, the letters for up, down, left and right). The arrows
 # work in every choice; "arrows" (no letters) is the default.
@@ -105,6 +113,11 @@ MOVE_SETS = {"arrows": ("Arrows only", ""), "ijkl": ("IJKL", "ikjl"), "esdf": ("
              "wasd": ("WASD", "wsad"), "hjkl": ("HJKL (vi)", "kjhl")}
 MOVE_ORDER = ["arrows", "ijkl", "esdf", "wasd", "hjkl"]
 DIRECTIONS = ("UP", "DOWN", "LEFT", "RIGHT")
+# The shortcut letters and their one meaning in every game (docs/design.md, One meaning per letter). A game
+# uses the ones it needs; any other letter does nothing at a table. Y and N answer dialogs, and only dialogs.
+SHORTCUTS = {"b": "split", "c": "check", "d": "double or draw", "e": "end the turn", "g": "random",
+             "h": "home board", "m": "new set", "o": "sort", "p": "pass", "r": "resign", "t": "chat",
+             "u": "undo", "v": "letter values", "x": "exchange", "z": "reset"}
 HELP_ROWS = 17          # the most lines a help box holds (80x24, with its frame, foot and shadow)
 # Terminal types known to send ANSI arrow keys (ESC [ A ...). For no type, an unknown one or a VT52-class
 # one the login offers letter keys for moving.
@@ -374,6 +387,8 @@ class TelnetIO:
             self.keys.append("BS")
         elif b == 12:
             self.keys.append("REDRAW")
+        elif b == 9:
+            self.keys.append("TAB")
         elif 32 <= b < 127:
             self.keys.append(chr(b))
         self.cr = False
@@ -487,6 +502,50 @@ def connected_text(secs):
     then 1h 5m from an hour on."""
     m = max(0, int(secs)) // 60
     return "%dh %dm" % (m // 60, m % 60) if m >= 60 else "%dm" % m
+
+
+def left_words(secs):
+    """Time left on a clock, as the sentences say it: 4:12 under an hour, then 1h 5m, then 2d 3h."""
+    s = max(0, int(secs))
+    if s >= 86400:
+        return "%dd %dh" % (s // 86400, s % 86400 // 3600)
+    if s >= 3600:
+        return "%dh %dm" % (s // 3600, s % 3600 // 60)
+    return "%d:%02d" % (s // 60, s % 60)
+
+
+def turn_words(secs):
+    """The time a turn has, in words: 5 minutes, 1 hour, 3 days."""
+    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
+        if secs >= size and secs % size == 0:
+            n = secs // size
+            return "%d %s%s" % (n, unit, "" if n == 1 else "s")
+    return left_words(secs)
+
+
+def and_list(items):
+    """ann; ann and bob; ann, bob and cy."""
+    items = list(items)
+    if len(items) < 2:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def or_list(items):
+    """13; 13 or 24; 6, 8 or 13."""
+    items = list(items)
+    return ", ".join(items[:-1]) + " or " + items[-1] if len(items) > 1 else "".join(items)
+
+
+def sentence(text):
+    """A reason from the server, such as "not your turn", as a sentence: "Not your turn." """
+    text = (text or "").strip().rstrip(".")
+    return (text[:1].upper() + text[1:] + ".") if text else ""
+
+
+def unknown_command(word):
+    """The answer to a command that does not exist, the same in every mode."""
+    return "There is no command called /%s. Type /help for help." % word.lstrip("/:")[:20]
 
 
 def clock_text(v, names):
@@ -700,9 +759,12 @@ def title_bar(cv, g, text, right=""):
     redrawing it costs only the few cells that change."""
     cv.put(0, 0, " " * COLS, A_TITLE)
     cv.put(1, 0, "ParlorNet", A_TITLE_HI)
+    on = DRAWING_CLOCK.get()
+    room = COLS - 1 - 13 - (len(on) + 2 if on else 0) - (len(right) + 3 if right else 0)
+    if len(text) > room:            # long names: cut at a word, so the clock keeps its place
+        text = text[:room].rsplit(" ", 1)[0].rstrip(",") if " " in text[:room] else text[:room]
     cv.put(11, 0, g["v"] + " " + text, A_TITLE)
     end = COLS - 1          # the right-hand text ends just before this column
-    on = DRAWING_CLOCK.get()
     if on:
         cv.put(COLS - 1 - len(on), 0, on, A_TITLE)
         end -= len(on) + 3
@@ -720,28 +782,29 @@ DRAWING_MOVES = contextvars.ContextVar("parlornet_moves", default="")
 DRAWING_CLOCK = contextvars.ContextVar("parlornet_clock", default="")
 
 
-def status_bar(cv, items):
-    """The bottom line: keys and what they do. 79 columns: the last cell of
-    the screen is never written, so nothing can scroll. A click on an item
-    counts as its key. With movement letters, "Arrows" shows the letters and
-    a hotkey that is one of them shows as :x (typed : then the letter)."""
+def status_bar(cv, items, lit=True):
+    """The keys line: keys and what they do. 79 columns: the last cell of the screen is never written, so
+    nothing can scroll. In game mode (lit) the key names are lit and a click on an item counts as its key.
+    In command mode nothing is lit and nothing can be clicked. With movement letters, "Arrows" shows the
+    letters. An item whose key is a command (/double) stands for a shortcut letter that moves the cursor:
+    a click on it gives the shortcut."""
     letters = MOVE_SETS.get(DRAWING_MOVES.get(), ("", ""))[1]
     cv.put(0, ROWS - 1, " " * (COLS - 1), A_STATUS)
     x = 1
-    for key, label in items:
+    for item in items:
+        key, label = item[0], item[1]
         if letters and key == "Arrows":
             key = DRAWING_MOVES.get().upper()
-        elif letters and len(key) == 1 and key.lower() in letters:
-            key = ":" + key.lower()
-        if x + len(key) + 1 + len(label) > COLS - 2:
+        width = len(key) + (1 + len(label) if label else 0)
+        if x + width > COLS - 2:
             break
-        cv.put(x, ROWS - 1, key, A_KEY)
-        cv.put(x + len(key) + 1, ROWS - 1, label, A_STATUS)
-        k = STATUS_KEYS.get(key, key.lower() if len(key) == 1 else key[1] if len(key) == 2 and key[0] == ":"
-                            else None)
-        if k:
-            cv.hot_area(x, ROWS - 1, len(key) + 1 + len(label), 1, k)
-        x += len(key) + len(label) + 3
+        cv.put(x, ROWS - 1, key, A_KEY if lit else A_STATUS)
+        if label:
+            cv.put(x + len(key) + 1, ROWS - 1, label, A_STATUS)
+        k = item[2] if len(item) > 2 else STATUS_KEYS.get(key, key.lower() if len(key) == 1 else None)
+        if k and lit:
+            cv.hot_area(x, ROWS - 1, width, 1, k)
+        x += width + 2
 
 
 def popup(cv, g, title, lines, options=None, sel=0, field=None, foot=None, buttons=None):
@@ -917,12 +980,20 @@ class AnsiView:
         self.msg, self.msg_attr = "", A_YELLOW
         self.buf = ""
         self.overlay = None
+        self.hist = None        # the history line shown on the command line (Up and Down), or None
         self.last_key = time.time()
 
     def compose(self):
         raise NotImplementedError
 
+    def compose_screen(self):
+        return self.compose()
+
     def cursor_at(self):
+        return None
+
+    def cursor_spot(self):
+        """Where the terminal's cursor sits when a typing line other than the command line is open."""
         return None
 
     def say(self, text, attr=A_YELLOW):
@@ -947,65 +1018,71 @@ class AnsiView:
         m = self.move_set()
         return MOVE_SETS[m][1][DIRECTIONS.index(direction)].upper() if m else None
 
-    def kn(self, letter):
-        """How to press a hotkey, for hints: D, or :d when D is a movement letter."""
-        return ":" + letter.lower() if self.move_of(letter) else letter.upper()
+    def kn(self, letter, command=""):
+        """How to give a shortcut, after "Press Enter to ..., or": D, or "type /double" when D moves the cursor."""
+        return "type /" + command if command and self.move_of(letter) else letter.upper()
 
-    def typed_text(self):
-        """What is on the input line, without the : that opened it."""
-        return self.buf[1:] if self.buf.startswith(":") else self.buf
+    def kp(self, letter, command=""):
+        """The same, where the sentence has no Press of its own: "press E", or "type /end"."""
+        return "type /" + command if command and self.move_of(letter) else "press " + letter.upper()
 
     def keys_help(self):
-        """Lines on the movement letters for the help box ([] with the arrows only)."""
+        """Lines on the movement letters, for help ([] with the arrows only)."""
         m = self.move_set()
         if not m:
             return []
         up, down, left, right = MOVE_SETS[m][1].upper()
-        name = m.upper()
-        out = ["%s  %s up, %s left, %s down, %s right; arrows too." % (name, up, left, down, right),
-               "Text that starts with %s, %s, %s or %s: type : first." % tuple(name)]
-        taken = [c for c in name if c.lower() in self.HOTKEYS]
-        if taken:
-            names = ", ".join(taken[:-1]) + " and " + taken[-1] if len(taken) > 1 else taken[0]
-            out.append("The %s key%s: type %s." % (names, "s" if len(taken) > 1 else "",
-                                                   " or ".join(":" + c.lower() for c in taken)))
-        return out
+        return ["%s moves up, %s left, %s down and %s right, and the arrows work too." % (up, left, down, right)]
 
     async def help_box(self, title, lines, foot=None):
-        """A help box, with the movement letters first when the session has them (on a second page when
-        they do not fit). The foot, if given, goes under the last page, as when another page follows."""
+        """A help box of one page, with the movement letters first when the session has them."""
         extra = self.keys_help()
-        if extra and len(lines) + 1 + len(extra) <= HELP_ROWS:
-            lines = extra + [""] + list(lines)
-        elif extra:
-            await self.message(title, lines)
-            title, lines = "Movement keys", extra
-        await self.message(title, lines, foot)
-
-    async def char_key(self, k):
-        """A printable key: on an empty line, or right after :, a hotkey letter acts (unless more typing
-        follows at once); anything else is typed. A leading : opens the line for any text."""
-        if self.buf in ("", ":") and k.lower() in self.HOTKEYS and not await self.typing_follows():
-            self.buf = ""
-            return await self.hotkey(k.lower())
-        if len(self.buf) < 60:
-            self.buf += k
-        return None
-
-    async def run_line(self, line):
-        """Enter on a typed line: the command. After a leading :, a hotkey letter alone does what the key
-        does."""
-        if line.startswith(":"):
-            line = line[1:].strip()
-            if len(line) == 1 and line.lower() in self.HOTKEYS:
-                return await self.hotkey(line.lower())
-        return await self.command(line)
+        await self.pages(title, [(extra + [""] if extra else []) + list(lines)])
 
     async def hotkey(self, k):
         return None
 
     async def command(self, line):
         return None
+
+    def commanding(self):
+        """True while the command line is open (command mode)."""
+        return self.buf.startswith("/")
+
+    async def command_key(self, k):
+        """A key in command mode: everything types on the command line. Enter runs it, Esc clears it,
+        Backspace erases, and Up and Down recall the lines run before. ? on an empty line opens help."""
+        if k == "ESC":
+            self.buf, self.hist = "", None
+        elif k == "BS":
+            self.buf = self.buf[:-1]
+        elif k == "ENTER":
+            line, self.buf, self.hist = self.buf.strip(), "", None
+            if line != "/":
+                hist = self.s.history
+                if not hist or hist[-1] != line:
+                    hist.append(line)
+                    del hist[:-50]
+                return await self.command(line[1:].strip())
+        elif k in ("UP", "DOWN"):
+            hist = self.s.history
+            if hist:
+                i = len(hist) if self.hist is None else self.hist
+                i = max(0, i - 1) if k == "UP" else i + 1
+                self.hist = i if i < len(hist) else None
+                self.buf = hist[i] if i < len(hist) else "/"
+        elif k == "REDRAW":
+            self.s.painter.invalidate()
+        elif k == "?" and self.buf == "/":
+            self.buf = ""
+            return await self.help()
+        elif isinstance(k, str) and len(k) == 1 and len(self.buf) < 60:
+            self.buf += k
+        return None
+
+    def command_keys(self, cv, back="the game"):
+        """The keys line in command mode: nothing lit."""
+        status_bar(cv, [("Enter", "run it"), ("Esc", "back to " + back), ("Backspace", "erase")], lit=False)
 
     def hit(self, k):
         """What a ("CLICK", x, y) event landed on in the last screen sent:
@@ -1020,11 +1097,12 @@ class AnsiView:
         since = getattr(self.s, "since", None)
         clock = DRAWING_CLOCK.set(connected_text(time.time() - since) if since else "")
         try:
-            cv = self.compose()
+            cv = self.compose_screen()
         finally:
             DRAWING_MOVES.reset(token)
             DRAWING_CLOCK.reset(clock)
-        pos = (min(3 + len(self.buf), COLS - 2), ROWS - 2) if self.buf else self.cursor_at()
+        pos = (min(1 + len(self.buf), COLS - 2), ROWS - 2) if self.buf else (
+            self.cursor_spot() or self.cursor_at())
         if self.overlay:
             pos = self.overlay(cv) or pos
         return cv, pos
@@ -1048,9 +1126,9 @@ class AnsiView:
             await self.io.flush()
 
     def input_line(self, cv):
-        """Line 23: what is being typed, or else the latest message."""
+        """Row 22: the command line in command mode, or else the latest message."""
         if self.buf:
-            cv.put(1, ROWS - 2, "> " + self.buf[-(COLS - 6):], A_BRIGHT)
+            cv.put(1, ROWS - 2, self.buf[-(COLS - 3):], A_BRIGHT)
         elif self.msg:
             cv.put(1, ROWS - 2, self.msg[:COLS - 2], self.msg_attr)
 
@@ -1063,37 +1141,49 @@ class AnsiView:
             self.last_key = time.time()
         return k
 
-    async def typing_follows(self):
-        """A hotkey letter on an empty command line is the start of a typed
-        command when more typing follows at once (a typed or pasted word)."""
-        if not self.io.keys:
-            await self.io.poll(HOTKEY_WAIT)
-        return bool(self.io.keys) and (len(self.io.keys[0]) == 1 or self.io.keys[0] in ("ENTER", "BS"))
-
     async def swallow_enter(self):
         """After a Y/N answer, drop an Enter typed out of habit."""
-        if await self.io.poll(HOTKEY_WAIT) and self.io.keys[0] == "ENTER":
+        if await self.io.poll(ENTER_WAIT) and self.io.keys[0] == "ENTER":
             self.io.keys.pop(0)
 
-    async def confirm(self, title, lines):
-        self.overlay = lambda cv: popup(cv, self.g, title, lines,
-                                        buttons=[(" Y  yes ", "y"), (" N or Esc  no ", "n")])
-        await self.show()
+    async def confirm(self, title, lines, verb=None, yes=None):
+        """A confirmation: Yes and No, starting on No. Esc is No. True for Yes."""
+        return await self.dialog(title, lines, ("Yes", "No"), 1, "Press Y for yes, or N for no.") is True
+
+    async def dialog(self, title, lines, labels, start, foot):
+        """A dialog over the screen with two buttons, answered inside itself: Y presses the first button and N
+        the second, Left, Right and Tab move between them, and Enter or Space presses the one lit. Esc cancels:
+        None. A click presses a button. Returns True for the first button, False for the second."""
+        sel = start
         try:
             while True:
+                buttons = [((" [%s] " if i == sel else "  %s  ") % label, "y" if i == 0 else "n")
+                           for i, label in enumerate(labels)]
+                self.overlay = lambda cv: popup(cv, self.g, title, lines, foot=foot, buttons=buttons)
+                await self.show()
                 k = await self.io.readkey()
                 if isinstance(k, tuple):
                     k = self.hit(k) or ""
-                if k in ("y", "Y", "n", "N", "ESC"):
+                if k in ("LEFT", "RIGHT", "TAB"):
+                    sel = 1 - sel
+                elif k in ("ENTER", " "):
+                    answer = sel == 0
+                    break
+                elif k in ("y", "Y", "n", "N"):
+                    answer = k in ("y", "Y")
+                    break
+                elif k == "ESC":
+                    answer = None
                     break
         finally:
             self.overlay = None
         await self.swallow_enter()
         await self.show()
-        return k in ("y", "Y")
+        return answer
 
     async def choose(self, title, lines, options, sel):
-        foot = "%s and Enter, or 1-%d. Esc cancels." % (self.move_set().upper() or "Arrows", len(options))
+        foot = "Pick one with %s and Enter, or 1 to %d. Esc goes back." % (
+            self.move_set().upper() or "the arrows", len(options))
         try:
             while True:
                 self.overlay = lambda cv: popup(cv, self.g, title, lines, options, sel, foot=foot)
@@ -1156,6 +1246,28 @@ class AnsiView:
         await self.show()
         return text
 
+    async def pages(self, title, pages, page=1):
+        """Help in pages, in one box: "Grid Words help, page 1 of 2". Space and Right turn to the next page
+        (Space goes round to the first), Left turns back, and Esc or Enter closes it."""
+        n, i = len(pages), max(0, min(page, len(pages)) - 1)
+        try:
+            while True:
+                foot = ("Press Space for page %d, or Esc to close." % ((i + 1) % n + 1) if n > 1 else
+                        "Press Esc to close.")
+                head = "%s, page %d of %d" % (title, i + 1, n) if n > 1 else title
+                self.overlay = lambda cv: popup(cv, self.g, head, pages[i][:HELP_ROWS], foot=foot)
+                await self.show()
+                k = await self.io.readkey()
+                if k in ("ESC", "ENTER") or isinstance(k, tuple):
+                    break
+                if k in (" ", "RIGHT", "PGDN"):
+                    i = (i + 1) % n if k == " " else min(n - 1, i + 1)
+                elif k in ("LEFT", "PGUP"):
+                    i = max(0, i - 1)
+        finally:
+            self.overlay = None
+        await self.show()
+
     async def message(self, title, lines, foot=None):
         self.overlay = lambda cv: popup(cv, self.g, title, lines, foot=foot or "Press any key (or click).")
         await self.show()
@@ -1166,109 +1278,180 @@ class AnsiView:
         await self.show()
 
 
+# ---- commands run on the server (CMD; docs/protocol.md, Commands) ------------------------------------
+
+CMD_MAX = 60            # a command line's characters, its slash included (the request is at most 80 bytes)
+DIALOG_WIDTH = 52       # a confirmation's words are wrapped to this in its dialog
+# The confirmations the server asks for (DLG kind): the dialog's title. Its words come with the DLG line.
+DIALOG_TITLES = {"resign": "Resign", "pass": "Pass", "end": "End turn", "quit": "Sign out"}
+# A command whose answer is several lines shows them in a box under this title.
+BOX_TITLES = {"who": "Who is online", "tables": "Tables", "top": "Leaderboard", "score": "Score",
+              "motd": "Message of the day", "list": "Your games and the open tables", "note": "Notes",
+              "time": "Time", "help": "Commands"}
+
+
+def box_title(line):
+    """The box title for the answer to a command line (without its slash)."""
+    word = (line.split() or [""])[0].lower()
+    if word == "who" and len(line.split()) > 1:
+        return line.split()[1]
+    return BOX_TITLES.get(word, "ParlorNet")
+
+
+def dialog_lines(text, width=DIALOG_WIDTH):
+    """A dialog's words in lines of at most width, broken between sentences when every sentence fits on a
+    line, else wrapped at spaces."""
+    parts = re.split(r"(?<=[.?!]) +", text.strip())
+    if any(len(p) > width for p in parts):
+        return textwrap.wrap(text, width)
+    out = []
+    for part in parts:
+        if out and len(out[-1]) + 1 + len(part) <= width:
+            out[-1] += " " + part
+        else:
+            out.append(part)
+    return out
+
+
+def answer_lines(lines, width=COLS - 2):
+    """The lines a command answered, without the empty ones at the end. One paragraph that fits in width is
+    joined into one line, since the server wraps its lines narrower than the screen."""
+    lines = list(lines)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    one = " ".join(l.strip() for l in lines)
+    if len(lines) > 1 and all(l.strip() for l in lines) and len(one) <= width:
+        return [one]
+    return lines
+
+
 # ---- menus ------------------------------------------------------------------------
 
-MENU_HELP = [
-    "Arrow keys pick a table, Enter opens it: your own",
-    "game, a free seat (you sit down) or a game to watch.",
+LOBBY_HELP = [         # the lobby's one page of help, on the full screen
+    "Moving",
+    "The arrows pick a table, and Enter opens it. Enter on your own game",
+    "goes back to it, on an open table sits down, on another game watches",
+    "it, and on an invitation lets you accept or decline it.",
     "",
-    "  N  new table       W  watch the selected table",
-    "  P  your password   R  refresh the list",
-    "  Q  log off         ?  this help",
-    "  O  options: letter keys that move the cursor",
-    "  X  decline the selected invitation (Enter joins)",
-    "A mouse click selects a table; a second click opens it.",
+    "Keys for the lobby",
+    "N opens a new table. ? opens this help, and / opens the command line.",
     "",
-    "Typed commands work too: new [game] [rules] [3p]",
-    "[5m|1h|1d...] [bot], join <n>, watch <n>, decline <n>,",
-    "who, profile [name], machine, activity, scores, time,",
-    "list, password, help, quit. Alone? new reversi bot",
+    "Commands",
+    "/open alone asks the questions N asks. /open GAME opens a table of that",
+    "game, and /invite bot GAME or /invite NAME GAME opens one to play the",
+    "bot or a player. /join TABLE or /join NAME sits down, /resume and",
+    "/watch take a table, and /close closes your open tables. /who, /tables,",
+    "/top, /score, /motd, /time and /activity tell you things. /password,",
+    "/machine and /keys change your settings.",
     "",
-    "Leaving a game or logging off never resigns it, but",
-    "your turn timer keeps running while it is your move.",
+    "Signing out",
+    "/quit signs you out, after asking first. Your games go on without you.",
 ]
 
-PLAIN_HELP = """ Commands:
-   new [game] [rules] [3p] [time] [bot]
-                     start a table: a game (reversi, mancala ...), its rules if it has
-                     several, the players if it takes more than two (3p), and the time
-                     per turn like 5m, 1h, 1d (what is left out is asked); with bot, the
-                     bot is invited to the other seats (at a table: type bot)
-   join <n>          sit at table n, or go back to your game there; at a table you
-                     are invited to, this accepts the invitation
-   decline <n>       decline your invitation to table n
-   watch <n>         watch table n
-   list              show the tables and your invitations again
-   who               the players online now
-   profile [name]    a player's profile, or your own: their preferred machine, the games
-                     they played and what they played with at public tables
-   machine [text]    set the machine you like to play on, shown on your profile
-                     (machine - clears it)
-   activity          the latest turns at public tables, and what they were played with
-   scores [game]     the leaderboard: the players with the most points, in every game
-                     or in one (scores reversi)
-   time              how long you have been connected, and the server's time
-   invite <name>     at your table, invite a player
-   uninvite <name>   at your table, withdraw that invitation
-   password          change your password
-   help              this list
-   quit              log off (your games stay; your turn timers keep running)"""
+PLAIN_LOBBY_HELP = [   # plain mode's: in the lobby every line is a command, and the slash may be left off
+    "Commands",
+    "/open asks which game, the rules, the players and the time per turn,",
+    "and opens a table anyone can join. /open GAME opens one of that game.",
+    "/invite bot GAME opens a table to play the bot, and /invite NAME GAME",
+    "opens one and invites that player.",
+    "/join TABLE or /join NAME sits down at an open table, and /join NAME",
+    "takes NAME's invitation.",
+    "/resume goes back to your game where it is your turn, and /resume",
+    "TABLE goes back to that table. /watch TABLE watches a game.",
+    "/close closes your open tables where nobody has joined you.",
+    "/who lists who is online, and /who NAME tells about one player.",
+    "/tables NAME lists a player's tables. /top shows the leaderboard,",
+    "and /score NAME shows a player's score.",
+    "/motd shows the message of the day, and /time the time signed in.",
+    "/activity shows the latest turns, and /machine sets your machine.",
+    "/password changes your password, and /list shows the tables again.",
+    "/quit signs you out, after asking first. Your games go on without you.",
+    "In the lobby the slash may be left off.",
+]
 
 
 class MenuBase:
     """Typed menu commands, shared by the plain and the full-screen menu."""
 
     async def command(self, line):
+        """A lobby command, with or without its slash (docs/design.md, The lobby). The shared commands run on
+        the server (shared); the lobby's own screens and settings are here."""
+        if line.startswith("/"):
+            line = line[1:]
         p = line.split()
         if not p:
             return await self.relist()
-        cmd = p[0].lower()
-        if cmd in QUIT_WORDS:
-            return "quit" if await self.confirm_quit() else None
-        if cmd in ("help", "?", "h"):
+        cmd, args = p[0].lower(), p[1:]
+        rest = line.split(None, 1)[1].strip() if len(p) > 1 else ""
+        if cmd == "help":
             return await self.help()
-        if cmd in ("list", "tables", "games", "l", "refresh", "r"):
+        if cmd == "list":                       # the lobby is the list: shown again
             return await self.relist()
         if cmd == "password" and self.s.has_password:
             return await self.password()
-        if cmd in ("options", "keys", "o") and self.s.ansi:
+        if cmd == "keys" and self.s.ansi:
             return await self.options()
-        if cmd in ("new", "n"):
-            return await self.new(p[1:])
-        if cmd in ("join", "j", "watch", "w", "accept"):
-            if len(p) < 2:
-                return await self.notice("Which table? For example: %s 1" % cmd)
-            return await self.enter(p[1], watch=cmd in ("watch", "w"), sit=cmd in ("join", "j", "accept"))
-        if cmd == "decline":
-            if len(p) < 2:
-                return await self.notice("Which table? For example: decline 1")
-            return await self.decline(p[1])
-        if cmd in ("invites", "invitations"):
+        if cmd == "practice":
+            if not self.s.ansi:
+                return await self.notice(PLAIN_PRACTICE)
+            await self.s.practice()
             return await self.relist()
-        if cmd in ("who", "online"):
-            return await self.notice(await self.s.who_text())
-        if cmd in ("profile", "finger", "whois"):
-            return await self.profile(p[1] if len(p) > 1 else "")
+        if cmd == "open" and not args:          # the questions N asks
+            return await self.new([], whom="anyone")
+        if cmd in ("resume", "watch"):
+            return await self.table_command(cmd, args)
+        if cmd == "join" and len(args) == 1:      # a table of yours already: back to it, as /resume does
+            mine = [t for t in (await self.s.load())[0] if t["id"] == args[0] and self.s.name in t["names"]]
+            if mine:
+                return await self.enter(mine[0]["id"], watch=False)
         if cmd == "machine":
-            return await self.machine(line.split(None, 1)[1].strip() if len(p) > 1 else None)
+            return await self.machine(rest or None)
         if cmd == "activity":
             return await self.show_text("Activity", await self.s.activity_lines())
-        if cmd in ("scores", "score", "leaderboard", "top"):
-            return await self.show_text("Leaderboard", await self.s.score_lines(p[1] if len(p) > 1 else ""))
-        if cmd == "time":
-            return await self.notice(" ".join(time_text(*await self.s.core.req("TIM"), width=COLS)))
-        if p[0].isdigit():
-            return await self.enter(p[0], watch=False)
-        return await self.notice("Unknown command: %s. Type help for the list." % line[:20])
+        return await self.shared(line)
 
-    async def profile(self, name):
-        """profile [name]: a player's profile (PFL), or your own."""
-        if name and not NAME_RE.match(name):
-            return await self.notice("Names are letters, digits, - and _, up to 12.")
-        title, lines = await self.s.profile_lines(name)
-        if title is None:
+    async def shared(self, line):
+        """A shared command, run on the server (CMD). One that seats you at a new table takes you there."""
+        cmd = line.split()[0].lower()
+        seats = cmd in ("open", "invite", "join")
+        before = {t["id"] for t in (await self.s.load())[0] if self.s.name in t["names"]} if seats else set()
+        lines = answer_lines(await self.s.command(self, line))
+        if self.s.quitting:
+            return "quit"
+        if seats:
+            tabs, _ = await self.s.load()
+            new = [t for t in tabs if self.s.name in t["names"] and t["id"] not in before]
+            if new:
+                return await self.enter(new[0]["id"], watch=False)
+        if cmd in ("open", "invite", "join", "close", "uninvite"):
+            await self.relist()
+        if len(lines) == 1:
             return await self.notice(lines[0])
-        return await self.show_text(title, lines)
+        if lines:
+            return await self.show_text(box_title(line), lines)
+        return None
+
+    async def ask_yes(self, title, lines, verb, yes=None):
+        """A confirmation the server asked for: Yes or No."""
+        raise NotImplementedError
+
+    async def table_command(self, cmd, args):
+        """/resume and /watch: the lobby's own way back to a table's screen."""
+        arg = args[0] if args else ""
+        tabs, clocks = await self.s.load()
+        me = self.s.name
+        if cmd == "resume":
+            mine = [t for t in tabs if me in t["names"] and t["status"] == "playing"]
+            if arg:
+                mine = [t for t in mine if t["id"] == arg]
+            mine.sort(key=lambda t: not (clocks.get(t["id"]) and clocks[t["id"]][0] == t["seat_of"].get(me)))
+            if not mine:
+                return await self.notice("You have no game at table %s." % arg if arg else
+                                         "You have no game to go back to.")
+            return await self.enter(mine[0]["id"], watch=False)
+        if not arg:
+            return await self.notice("Type /watch and a table number.")
+        return await self.enter(arg, watch=True)
 
     async def machine(self, text):
         """machine [text]: set your preferred machine (PFL SET PREF); asked when not given, and "-" clears it."""
@@ -1279,7 +1462,7 @@ class MenuBase:
         text = "" if text == "-" else claim_text(text)
         _, final = await self.s.core.req(("PFL SET PREF %s" % text).rstrip())
         if not final.startswith("OK"):
-            return await self.notice("Can't: " + err_text(final))
+            return await self.notice("That didn't work. %s" % sentence(err_text(final)))
         return await self.notice("Your preferred machine is now %s." % text if text else
                                  "Your preferred machine is cleared.")
 
@@ -1293,18 +1476,16 @@ class MenuBase:
             self.say("  " + l)
         await self.io.flush()
 
-    async def new(self, args):
-        """new [game] [rules] [3p] [time]: what is not given is asked for, the rules only for a game with
-        several rulesets and the players only for a game that takes more than two."""
+    async def new(self, args, whom=None):
+        """Open a table: the game, its rules where it has several, the players where it takes more than two,
+        the time per turn, and whom to play (the bot, anyone who joins, or a player named). What is not given
+        is asked. whom: "bot", "anyone", a player's name, or None to ask."""
         games = [g for g in self.s.games if g["key"] in RENDERERS]
         turn, game, rules, players, rest = None, None, None, None, []
-        vs_bot = False
         for a in args:
             g = next((g for g in games if g["key"].split("/")[0] == a.lower()), None)
             if g is not None and game is None:
                 game = g
-            elif a.lower() in ("bot", "bots"):      # new reversi bot: the bot in every other seat
-                vs_bot = True
             elif TURN_RE.match(a):
                 turn = a
             elif PLAYERS_RE.match(a):
@@ -1313,21 +1494,21 @@ class MenuBase:
                 rest.append(a)
         if game is None and len(games) > 1:
             if rest:
-                return await self.notice("This server has no text screen for %s. Games here: %s"
-                                         % (rest[0][:12], ", ".join(g["name"] for g in games)))
+                return await self.notice("There is no game called %s here. The games are %s." % (
+                    rest[0][:12], and_list(g["key"].split("/")[0] for g in games)))
             game = await self.ask_game(games)
             if game is None:
                 return None
         game = game or (games[0] if games else None)
         if game is None:
-            return await self.notice("No games here have a text screen yet.")
+            return await self.notice("No game here has a text screen yet.")
         rulesets = game.get("rulesets") or [game["rules"]]
         for a in rest:
             if a.lower() in rulesets and rules is None:
                 rules = a.lower()
             else:
-                return await self.notice("%s has no rules called %s. Its rules: %s"
-                                         % (game["name"], a[:12], ", ".join(rulesets)))
+                return await self.notice("%s has no rules called %s. Its rules are %s." % (
+                    game["name"], a[:12], and_list(rulesets)))
         if rules is None:
             rules = rulesets[0]
             if len(rulesets) > 1:
@@ -1345,23 +1526,37 @@ class MenuBase:
             turn = await self.ask_turn(game)
             if turn is None:
                 return None
+        if whom is None:
+            whom = await self.ask_whom(game)
+            if whom is None:
+                return None
         tid, err = await self.s.new_table(game, turn, rules, players)
         if err:
             return await self.notice(err)
-        if vs_bot:                  # sit down, then a bot invited to each other seat (docs/bot.md)
+        if whom != "anyone":            # sit down, then invite the bot to each other seat, or the player named
             await self.s.core.req("JON %s" % tid)
-            for name in botflag.NAMES[:max(0, (players or lo) - 1)]:
-                await self.s.core.req("INV %s %s" % (tid, name))
+            names = botflag.NAMES[:max(0, (players or lo) - 1)] if whom.lower() == "bot" else [whom]
+            for name in names:
+                _, final = await self.s.core.req("INV %s %s" % (tid, name))
+                if final.startswith("ERR NOPLAYER"):
+                    await self.notice("There is no player called %s, so table %s is open to anyone." % (name, tid))
         return await self.enter(tid, watch=False)
+
+    async def ask_whom(self, game):
+        raise NotImplementedError
 
     async def enter(self, tid, watch, sit=False):
         err = await self.s.enter(tid, watch, sit)
+        if self.s.quitting:                 # /quit at the table, said yes to
+            return "quit"
+        if self.s.practice_next:            # /practice at the table
+            await self.s.practice()
         if err:
             return await self.notice(err)
         return await self.back(tid)
 
     async def decline(self, tid):
-        """decline n: my invitation to table n declined (UNV); whoever invited me hears of it."""
+        """/decline NAME: my invitation to that table declined (UNV); whoever invited me hears of it."""
         inv = next((i for i in self.s.invites if i["id"] == tid), None)
         _, final = await self.s.core.req("UNV %s %s" % (tid, self.s.name))
         if not final.startswith("OK"):
@@ -1377,6 +1572,7 @@ class PlainMenu(MenuBase):
 
     def __init__(self, sess):
         self.s, self.io = sess, sess.io
+        self.asked = set()          # the invitations asked about once (their tables)
 
     def say(self, text=""):
         self.io.write(text + "\n")
@@ -1389,9 +1585,25 @@ class PlainMenu(MenuBase):
     async def run(self):
         await self.relist()
         while True:
+            if await self.answer_invites() == "quit":
+                return
             line = await self.ask("> ")
             if await self.command(line) == "quit":
                 return
+
+    async def answer_invites(self):
+        """Each new invitation is a dialog once, as on the full screen: Y accepts it, N declines it, and Enter
+        leaves it for later, when /join NAME takes it."""
+        for inv in [i for i in self.s.invites if i["id"] not in self.asked]:
+            self.asked.add(inv["id"])
+            yn = (await self.ask("%s invites you to play %s at table %s. Type Y to accept, N to decline, or "
+                                 "press Enter to leave it for later. " % (inv["from"], self.s.game_name(inv["key"]),
+                                                                          inv["id"]))).strip().lower()
+            if yn.startswith("y"):
+                return await self.enter(inv["id"], watch=False, sit=True)
+            if yn.startswith("n"):
+                return await self.decline(inv["id"])
+        return None
 
     async def relist(self):
         tabs, clocks = await self.s.load()
@@ -1400,7 +1612,7 @@ class PlainMenu(MenuBase):
         others = [t for t in tabs if me not in t["names"]]
         self.say("")
         tail = "%s | %s" % (me, connected_text(time.time() - self.s.since))      # the time connected
-        self.say(("== ParlorNet main menu " + "=" * 56)[:78 - len(tail)] + " " + tail)
+        self.say(("== ParlorNet lobby " + "=" * 60)[:78 - len(tail)] + " " + tail)
         self.say("Your tables:")
         for t in mine:
             opp = [n for n in t["names"] if n != me]
@@ -1414,7 +1626,7 @@ class PlainMenu(MenuBase):
         self.say("Other tables:")
         for t in others[:12]:
             who = " vs ".join(t["names"]) if t["status"] == "playing" else ", ".join(t["names"]) or "-"
-            act = "join %s" % t["id"] if t["status"] == "open" else "watch %s" % t["id"]
+            act = "/join %s" % t["id"] if t["status"] == "open" else "/watch %s" % t["id"]
             self.say("  %4s  %-8s  %-27s  %-12s  %s" % (t["id"], self.s.game_name(t["key"]), who[:27],
                                                         turn_text(t["turn"]) + " a turn", act)[:79])
             if t["status"] == "open":
@@ -1424,11 +1636,10 @@ class PlainMenu(MenuBase):
         if self.s.invites:
             self.say("Invitations for you:")
             for i in self.s.invites:
-                self.say("  %4s  %-8s  from %-22s  join %s or decline %s" % (
-                    i["id"], self.s.game_name(i["key"]), i["from"], i["id"], i["id"])[:79])
+                self.say("  %4s  %-8s  from %-22s  /join %s accepts it" % (
+                    i["id"], self.s.game_name(i["key"]), i["from"], i["from"])[:79])
         self.say(await self.s.who_text())
-        self.say("Commands: new [game] [time], join <n>, watch <n>, %swho, list, %shelp, quit"
-                 % ("decline <n>, " if self.s.invites else "", "password, " if self.s.has_password else ""))
+        self.say("Type /open and a game to open a table, or /help for the commands.")
         await self.io.flush()
 
     def client_lines(self, t, names):
@@ -1443,15 +1654,14 @@ class PlainMenu(MenuBase):
         await self.io.flush()
 
     async def help(self):
-        await self.notice(PLAIN_HELP if self.s.has_password else
-                          "\n".join(l for l in PLAIN_HELP.split("\n") if "password" not in l))
+        await self.notice("\n".join(" " + l for l in PLAIN_LOBBY_HELP if self.s.has_password or "/password" not in l))
 
     async def back(self, tid):
         return await self.relist()
 
-    async def confirm_quit(self):
-        yn = await self.ask("Log off? Your games stay open and your turn timers keep running. (y/N) ")
-        return yn.lower().startswith("y")
+    async def ask_yes(self, title, lines, verb, yes=None):
+        yn = await self.ask(" ".join(lines) + " Type Y for yes, or N for no. ")
+        return yn.strip().lower().startswith("y")
 
     async def password(self):
         """The server's password-change steps, as prompts (secrets not echoed)."""
@@ -1461,18 +1671,22 @@ class PlainMenu(MenuBase):
         except NeedAuth as ask:
             done = await answer_asks(self.io, self.s.core, ask)
         except CoreError as e:
-            return await self.notice("Can't: " + no_wait(str(e)))
+            return await self.notice("That didn't work. %s" % sentence(no_wait(str(e))))
         await self.notice("Your password is changed. You are signed out everywhere else." if done
                           else "Your password is not changed.")
 
     async def ask_turn(self, game):
-        t = await self.ask("Time per turn [1d] (5m, 15m, 1h, 1d, 3d, 5d ...): ")
+        t = await self.ask("How long is each turn? Type 5m, 15m, 1h, 1d, 3d or 5d [1d]: ")
         return t or "1d"
+
+    async def ask_whom(self, game):
+        a = (await self.ask("Whom do you want to play? Type bot, a player's name, or Enter for anyone: ")).strip()
+        return "anyone" if not a or a.lower() == "anyone" else a if NAME_RE.match(a) else None
 
     async def ask_rules(self, game, rulesets):
         for n, r in enumerate(rulesets):
             self.say("  %d  %-10s %s" % (n + 1, r, games.rules_name(game["key"], r)))
-        a = (await self.ask("Rules (1-%d) [1]: " % len(rulesets))).strip().lower()
+        a = (await self.ask("Which rules? Type 1 to %d [1]: " % len(rulesets))).strip().lower()
         if not a:
             return rulesets[0]
         if a.isdigit() and 1 <= int(a) <= len(rulesets):
@@ -1483,7 +1697,7 @@ class PlainMenu(MenuBase):
         return r
 
     async def ask_players(self, game, lo, hi):
-        a = (await self.ask("Players (%d-%d) [%d]: " % (lo, hi, lo))).strip()
+        a = (await self.ask("How many players? Type %d to %d [%d]: " % (lo, hi, lo))).strip()
         if not a:
             return lo
         if a.isdigit() and lo <= int(a) <= hi:
@@ -1493,22 +1707,23 @@ class PlainMenu(MenuBase):
 
     async def ask_game(self, games):
         words = [g["key"].split("/")[0] for g in games]
-        a = (await self.ask("Game (%s) [%s]: " % (", ".join(words), words[0]))).lower()
+        a = (await self.ask("Which game? Type %s [%s]: " % (or_list(words), words[0]))).lower()
         if not a:
             return games[0]
         game = next((g for g, w in zip(games, words) if w.startswith(a)), None)
         if game is None:
-            await self.notice("No such game here: %s" % a[:12])
+            await self.notice("There is no game called %s here." % a[:12])
         return game
 
 
 class AnsiMenu(MenuBase, AnsiView):
-    """The full-screen main menu: your tables, other tables, a new-table
-    entry; arrows and Enter, hotkeys in the status bar."""
+    """The full-screen lobby: your games (your turn first) and your invitations, then the other tables. The
+    arrows pick and Enter opens. N opens a new table, ? is help and / the command line. A letter means what it
+    means at a table, or nothing (docs/design.md, The lobby)."""
 
     MINE_TOP, MINE_ROWS = 2, 5
     OTHER_TOP, OTHER_ROWS = 10, 8
-    HOTKEYS = "nwproqx?"
+    HOTKEYS = "n?"
 
     def __init__(self, sess):
         AnsiView.__init__(self, sess)
@@ -1526,8 +1741,7 @@ class AnsiMenu(MenuBase, AnsiView):
 
     @staticmethod
     def item_id(it):
-        return it[1]["id"] if it[0] == "table" else "inv:" + it[1]["id"] if it[0] == "invite" else \
-            "new:" + it[1]["key"]
+        return it[1]["id"] if it[0] == "table" else "inv:" + it[1]["id"] if it[0] == "invite" else it[0]
 
     def my_move(self, it):
         if it[0] != "table" or it[1]["id"] not in self.clocks:
@@ -1538,16 +1752,17 @@ class AnsiMenu(MenuBase, AnsiView):
         tabs, self.clocks = await self.s.load()
         cur = self.item_id(self.items[self.sel]) if self.items else None
         me = self.s.name
-        self.mine = [("invite", i) for i in self.s.invites]
-        self.mine += [("table", t) for t in tabs if me in t["names"]]
-        self.mine += [("new", g) for g in self.s.games if g["key"] in RENDERERS]
+        mine = [t for t in tabs if me in t["names"]]
+        self.mine = [("table", t) for t in mine if self.my_move(("table", t))]
+        self.mine += [("table", t) for t in mine if not self.my_move(("table", t))]
+        self.mine += [("invite", i) for i in self.s.invites]
         fresh = [i for i in self.s.invites if i["id"] not in self.seen_invites]
         self.seen_invites = {i["id"] for i in self.s.invites}
         if fresh and not self.first:
             i = fresh[0]
-            self.say("%s invites you to %s at table %s. Enter joins, %s declines." % (
-                i["from"], self.s.game_name(i["key"]), i["id"], self.kn("X")), A_YELLOW)
-        self.others = [("table", t) for t in tabs if me not in t["names"]]
+            self.say("%s invites you to play %s at table %s. Press Enter on it to answer." % (
+                i["from"], self.s.game_name(i["key"]), i["id"]), A_YELLOW)
+        self.others = [("table", t) for t in tabs if me not in t["names"]] + [("practice", None)]
         ids = [self.item_id(it) for it in self.items]
         if self.first:
             self.first = False
@@ -1560,13 +1775,13 @@ class AnsiMenu(MenuBase, AnsiView):
     # ---- drawing ---------------------------------------------------------
     def row_text(self, it):
         """-> (text, status column, status attribute, plain attribute)."""
-        if it[0] == "new":
-            return "%5s  Start a new %s table" % ("+", it[1]["name"]), 0, A_GREEN, A_GREEN
+        if it[0] == "practice":
+            return "%5s  %s" % ("", "The practice game teaches the keys."), 0, A_GREEN, A_GREEN
         if it[0] == "invite":
             i = it[1]
             left = "%5s  %-8s  %-16s  %-10s  " % (i["id"], self.s.game_name(i["key"]), ("from " + i["from"])[:16],
                                                  "")
-            return (left + "invited: Enter joins")[:74], len(left), A_YELLOW, A_TEXT
+            return (left + "an invitation")[:74], len(left), A_YELLOW, A_TEXT
         t = it[1]
         game = self.s.game_name(t["key"])
         if self.s.name in t["names"]:
@@ -1577,8 +1792,7 @@ class AnsiMenu(MenuBase, AnsiView):
         else:
             who = " vs ".join(t["names"]) if t["status"] == "playing" else ", ".join(t["names"])
             left = "%5s  %-8s  %-24s  %-10s  " % (t["id"], game, (who or "-")[:24], turn_text(t["turn"]))
-            st, attr = ("open: Enter joins", A_GREEN) if t["status"] == "open" else (
-                "playing: %s watches" % self.kn("W"), A_DIM)
+            st, attr = ("open", A_GREEN) if t["status"] == "open" else ("playing", A_DIM)
         return (left + st)[:74], len(left), attr, A_TEXT
 
     def panel(self, cv, which, top, rows, title, header, items, base, empty):
@@ -1613,66 +1827,56 @@ class AnsiMenu(MenuBase, AnsiView):
 
     def describe(self):
         if not self.items:
-            return "No games here have a text screen yet."
+            return "You have no games yet. Press N to open a table."
         kind, x = self.items[self.sel]
+        if kind == "practice":
+            return "Press Enter to play the practice game. It is not played on the parlor."
         if kind == "invite":
-            return "%s invites you to %s at table %s. Press Enter to join or %s to decline." % (
-                x["from"], self.s.game_name(x["key"]), x["id"], self.kn("X"))
-        if kind == "new":
-            ask = (["rules"] if len(x.get("rulesets") or ()) > 1 else []) + \
-                (["players"] if (x.get("max") or 2) > (x.get("min") or 2) else []) + ["time per turn"]
-            what = ", ".join(ask[:-1]) + " and " + ask[-1] if len(ask) > 1 else "the " + ask[0]
-            for text in ("Enter starts a new %s table; you choose %s." % (x["name"], what),
-                         "Enter: a new %s table; you choose %s." % (x["name"], what)):
-                if len(text) <= COLS - 2:
-                    return text
-            return "Enter starts a new %s table." % x["name"]
+            return "%s invites you to play %s at table %s. Press Enter to answer." % (
+                x["from"], self.s.game_name(x["key"]), x["id"])
         opp = [n for n in x["names"] if n != self.s.name]
         seats = [(x["seat_of"][n], n) for n in x["names"]]       # with what each plays (LST clients)
         cl, w = x.get("clients") or {}, COLS - 2
         if self.s.name in x["names"]:
             if x["status"] == "open":
-                return "Table %s is waiting for an opponent. Enter shows it." % x["id"]
+                return "Table %s is waiting for an opponent. Press Enter to go back to it." % x["id"]
             if not opp:
-                return "Table %s: Enter goes back to your game against ?." % x["id"]
-            return with_clients(["Table %s: Enter goes back to your game against %%s." % x["id"],
-                                 "Table %s: Enter goes back to your game with %%s." % x["id"]],
-                                [(s, n) for s, n in seats if n != self.s.name], cl, ", ", w)
+                return "Table %s is your game. Press Enter to go back to it." % x["id"]
+            return with_clients(["Press Enter to go back to your game with %%s at table %s." % x["id"],
+                                 "Your game with %%s is at table %s." % x["id"]],
+                                [(s, n) for s, n in seats if n != self.s.name], cl, " and ", w)
         if x["status"] == "open":
             if not seats:
-                return "Table %s: nobody waits for an opponent. Enter sits down, %s watches." % (x["id"], self.kn("W"))
-            return with_clients(["Table %s: %%s waits for an opponent. Enter sits down, %s watches." % (
-                x["id"], self.kn("W")), "Table %s: %%s waits. Enter sits down, %s watches." % (x["id"], self.kn("W"))],
-                seats, cl, ", ", w)
-        return with_clients(["Table %s: %%s. Enter or %s watches the game." % (x["id"], self.kn("W")),
-                             "Table %s: %%s. Enter or %s watches." % (x["id"], self.kn("W"))], seats, cl, " vs ", w)
+                return "Table %s is open. Press Enter to sit down." % x["id"]
+            return with_clients(["%%s waits at table %s. Press Enter to sit down." % x["id"],
+                                 "%%s waits at table %s." % x["id"]], seats, cl, ", ", w)
+        return with_clients(["%%s play at table %s. Press Enter to watch." % x["id"],
+                             "%%s play at table %s." % x["id"]], seats, cl, " and ", w)
 
     def compose(self):
         cv = Canvas()
-        title_bar(cv, self.g, "Main menu", self.s.name)
+        title_bar(cv, self.g, "Lobby", self.s.name)
         moves = [it[1]["id"] for it in self.mine if self.my_move(it)]
         if moves:
-            cv.put(1, 1, "It is your move at table %s." % ", ".join(moves[:8]), A_YELLOW)
-        elif self.move_set():
-            cv.put(1, 1, "Welcome, %s. Choose a table with %s or the arrows, then Enter."
-                   % (self.s.name, self.move_set().upper()), A_TEXT)
+            cv.put(1, 1, ("It's your turn at table %s." % and_list(moves[:8]))[:COLS - 2], A_YELLOW)
+        elif not [it for it in self.mine if it[0] == "table"]:
+            cv.put(1, 1, "You have no games yet. Press N to open a table.", A_TEXT)
         else:
-            cv.put(1, 1, "Welcome, %s. Choose a table with the arrow keys and press Enter." % self.s.name,
-                   A_TEXT)
+            cv.put(1, 1, "Welcome, %s. Pick a table with %s and press Enter." % (
+                self.s.name, self.move_set().upper() or "the arrows"), A_TEXT)
         self.panel(cv, 0, self.MINE_TOP, self.MINE_ROWS, "Your tables",
                    "%5s  %-8s  %-16s  %-10s  %s" % ("Table", "Game", "Opponent", "Per turn", "Status"),
-                   self.mine, 0, "No games here have a text screen yet.")
+                   self.mine, 0, "You have no games yet. Press N to open a table.")
         self.panel(cv, 1, self.OTHER_TOP, self.OTHER_ROWS, "Other tables",
                    "%5s  %-8s  %-24s  %-10s  %s" % ("Table", "Game", "Players", "Per turn", ""),
-                   self.others, len(self.mine), "No other tables yet. Start one, and anyone can join it.")
+                   self.others, len(self.mine), "Nobody else has a table yet. Press N to open one.")
         cv.put(1, ROWS - 3, self.describe()[:COLS - 2], A_TEXT)
         self.input_line(cv)
         if self.buf:
-            status_bar(cv, [("Enter", "run command"), ("Esc", "cancel"), ("Backspace", "erase")])
+            self.command_keys(cv, "the lobby")
         else:
-            status_bar(cv, [("Arrows", "pick"), ("Enter", "open"), ("N", "new"), ("W", "watch")]
-                       + ([("P", "password")] if self.s.has_password else [])
-                       + [("O", "keys"), ("?", "help"), ("Q", "quit")])
+            status_bar(cv, [("Arrows", "pick"), ("Enter", "open"), ("N", "new table"), ("?", "help"),
+                            ("/", "type", "/")])
         return cv
 
     def cursor_at(self):
@@ -1700,6 +1904,8 @@ class AnsiMenu(MenuBase, AnsiView):
 
     async def on_key(self, k):
         n = len(self.items)
+        if self.buf:
+            return await self.command_key(k)
         if isinstance(k, tuple):
             v = self.hit(k)
             if isinstance(v, tuple) and v[0] == "item" and v[1] < n:
@@ -1710,10 +1916,9 @@ class AnsiMenu(MenuBase, AnsiView):
             if not isinstance(v, str):
                 return None
             if len(v) == 1 and v in self.HOTKEYS:
-                return await self.hotkey(v)                 # a status bar key, clicked: never a movement
+                return await self.hotkey(v)                 # a keys line item, clicked: never a movement
             k = v
-        elif not self.buf:
-            k = self.move_of(k) or k                        # a movement letter is an arrow
+        k = self.move_of(k) or k                            # a movement letter is an arrow
         if k in ("UP", "DOWN", "PGUP", "PGDN", "HOME", "END"):
             if n:
                 step = {"UP": -1, "DOWN": 1, "PGUP": -5, "PGDN": 5, "HOME": -n, "END": n}[k]
@@ -1722,20 +1927,16 @@ class AnsiMenu(MenuBase, AnsiView):
         if k == "REDRAW":
             self.s.painter.invalidate()
             return None
-        if k == "ESC":
-            self.buf = ""
-            return None
-        if k == "BS":
-            self.buf = self.buf[:-1]
-            return None
-        if k == "ENTER" or (k == " " and not self.buf):
-            if self.buf:
-                line, self.buf = self.buf.strip(), ""
-                return await self.run_line(line)
+        if k in ("ENTER", " "):
             return await self.open_selected()
-        if len(k) != 1:
+        if k == "/":
+            self.buf = "/"
             return None
-        return await self.char_key(k)
+        if isinstance(k, str) and len(k) == 1:
+            if k.lower() in self.HOTKEYS:
+                return await self.hotkey(k.lower())
+            return self.say("%s does nothing in the lobby. Press ? to see the keys." % k.upper(), A_DIM)
+        return None
 
     async def options(self):
         """The movement keys: letters that move the cursor as the arrows do, kept with the player for the
@@ -1750,45 +1951,32 @@ class AnsiMenu(MenuBase, AnsiView):
         self.s.moves = MOVE_ORDER[i]
         await keep_moves(self.s.core, self.s.moves)
         if not self.move_set():
-            return self.say("Movement keys: the arrows only.", A_GREEN)
-        return self.say("Movement keys: %s, kept for next time. Press : first to type text."
-                        % self.move_set().upper(), A_GREEN)
+            return self.say("You move the cursor with the arrows only now.", A_GREEN)
+        return self.say("You move the cursor with %s now, and it is kept for next time." % self.move_set().upper(),
+                        A_GREEN)
 
     async def hotkey(self, k):
-        if k == "o":
-            return await self.options()
-        if k == "q":
-            return "quit" if await self.confirm_quit() else None
         if k == "?":
             return await self.help()
-        if k == "r":
-            await self.relist()
-            return self.say("Refreshed.", A_DIM)
-        if k == "p" and self.s.has_password:
-            return await self.password()
         if k == "n":
-            it = self.items[self.sel] if self.items else None
-            return await self.new([it[1]["key"].split("/")[0]] if it and it[0] == "new" else [])
-        if k == "x":
-            it = self.items[self.sel] if self.items else None
-            if not it or it[0] != "invite":
-                return self.say("Pick an invitation to decline first.")
-            return await self.decline(it[1]["id"])
-        if k == "w":
-            it = self.items[self.sel] if self.items else None
-            if not it or it[0] != "table":
-                return self.say("Pick a table to watch first.")
-            return await self.enter(it[1]["id"], watch=self.s.name not in it[1]["names"])
+            return await self.new([])
         return None
 
     async def open_selected(self):
         if not self.items:
             return None
         kind, x = self.items[self.sel]
-        if kind == "new":
-            return await self.new([x["key"].split("/")[0]])
-        if kind == "invite":
-            return await self.enter(x["id"], watch=False, sit=True)
+        if kind == "practice":
+            await self.s.practice()
+            return await self.load()
+        if kind == "invite":            # the invitation dialog: Accept sits down, Decline turns it down
+            answer = await self.dialog("Invitation", [
+                "%s invites you to play %s at table %s." % (x["from"], self.s.game_name(x["key"]), x["id"]),
+                "If you accept, you sit down there."], ("Accept", "Decline"), 0,
+                "Press Y to accept, or N to decline. Esc puts this away.")
+            if answer is None:
+                return None
+            return await (self.enter(x["id"], watch=False, sit=True) if answer else self.decline(x["id"]))
         if self.s.name in x["names"]:
             return await self.enter(x["id"], watch=False)
         return await self.enter(x["id"], watch=x["status"] != "open")
@@ -1798,7 +1986,7 @@ class AnsiMenu(MenuBase, AnsiView):
         await self.load()
 
     async def notice(self, text):
-        self.say(text, A_RED if text.startswith(("Can't", "Unknown", "No ")) else A_YELLOW)
+        self.say(text, A_RED if text.startswith(("That didn't work", "There is no", "No ", "You have no")) else A_YELLOW)
 
     async def back(self, tid):
         """Back from a table: keep it selected."""
@@ -1809,13 +1997,10 @@ class AnsiMenu(MenuBase, AnsiView):
         await self.show()
 
     async def help(self):
-        await self.help_box("Help", MENU_HELP if self.s.has_password else
-                            [l.replace("  P  your password   R", "  R").replace("password, ", "")
-                             for l in MENU_HELP])
+        await self.help_box("Lobby help", [l for l in LOBBY_HELP if self.s.has_password or "/password" not in l])
 
-    async def confirm_quit(self):
-        return await self.confirm("Log off", ["Log off? Your games stay open and your turn",
-                                              "timers keep running."])
+    async def ask_yes(self, title, lines, verb, yes=None):
+        return await self.confirm(title, lines, verb, yes)
 
     async def show_text(self, title, lines):
         await self.message(title, lines[:HELP_ROWS] or ["Nothing yet."])
@@ -1833,7 +2018,7 @@ class AnsiMenu(MenuBase, AnsiView):
         except NeedAuth as first:
             ask = first
         except CoreError as e:
-            return await self.notice("Can't: " + no_wait(str(e)))
+            return await self.notice("That didn't work. %s" % sentence(no_wait(str(e))))
         while True:
             value = await self.ask_text(ask.label, ask.info or [ask.label], maxlen=64, secret=ask.secret)
             if not value:
@@ -1844,21 +2029,32 @@ class AnsiMenu(MenuBase, AnsiView):
             except NeedAuth as again:
                 ask = again
             except CoreError as e:
-                return await self.notice("Can't: " + no_wait(str(e)))
+                return await self.notice("That didn't work. %s" % sentence(no_wait(str(e))))
 
     async def ask_turn(self, game):
         i = await self.choose("New %s table" % game["name"],
-                              ["Time per turn. A player whose clock", "runs out loses the game."],
+                              ["How long is each turn? A player whose", "clock runs out loses the game."],
                               [label + ("  (default)" if n == TURN_DEFAULT else "")
                                for n, (_, label) in enumerate(TURNS)], TURN_DEFAULT)
         return None if i is None else TURNS[i][0]
 
     async def ask_game(self, games):
-        i = await self.choose("New table", ["Which game?"], [g["name"] for g in games], 0)
+        i = await self.choose("New table", ["Which game do you want to play?"], [g["name"] for g in games], 0)
         return None if i is None else games[i]
 
+    async def ask_whom(self, game):
+        i = await self.choose("New %s table" % game["name"], ["Whom do you want to play?"],
+                              ["%s against the bot" % game["name"], "%s with anyone who joins" % game["name"],
+                               "%s with a player you name" % game["name"]], 0)
+        if i is None:
+            return None
+        if i < 2:
+            return ("bot", "anyone")[i]
+        name = await self.ask_text("A player", ["The name of the player to invite."])
+        return name or None
+
     async def ask_rules(self, game, rulesets):
-        i = await self.choose("New %s table" % game["name"], ["Which rules?"],
+        i = await self.choose("New %s table" % game["name"], ["Which rules do you want?"],
                               [games.rules_name(game["key"], r) for r in rulesets], 0)
         return None if i is None else rulesets[i]
 
@@ -1890,12 +2086,73 @@ class GameBase:
         self.seq = 0
         self.v = None
         self.over = ""
+        self.last = ""          # the last move, as a sentence (last_move, from the events)
         self.turn_secs = 0
         self.clock_at = time.time()
 
     def name(self, seat):
         n = self.names[seat] if 0 <= seat < len(self.names) else "-"
         return n if n != "-" else "seat %d" % (seat + 1)
+
+    GAME = ""               # the game's name, for the title bar and the header
+
+    def who(self, name):
+        """A player's name as a sentence says it: the bot is "the bot"."""
+        return "the bot" if botflag.is_bot_name(name) else name
+
+    def seated_names(self):
+        return [n for n in self.names if n and n != "-"]
+
+    def title_text(self):
+        """The title bar's words: "Grid Words, table 12, with ann", or for a watcher "Grid Words, table 12,
+        ann and bob"."""
+        title = "%s, table %s" % (self.GAME, self.tid)
+        if self.me >= 0:
+            others = [self.who(n) for i, n in enumerate(self.names) if i != self.me and n and n != "-"]
+            return title + (", with " + and_list(others) if others else "")
+        seated = [self.who(n) for n in self.seated_names()]
+        return title + (", " + and_list(seated) if seated else "")
+
+    def over_sentence(self):
+        """The end of the game as a sentence: "Game over. ann wins 33-31." """
+        status = (self.v or {}).get("status") or ""
+        text = (self.over or (status if status.startswith("Game over") else "") or "Game over").strip().rstrip(".")
+        if text.startswith("Game over: "):
+            text = text[len("Game over: "):]
+        elif text == "Game over":
+            return "Game over."
+        first = text.split()[0] if text.split() else ""
+        if first not in self.names:         # a name stays as its player wrote it
+            text = text[:1].upper() + text[1:]
+        return "Game over. " + text + "."
+
+    def waiting_sentence(self):
+        """Before the game starts: who it waits for, and for a seated player how to bring in the bot."""
+        seated = len(self.seated_names())
+        free = max(1, len(self.names) - seated) if self.names else 1
+        who = "a second player" if seated <= 1 or len(self.names) <= 2 else \
+            "one more player" if free == 1 else "%d more players" % free
+        if self.me >= 0:
+            return "Waiting for %s. Type /invite bot to play the bot." % who
+        return "Waiting for %s." % who
+
+    def not_yours(self, seat=None):
+        """What a key that plays says when it isn't your turn."""
+        if self.me < 0:
+            return "You are watching this table."
+        if not self.playing():
+            return self.over_sentence() if self.over else "The game has not started yet."
+        return "It is %s's turn." % self.who(self.name(self.v["turn"] if seat is None else seat))
+
+    def offer(self):
+        """The offer waiting for this player's answer, or None: (key, title, lines, start on accept, the move
+        that accepts, the move that declines, the sentence while it is put away). The key tells one offer
+        from the next."""
+        return None
+
+    def refused(self, what, final):
+        """A move the server refused, in the player's own terms: "You can't play d3. Not your turn." """
+        return "You can't play %s. %s" % (what, sentence(err_text(final)))
 
     def describe(self, text):
         return describe_event(text, self.names)
@@ -1905,12 +2162,172 @@ class GameBase:
         or None if it is not one. cmd is the first word in lower case, words every word as typed."""
         return None
 
+    # The commands every table takes, and what the sentence line says while one is typed.
+    TABLE_COMMANDS = {
+        "say": "/say sends a line to the table.",
+        "resign": "/resign gives up the game, after asking first.",
+        "invite": "/invite brings a player to this table, and /invite bot brings in the bot.",
+        "uninvite": "/uninvite takes back an invitation you sent.",
+        "note": "/note shows the table's notes, and /note with words adds one.",
+        "time": "/time shows the time signed in and the server's time.",
+        "who": "/who lists who is online, and /who with a name shows one player.",
+        "list": "/list shows your games and the open tables.",
+        "leave": "/leave goes back to the lobby. The game goes on without you.",
+        "quit": "/quit signs you out, after asking first. Your games go on.",
+        "help": "/help opens help.",
+        "practice": "/practice starts the practice game of Tic Tac Toe, which teaches the keys.",
+        "redraw": "/redraw loads the table again and redraws the screen.",
+    }
+    COMMANDS = {}           # a game's own commands (/roll, /pass ...): name -> what the sentence line says
+    # Help, page 1: how to play here (Moving, Keys for the game, Commands, Every game); page 2: the reference
+    HELP_MOVING = []
+    HELP_KEYS = []
+    HELP_COMMANDS = []
+    HELP_REFERENCE = []
+    EVERY_TABLE = "Every table also takes /say, /invite, /note, /time and /leave."
+
+    def reference(self):
+        """Help's second page: the facts to look up."""
+        return list(self.HELP_REFERENCE)
+    MOVE_EXAMPLE = ""       # a typed move, for the sentence line: "/d3"
+
+    def command_sentence(self, line):
+        """What the sentence line says while line (with its slash) is typed on the command line."""
+        word = line[1:].split()[0].lower() if line[1:].split() else ""
+        text = self.COMMANDS.get(word) or self.TABLE_COMMANDS.get(word)
+        if text:
+            return text
+        if word and self.me >= 0 and self.move_word(word, line[1:].split()):
+            return "Press Enter to play %s." % line[1:].strip()
+        if self.MOVE_EXAMPLE:
+            return "Type a command, or a move such as %s, and press Enter." % self.MOVE_EXAMPLE
+        return "Type a command and press Enter. /help lists them."
+
+    # how a screen shows things; the full screen and plain mode each give their own
+    def tell(self, text, attr=None):
+        raise NotImplementedError
+
+    async def show_lines(self, title, lines):
+        raise NotImplementedError
+
+    async def ask_yes(self, title, lines, verb, yes=None):
+        raise NotImplementedError
+
+    async def help(self, page=1):
+        raise NotImplementedError
+
+    async def reload(self):
+        await self.pull()
+        await self.refresh()
+
+    async def game_command(self, cmd, args):
+        """A game's own command that is more than a move (/colors, /sort, /home): True when done."""
+        return False
+
+    async def run_command(self, line):
+        """A command line, without its slash -> "menu" to leave the table, else None. /leave, /practice, /help,
+        /redraw and a game's own commands for its screen (/sort, /home) are the table screen's own. Every
+        other line, a typed move included, runs on the server (shared)."""
+        p = line.split()
+        if not p:
+            return None
+        cmd, args = p[0].lower(), p[1:]
+        if cmd == "leave":
+            return "menu"
+        if cmd == "practice":
+            if not self.s.ansi:
+                return self.tell(PLAIN_PRACTICE)
+            self.s.practice_next = True
+            return "menu"
+        if cmd == "help":
+            await self.help(2 if args[:1] == ["2"] else 1)
+        elif cmd == "redraw":
+            await self.reload()
+            self.redrawn()
+        elif cmd in self.COMMANDS and await self.game_command(cmd, args):
+            pass
+        else:
+            return await self.shared(line)
+        return None
+
+    def typed_reset(self):
+        """Before a line runs on the server: a pick in progress is put down, since the board may change."""
+
+    async def shared(self, line):
+        """A command line or a typed move, run on the server (CMD) with this table's words, then the events
+        it caused and its answer -> "menu" when it signed you out."""
+        self.typed_reset()
+        lines = answer_lines(await self.s.command(self, line, self.tid))
+        if self.s.quitting:
+            return "menu"
+        await self.reload()
+        await self.answered(line, lines)
+        return None
+
+    async def answered(self, line, lines):
+        """The answer to a command line: one line on the sentence line, more in a box."""
+        if len(lines) == 1:
+            self.tell(lines[0])
+        elif lines:
+            await self.show_lines(box_title(line), lines)
+
+    def redrawn(self):
+        """After /redraw: the full screen repaints."""
+
+    async def said(self):
+        """After a line said to the table."""
+        await self.pull()
+
     async def play_word(self, word):
         """Play move_word's answer -> an error text or None."""
         return await self.move(word)
 
     def on_event(self, text):
         """Called for every new event (the payload after the seq)."""
+
+    def last_move(self, text):
+        """A game's event -> the last-move sentence it makes (docs/design.md, The last move), or None when the
+        event says nothing about the last move."""
+        return None
+
+    def view_last(self):
+        """The last move as a sentence from the view alone, for a game whose view carries it, when no event
+        has told it yet; "" otherwise."""
+        return ""
+
+    def last_said(self):
+        return self.last or self.view_last()
+
+    def actor(self, seat):
+        """Who did something, at the start of a last-move sentence: "You", or the player's name."""
+        seat = int(seat)
+        return "You" if seat == self.me else self.who(self.name(seat))
+
+    def turn_sentence(self):
+        """The panel's turn line, in the shared words: "Your turn.", "Waiting for ann.", "Game over." """
+        if not (self.v and self.v.get("rows")):
+            return "Waiting for a second player."
+        if not self.playing():
+            return "Game over."
+        if self.my_turn():
+            return "Your turn."
+        turn = self.v.get("turn", -1)
+        if turn is None or turn < 0:
+            return "Game over."
+        return "Waiting for %s." % self.who(self.name(turn))
+
+    def clock_sentence(self):
+        """The panel's clock line -> (text, urgent): "You have 4:12 left.", "ann has 2:03 left.", or for a
+        table whose clock isn't running "Each turn has 5 minutes." """
+        c = self.clock()
+        if c:
+            seat, left, limit = c
+            if seat == self.me:
+                return "You have %s left." % left_words(left), left < 60
+            return "%s has %s left." % (self.who(self.name(seat)), left_words(left)), False
+        if self.turn_secs and not self.over:
+            return "Each turn has %s." % turn_words(self.turn_secs), False
+        return "", False
 
     async def refresh(self):
         data, _ = await self.core.req("LST table=%s" % self.tid)
@@ -1968,6 +2385,9 @@ class GameBase:
                     self.names += ["-"] * (int(f[1]) + 1 - len(self.names))
                     self.names[int(f[1])] = f[2]
                 self.on_event(p[3])
+                said = self.last_move(p[3])
+                if said is not None:
+                    self.last = said
                 d = self.describe(p[3])
                 if d:
                     self.log.append(d)
@@ -2001,13 +2421,6 @@ class GameBase:
         data, final = await self.core.req("NOTE %s" % self.tid)
         return note_lines(data) if final.startswith("OK") else []
 
-    async def typed_note(self, text):
-        """The typed commands notes (or note alone) and note TEXT -> lines to show."""
-        if not text:
-            return await self.notes() or ["This table has no notes yet."]
-        _, final = await self.core.req("NOTE %s %s" % (self.tid, text))
-        return ["Noted."] if final.startswith("OK") else ["Can't: " + err_text(final)]
-
     def playing(self):
         return bool(self.v and self.v["rows"]) and not self.over
 
@@ -2038,7 +2451,7 @@ class GameBase:
     async def move(self, sq):
         _, final = await self.core.req("MOV %s %s" % (self.tid, sq))
         if not final.startswith("OK"):
-            return "Can't play %s: %s" % (sq, err_text(final))
+            return self.refused(sq, final)
         await self.pull()
         await self.refresh()
         return None
@@ -2047,77 +2460,34 @@ class GameBase:
         """UND or END for games with staged turns."""
         _, final = await self.core.req("%s %s" % (verb, self.tid))
         if not final.startswith("OK"):
-            return "Can't %s: %s" % (what, err_text(final))
+            return "You can't %s now. %s" % (what, sentence(err_text(final)))
         await self.pull()
         await self.refresh()
         return None
 
     async def chat(self, text):
         _, final = await self.core.req("CHT %s %s" % (self.tid, text))
-        return None if final.startswith("OK") else "Can't: " + err_text(final)
-
-    async def invite_bot(self):
-        """The typed command bot: invite the next bot name to this open table (docs/bot.md) -> what to say."""
-        data, _ = await self.core.req("LST table=%s" % self.tid)
-        tab = next((t for t in parse_tables(data) if t["id"] == self.tid), None)
-        if tab is None or tab["status"] != "open" or self.me < 0:
-            return "The bot can be invited only to an open table where you sit."
-        evts, _ = await self.core.req("SIN %s 0" % self.tid)
-        pending = pending_invites([l.split(" ", 3)[3] for l in evts if l.startswith("EVT ") and l.count(" ") >= 3])
-        if tab["seats"] - tab["filled"] <= len(pending):
-            return "Every free seat is taken or held for someone invited."
-        name = botflag.next_name(tab["names"] + pending)
-        if name is None:
-            return "No bot name is free at this table."
-        _, final = await self.core.req("INV %s %s" % (self.tid, name))
-        await self.pull()
-        return ("Invited %s: it sits down in a few seconds." % name if final.startswith("OK")
-                else "Can't: " + err_text(final))
-
-    async def invite_player(self, name, withdraw=False):
-        """The typed commands invite <name> and uninvite <name> at a table where I sit (INV, UNV) -> what to
-        say. Whoever is invited sees it in their own frontend (a match offer on IOS, a FIBS invitation)."""
-        if self.me < 0:
-            return "Only a player seated here can invite."
-        if not NAME_RE.match(name):
-            return "Names are letters, digits, - and _, up to 12."
-        _, final = await self.core.req("%s %s %s" % ("UNV" if withdraw else "INV", self.tid, name))
-        await self.pull()
-        if final.startswith("OK"):
-            return ("You withdrew %s's invitation." % name if withdraw else
-                    "You invited %s, who is not online now. It will wait an hour." % name if final == "OK offline" else
-                    "You invited %s. It will sit down in a few seconds." % name if botflag.is_bot_name(name) else
-                    "You invited %s." % name)
-        if final.startswith("ERR NOPLAYER"):
-            return "There is no player called %s." % name
-        if final.startswith("ERR NOINVITE"):
-            return "%s is not invited here." % name
-        return "Can't: " + err_text(final)
-
-    async def resign(self):
-        _, final = await self.core.req("RES %s" % self.tid)
-        err = None if final.startswith("OK") else "Can't: " + err_text(final)
-        await self.pull()
-        await self.refresh()
-        return err
-
+        return None if final.startswith("OK") else "Your line can't be sent. %s" % sentence(err_text(final))
 
 class AnsiGame(GameBase, AnsiView):
     """A game's full screen: the key loop, typed commands, talk, resign and
     help, shared by every game. A game's AnsiScreen (adapters/games/) draws
     the screen in compose() and fills in the hooks: on_arrow, on_click,
-    on_enter, on_escape, hotkey, move_word and typed_move, snap."""
+    on_enter, on_escape, hotkey, move_word, typed_reset and snap."""
 
     idle = False
-    HOTKEYS = "rt?"         # single keys taken as commands on an empty input line
+    HOTKEYS = "rt?"         # the game's shortcut keys (letters lower case); any other key does nothing
     LOG_TOP, LOG_ROWS = 9, 11
-    TITLE = "Game"          # the help box's title
-    HELP = []               # the help box's lines
+    EVERY_GAME = ["R resigns, after asking first. T or Tab opens the chat.",
+                  "Esc goes back to the lobby, and the game goes on without you."]
 
     def __init__(self, sess, tid, key, me):
         GameBase.__init__(self, sess, tid, key, me)
         AnsiView.__init__(self, sess)
         self.was_my_turn = False
+        self.chatting = False   # the chat screen is open
+        self.chat_buf = ""      # what is typed on it
+        self.offer_away = None  # the offer put away with Esc (its key), until Enter brings it back
 
     # ---- hooks for the game ------------------------------------------------
     def snap(self):
@@ -2136,23 +2506,99 @@ class AnsiGame(GameBase, AnsiView):
         """Esc with nothing typed: "menu" leaves the table."""
         return "menu"
 
-    def typing(self):
-        """True while every letter types even on an empty line, so movement letters do not move (Grid
-        Words, once a word's start is set)."""
-        return False
-
     def input_line(self, cv):
-        """Line 23: what is being typed. A game screen shows its message on the line above, in place of the
-        hint, so it is not repeated here."""
+        """Row 22: the command line. A game screen shows its message on the sentence line above, in place
+        of the hint, so it is not repeated here."""
         if self.buf:
-            cv.put(1, ROWS - 2, "> " + self.buf[-(COLS - 6):], A_BRIGHT)
+            cv.put(1, ROWS - 2, self.buf[-(COLS - 3):], A_BRIGHT)
 
-    async def typed_move(self, word):
-        """A typed move (move_word's answer): play it and say what went wrong."""
-        err = await self.play_word(word)
-        if err:
-            self.say(err, A_RED)
+    def lit(self):
+        """True in game mode: the cursor and the lit keys show. In command mode they go dark."""
+        return not self.buf
+
+    def sentence(self, hint):
+        """The sentence line's text and attribute: the command being typed, a message, an offer put away,
+        or the hint."""
+        if self.buf:
+            return self.command_sentence(self.buf), A_TEXT
+        if self.msg:
+            return self.msg, self.msg_attr
+        return self.offer_hint() or hint()
+
+    def keys_line(self, cv, keys):
+        """The keys line: the game's keys in game mode, the command line's keys in command mode."""
+        if self.buf:
+            return self.command_keys(cv)
+        status_bar(cv, keys)
+
+    def keys(self, arrows=None, enter=None, actions=(), cancel=False):
+        """The keys line's slots in the shared order (docs/design.md): the arrows and Enter, then the game's
+        actions as (letter, label, command) in order, then Esc cancel while something is picked, then Chat,
+        Help and Resign, the command line and Esc lobby. A shortcut on a movement letter shows as its
+        command. When the slots don't fit, Resign goes first, then Chat, then the game's last actions, and
+        "? help" becomes "? more"."""
+        head = ([("Arrows", arrows)] if arrows else []) + ([("Enter", enter)] if enter else [])
+        acts = []
+        for letter, label, command in actions:
+            if self.move_of(letter):
+                acts.append(("/" + command.split()[0], "", letter))
+            else:
+                acts.append((letter.upper(), label, letter))
+        seated = self.me >= 0 and self.playing()
+        tail = [("Esc", "cancel")] if cancel else []
+        table = [("T", "chat"), ("?", "help")] + ([("R", "resign")] if seated else [])
+        end = [("/", "type", "/")] + ([] if cancel else [("Esc", "lobby")])
+
+        def width(items):
+            return sum(len(i[0]) + (1 + len(i[1]) if i[1] else 0) + 2 for i in items) - 2
+        more = False
+        while width(head + acts + tail + table + end) > COLS - 3:
+            if ("R", "resign") in table:
+                table.remove(("R", "resign"))
+            elif ("T", "chat") in table:
+                table.remove(("T", "chat"))
+            elif acts:
+                acts.pop()
+            else:
+                break
+            more = True
+        if more:
+            table = [t if t[0] != "?" else ("?", "more") for t in table]
+        return head + acts + tail + table + end
+
+    async def shared(self, line):
+        result = await GameBase.shared(self, line)
         self.snap()
+        return result
+
+    def tell(self, text, attr=None):
+        self.say(text, A_RED if attr == "red" else attr or A_YELLOW)
+
+    async def show_lines(self, title, lines):
+        await self.message(title, list(lines)[:HELP_ROWS] or ["There is nothing to show."])
+
+    async def ask_yes(self, title, lines, verb, yes=None):
+        return await self.confirm(title, lines, verb, yes)
+
+    def redrawn(self):
+        self.snap()
+        self.s.painter.invalidate()
+
+    # ---- the sentence line's shared sentences ----------------------------------
+    def waiting_hint(self):
+        return self.waiting_sentence(), A_DIM
+
+    def over_hint(self, text=None):
+        if text is not None:
+            self.over = self.over or text
+        return self.over_sentence() + " Press Esc to go back to the lobby.", A_YELLOW
+
+    def watch_hint(self):
+        names = and_list([self.who(n) for n in self.seated_names()]) or "this table"
+        return "You are watching %s. Press T to chat, or Esc to leave." % names, A_DIM
+
+    def their_hint(self, seat):
+        return "Waiting for %s. Press T to chat, or ? for help." % self.who(self.name(seat)), A_DIM
 
     # ---- drawing helpers -----------------------------------------------------
     def draw_log(self, cv, x, width):
@@ -2164,20 +2610,61 @@ class AnsiGame(GameBase, AnsiView):
         for i, (l, attr) in enumerate(lines[-self.LOG_ROWS:]):
             cv.put(x, self.LOG_TOP + i, l, attr)
 
+    def draw_panel_parts(self, cv, px, top, pw, players, facts=(), extra=None, bottom=19):
+        """The panel, in the shared order (docs/design.md): the players, then the turn, the clock, the last
+        move and the game's facts, then the chat and log down to the bottom row. players: [(seat, mark, score)],
+        where mark is (text, attribute) or None and score is the game's own unit, as "33 discs". facts: lines
+        of text, or (text, attribute). extra(cv, y) draws more under the facts (Grid Words' rack) and returns
+        the next row."""
+        g, inner = self.g, pw - 4
+        box(cv, g, px, top, pw, bottom - top + 1, A_BORDER, "Players", tattr=A_HEAD)
+        y = top + 1
+        started = bool(self.v and self.v.get("rows"))
+        for seat, mark, score in players:
+            tomove = started and self.playing() and self.v.get("turn") == seat
+            empty = seat >= len(self.names) or self.names[seat] in ("", "-")
+            cv.put(px + 2, y, g["ptr"] if tomove else " ", A_YELLOW)
+            x = px + 4
+            if mark:
+                cv.put(x, y, mark[0], mark[1])
+                x += len(mark[0]) + 1
+            label = ("(empty seat)" if empty else self.names[seat]) + (" (you)" if seat == self.me else "")
+            room = px + pw - 2 - x - (len(score) + 1 if score and started else 0)
+            cv.put(x, y, label[:room], A_BRIGHT if tomove else A_DIM if empty else A_TEXT)
+            if score and started:
+                cv.put(px + pw - 2 - len(score), y, score, A_BRIGHT if tomove else A_TEXT)
+            y += 1
+        rule(cv, g, px, y, pw, A_BORDER)
+        y += 1
+        clock, urgent = self.clock_sentence()
+        lines = [(self.turn_sentence(), A_YELLOW), (clock, A_RED if urgent else A_TEXT)]
+        if started and self.last_said():
+            lines.append((self.last_said(), A_TEXT))
+        lines += [f if isinstance(f, tuple) else (f, A_DIM) for f in facts]
+        for text, attr in lines:
+            for l in textwrap.wrap(text, inner):
+                if y < bottom - 2:
+                    cv.put(px + 2, y, l, attr)
+                    y += 1
+        if extra:
+            y = extra(cv, y)
+        rule(cv, g, px, y, pw, A_BORDER, "Chat and log", tattr=A_HEAD)
+        self.LOG_TOP, self.LOG_ROWS = y + 1, max(0, bottom - y - 1)
+        self.draw_log(cv, px + 2, inner)
+
     def draw_waiting(self, cv, x0, y0, w=27):
-        """The "Waiting for an opponent" box over the board."""
+        """The box over the board before the game starts."""
         box(cv, self.g, x0, y0, w, 5, A_POP, double=True, fill=A_POP)
-        cv.put(x0 + 2, y0 + 1, "Waiting for an opponent".center(w - 4), A_POP)
-        if self.me >= 0 and w - 4 >= len(BOT_HINT):
-            cv.put(x0 + 2, y0 + 2, BOT_HINT.center(w - 4), A_POPDIM)
-        cv.put(x0 + 2, y0 + 3, ("Table %s is open" % self.tid).center(w - 4), A_POPDIM)
+        cv.put(x0 + 2, y0 + 1, ("Table %s is open." % self.tid).center(w - 4), A_POP)
+        cv.put(x0 + 2, y0 + 3, "Nobody has joined yet.".center(w - 4), A_POPDIM)
 
     # ---- running ---------------------------------------------------------
     async def run(self):
         if not await self.open_view():
-            return "Can't show that table."
+            return "That table can't be shown."
         self.snap()
         await self.show()
+        await self.offer_check()
         polled = time.time()
         while True:
             k = await self.key(min(1.0, self.tick_in() or 1.0))
@@ -2189,6 +2676,7 @@ class AnsiGame(GameBase, AnsiView):
                         self.snap()
                 await self.tick()
                 await self.show()
+                await self.offer_check()
                 continue
             self.msg = ""
             if not await self.key_seen(k) and await self.on_key(k) == "menu":
@@ -2197,6 +2685,23 @@ class AnsiGame(GameBase, AnsiView):
             await self.show()
 
     async def on_key(self, k):
+        o = self.offer()
+        if o and not self.buf and not self.chatting:
+            if self.offer_away != o[0]:
+                self.io.keys.insert(0, k)           # the dialog is up: the key that came answers it
+                return await self.answer_offer(o)
+            if k in ("ENTER", " "):                 # put away: Enter brings it back
+                return await self.answer_offer(o)
+        result = await self.game_key(k)
+        if result != "menu":
+            await self.offer_check()
+        return result
+
+    async def game_key(self, k):
+        if self.chatting:
+            return await self.chat_key(k)
+        if self.buf:
+            return await self.command_key(k)
         if isinstance(k, tuple):
             v = self.hit(k)
             if isinstance(v, tuple):
@@ -2204,92 +2709,155 @@ class AnsiGame(GameBase, AnsiView):
             if not isinstance(v, str):
                 return None
             if len(v) == 1 and v in self.HOTKEYS:
-                return await self.hotkey(v)         # a status bar key, clicked: never a movement
+                return await self.hotkey(v)         # a keys line item, clicked: never a movement
             k = v
-        elif not self.buf and not self.typing():
+        else:
             k = self.move_of(k) or k                # a movement letter is an arrow
         if k in ("UP", "DOWN", "LEFT", "RIGHT"):
             return self.on_arrow(k)
         if k == "ESC":
-            if self.buf:
-                self.buf = ""
-                return None
             return self.on_escape()
         if k == "REDRAW":
             self.s.painter.invalidate()
             return None
-        if k == "BS":
-            self.buf = self.buf[:-1]
-            return None
-        if k == "ENTER" or (k == " " and not self.buf):
-            if self.buf:
-                line, self.buf = self.buf.strip(), ""
-                return await self.run_line(line)
+        if k in ("ENTER", " "):
             return await self.on_enter()
-        if len(k) != 1:
+        if k == "/":
+            self.buf = "/"
             return None
-        return await self.char_key(k)
+        if k == "TAB":
+            return self.open_chat()
+        if isinstance(k, str) and len(k) == 1:
+            if k.lower() in self.HOTKEYS:
+                return await self.hotkey(k.lower())
+            return self.say(self.does_nothing(k), A_DIM)
+        return None
+
+    def does_nothing(self, k):
+        return "%s does nothing in %s. Press ? to see the keys." % (k.upper(), self.GAME)
+
+    # ---- offers: a dialog for a double, a draw offer or an offer to resign (docs/design.md, Dialogs) -----
+    async def offer_check(self):
+        """Open the offer's dialog when an offer waits and the player has not put it away."""
+        o = self.offer()
+        if not o:
+            self.offer_away = None
+            return None
+        if self.offer_away == o[0] or self.overlay or self.buf or self.chatting:
+            return None
+        return await self.answer_offer(o)
+
+    async def answer_offer(self, o):
+        key, title, lines, start, yes, no, _ = o
+        answer = await self.dialog(title, lines, ("Accept", "Decline"), 0 if start else 1,
+                                   "Press Y to accept, or N to decline. Esc puts this away.")
+        if answer is None:
+            self.offer_away = key           # put away: Enter brings it back
+            return None
+        self.offer_away = None
+        return await self.answer_with(yes if answer else no)
+
+    async def answer_with(self, word):
+        """Send the move that answers an offer."""
+        err = await self.play_word(word)
+        if err:
+            self.say(err, A_RED)
+        self.snap()
+
+    def offer_hint(self):
+        """The sentence line while an offer is put away, or None."""
+        o = self.offer()
+        return (o[6], A_YELLOW) if o and self.offer_away == o[0] else None
+
+    # ---- the chat screen -----------------------------------------------------
+    def open_chat(self):
+        self.chatting, self.chat_buf, self.msg = True, "", ""
+
+    def chat_head(self):
+        """The chat screen's first row: the table, and whose turn it is on the board."""
+        head = "Chat at table %s." % self.tid
+        if not (self.v and self.v.get("rows")):
+            return head + " The game has not started."
+        if not self.playing():
+            return head + " The game is over."
+        if self.my_turn():
+            return head + " It is your turn on the board."
+        return head + " %s is playing." % self.who(self.name(self.v["turn"]))
+
+    async def chat_key(self, k):
+        """A key on the chat screen: everything types, except ? on an empty line, which opens help. Enter says
+        the line (a line with a slash is a command), and Esc goes back to the board."""
+        if k == "ESC":
+            self.chatting, self.chat_buf = False, ""
+        elif k == "BS":
+            self.chat_buf = self.chat_buf[:-1]
+        elif k == "REDRAW":
+            self.s.painter.invalidate()
+        elif k == "?" and not self.chat_buf:      # on an empty line, ? is help, as everywhere
+            return await self.help()
+        elif k == "ENTER":
+            line, self.chat_buf = self.chat_buf.strip(), ""
+            if line.startswith("/"):
+                return await self.command(line[1:].strip())
+            if line:
+                err = await self.chat(line)
+                if err:
+                    self.say(err, A_RED)
+                await self.pull()
+        elif isinstance(k, str) and len(k) == 1 and len(self.chat_buf) < 70:
+            self.chat_buf += k
+        return None
+
+    def compose_screen(self):
+        return self.compose_chat() if self.chatting else self.compose()
+
+    def compose_chat(self):
+        cv = Canvas()
+        g = self.g
+        title_bar(cv, g, self.title_text())
+        cv.put(1, 1, self.chat_head()[:COLS - 2], A_YELLOW)
+        box(cv, g, 0, 2, COLS, 18, A_BORDER, "Chat and log", tattr=A_HEAD)
+        lines = []
+        for entry in self.log:
+            attr = A_TEXT if entry.startswith("<") else A_DIM
+            lines += [(l, attr) for l in wrap(entry, COLS - 4)]
+        for i, (l, attr) in enumerate(lines[-16:]):
+            cv.put(2, 3 + i, l, attr)
+        text, attr = (self.msg, self.msg_attr) if self.msg else (
+            "Type a line and press Enter to say it. Esc goes back to the board.", A_TEXT)
+        cv.put(1, ROWS - 3, text[:COLS - 2], attr)
+        cv.put(1, ROWS - 2, ("> " + self.chat_buf)[-(COLS - 3):], A_BRIGHT)
+        status_bar(cv, [("Enter", "send"), ("/", "command"), ("Esc", "board")], lit=False)
+        return cv
+
+    def cursor_spot(self):
+        return (min(3 + len(self.chat_buf), COLS - 2), ROWS - 2) if self.chatting else None
 
     async def hotkey(self, k):
-        """R resigns, T starts a line to the table, ? helps; a game adds its own and calls this."""
+        """R resigns, T opens the chat screen, ? helps; a game adds its own and calls this."""
         if k == "r":
-            return await self.ask_resign()
+            return await self.shared("resign")
         if k == "t":
-            self.buf = "say "
-            return None
+            return self.open_chat()
         if k == "?":
             return await self.help()
         return None
 
     async def command(self, line):
-        p = line.split()
-        if not p:
-            return None
-        cmd = p[0].lower()
-        if cmd in MENU_WORDS:
-            return "menu"
-        if cmd in ("redraw", "r", "refresh"):
-            await self.pull()
-            await self.refresh()
-            self.snap()
-            self.s.painter.invalidate()
-        elif cmd in ("help", "?"):
-            await self.help()
-        elif cmd in ("say", "chat") and len(p) > 1:
-            err = await self.chat(" ".join(p[1:]))
-            if err:
-                self.say(err, A_RED)
-            await self.pull()
-        elif cmd == "resign":
-            await self.ask_resign()
-        elif cmd == "bot" and len(p) == 1:
-            self.say(await self.invite_bot())
-        elif cmd in ("invite", "uninvite") and len(p) == 2:
-            self.say(await self.invite_player(p[1], withdraw=cmd == "uninvite"))
-        elif cmd in ("notes", "note"):
-            lines = await self.typed_note(line.split(None, 1)[1].strip() if cmd == "note" and len(p) > 1 else "")
-            if len(lines) == 1:
-                self.say(lines[0])
-            else:
-                await self.message("Notes", lines)
-        elif self.me >= 0 and self.move_word(cmd, p):
-            await self.typed_move(self.move_word(cmd, p))
-        else:
-            self.say("Unknown command: %s. Press ? for help." % line[:20], A_RED)
-        return None
+        """A command line, without its slash."""
+        return await self.run_command(line)
 
-    async def ask_resign(self):
-        if self.me < 0 or not self.playing():
-            return self.say("There is no game of yours running here to resign.")
-        if await self.confirm("Resign", ["Resign this game? It ends now and counts",
-                                         "as a loss. (Leaving never resigns.)"]):
-            err = await self.resign()
-            if err:
-                self.say(err, A_RED)
-        return None
+    def help_pages(self):
+        """Help's two pages, as lists of lines."""
+        one = ["Moving"] + self.HELP_MOVING + ["", "Keys for %s" % self.GAME] + (
+            self.HELP_KEYS or ["%s has no keys of its own." % self.GAME]) + ["", "Commands"] + self.HELP_COMMANDS \
+            + ["", "Every game"] + self.EVERY_GAME
+        extra = self.keys_help()
+        two = (extra + [""] if extra else []) + self.reference() + ["", self.EVERY_TABLE, PRACTICE_LINE]
+        return one, two
 
-    async def help(self):
-        await self.help_box(self.TITLE, self.HELP)
+    async def help(self, page=1):
+        await self.pages("%s help" % self.GAME, list(self.help_pages()), page)
 
 
 class PlainGame(GameBase):
@@ -2298,25 +2866,86 @@ class PlainGame(GameBase):
     commands: say, resign, redraw, menu, help."""
 
     BOARD_KINDS = ("JOIN", "LEAVE", "START", "END")   # events that redraw the board (others are printed)
-    HELP_TEXT = ""                                    # what help prints
 
     def lines(self):
         raise NotImplementedError
 
     def prompt(self):
-        return "> "
+        """The prompt: the sentence line made short, ending with ">", naming a command only when it applies."""
+        v = self.v
+        if not (v and v.get("rows")):
+            return "Waiting for a second player. > "
+        if not self.playing():
+            return "Game over. > "
+        if self.me < 0:
+            return "You are watching. > "
+        if self.my_turn():
+            return self.turn_prompt() + " > "
+        return "%s > " % self.turn_sentence()
+
+    def turn_prompt(self):
+        """The prompt on your turn, without its ">"."""
+        return "Your turn."
+
+    # ---- the plain screen's parts, in the panel's order ----------------------------------------
+    def plain_header(self):
+        """The first lines: "Grid Words, table 12, with ann. You are eric." """
+        return textwrap.wrap("%s. %s" % (self.title_text(), "You are watching." if self.me < 0 else
+                                         "You are %s." % self.s.name), 78)
+
+    def plain_waiting(self):
+        return ["", self.waiting_sentence(), "Type /leave to go back to the lobby. The table stays open."]
+
+    def side_text(self, players, facts=(), width=32):
+        """The text beside the board, in the panel's order (docs/design.md): the players, then the turn, the
+        clock, the last move and the game's facts. players: [(seat, mark, score)]."""
+        out = []
+        started = bool(self.v and self.v.get("rows"))
+        for seat, mark, score in players:
+            tomove = started and self.playing() and self.v.get("turn") == seat
+            empty = seat >= len(self.names) or self.names[seat] in ("", "-")
+            label = ("(empty seat)" if empty else self.names[seat]) + (" (you)" if seat == self.me else "")
+            head = "%s %s%s" % (">" if tomove else " ", mark + " " if mark else "", label)
+            out.append(head[:width - len(score) - 1].ljust(width - len(score)) + score)
+        out.append("")
+        clock, _ = self.clock_sentence()
+        first = self.over_sentence() if started and not self.playing() else self.turn_sentence()
+        for text in [first, clock, self.last_said() if started else ""] + list(facts):
+            out += textwrap.wrap(text, width) if text else []
+        return out
+
+    @staticmethod
+    def beside(board, side, col):
+        """The board's lines with the side text beside them from column col, the rest below."""
+        out = []
+        for i in range(max(len(board), len(side))):
+            left = board[i] if i < len(board) else ""
+            right = side[i] if i < len(side) else ""
+            out.append((left.ljust(col) + right if right else left).rstrip()[:80])
+        return out
+
+    def plain_log(self, n=4):
+        return [" " + l[:78] for l in self.log[-n:]]
 
     async def draw(self):
-        self.io.write("\n".join(self.lines()) + "\n" + self.prompt())
+        self.io.write("\n".join(self.lines()) + "\n" + self.full_prompt())
         await self.io.flush()
+        self.drawn = True
 
     async def notice(self, text):
-        self.io.write(text + "\n" + self.prompt())
+        self.io.write(text + "\n" + self.full_prompt())
         await self.io.flush()
+
+    def full_prompt(self):
+        """The prompt, or while an offer waits, its question: the dialog of plain mode."""
+        o = self.offer()
+        if o:
+            return "\n".join(o[2]) + "\nType Y to accept, or N to decline. > "
+        return self.prompt()
 
     async def run(self):
         if not await self.open_view():
-            return "Can't show that table."
+            return "That table can't be shown."
         await self.draw()
         buf = ""
         while True:
@@ -2327,7 +2956,7 @@ class PlainGame(GameBase):
                     await self.refresh()
                     await self.draw()
                 elif any(d for _, d in new):
-                    await self.notice("\n".join(" " + d for _, d in new if d))
+                    await self.notice("\n".join(" " + self.as_sentence(d) for _, d in new if d))
                 await self.tick()
                 continue
             if await self.key_seen(k):
@@ -2336,7 +2965,7 @@ class PlainGame(GameBase):
                 line, buf = buf.strip(), ""
                 if self.io.server_echo:
                     self.io.write("\n")
-                if await self.command(line) == "menu":
+                if await self.line_in(line) == "menu":
                     return None
                 await self.tick()
             elif k == "BS":
@@ -2346,51 +2975,103 @@ class PlainGame(GameBase):
                         self.io.write("\b \b")
                         await self.io.flush()
             elif k == "ESC":
-                return None
-            elif len(k) == 1 and len(buf) < 60:
+                if not buf:
+                    return None
+                if self.io.server_echo:             # Esc with something typed clears it
+                    self.io.write("\b \b" * len(buf))
+                    await self.io.flush()
+                buf = ""
+            elif isinstance(k, str) and len(k) == 1 and len(buf) < 60:
                 buf += k
                 if self.io.server_echo:
                     self.io.write(k)
                     await self.io.flush()
 
-    async def command(self, line):
-        p = line.split()
-        if not p or p[0].lower() in ("redraw", "r", "refresh"):
-            await self.pull()
-            await self.refresh()
+    async def line_in(self, line):
+        """A line typed at the prompt. A line with a slash is a command or a move. An empty line draws the
+        board again. Any other line is said to the table, except one that is a move, which is not sent:
+        the answer says how to play it or say it."""
+        self.drawn = False
+        o = self.offer()
+        if o and line.lower() in ("y", "n", "yes", "no"):
+            yes = line.lower().startswith("y")
+            err = await self.play_word(o[4] if yes else o[5])
+            return await (self.notice(err) if err else self.draw())
+        if not line:
+            await self.reload()
             return await self.draw()
-        cmd = p[0].lower()
-        if cmd in MENU_WORDS:
-            return "menu"
-        if cmd in ("help", "?"):
-            return await self.notice(self.HELP_TEXT)
-        if cmd in ("say", "chat") and len(p) > 1:
-            err = await self.chat(" ".join(p[1:]))
-            new = await self.pull()
-            return await self.notice(err or "\n".join(" " + d for _, d in new if d))
-        if cmd == "resign" and self.me >= 0:
-            self.io.write("Resign this game? (y/N) ")
-            await self.io.flush()
-            if (await self.io.readline()).lower().startswith("y"):
-                err = await self.resign()
+        if line.startswith("/"):
+            if await self.run_command(line[1:].strip()) == "menu":
+                return "menu"
+        else:
+            p = line.split()
+            if self.me >= 0 and p[0].lower() not in self.COMMANDS and self.move_word(p[0].lower(), p):
+                self.tell("To play %s, type /%s. To say it, type /say %s." % (line, line, line))
+            else:
+                err = await self.chat(line)
                 if err:
-                    self.log.append(err)
-            return await self.draw()
-        if cmd == "bot" and len(p) == 1:
-            return await self.notice(await self.invite_bot())
-        if cmd in ("invite", "uninvite") and len(p) == 2:
-            return await self.notice(await self.invite_player(p[1], withdraw=cmd == "uninvite"))
-        if cmd in ("notes", "note"):
-            lines = await self.typed_note(line.split(None, 1)[1].strip() if cmd == "note" and len(p) > 1 else "")
-            return await self.notice("\n".join(" " + l for l in lines))
-        word = self.move_word(cmd, p)
-        if self.me >= 0 and word:
-            err = await self.play_word(word)
-            if err:
-                return await self.notice(err)
-            return await self.draw()
-        return await self.notice("Unknown: %s. Type help." % line[:20])
+                    self.tell(err)
+                await self.said()
+        if not self.drawn:
+            self.io.write(self.full_prompt())
+            await self.io.flush()
+        return None
 
+    async def command(self, line):
+        """A command line, without its slash (also for the tests)."""
+        return await self.run_command(line)
+
+    def tell(self, text, attr=None):
+        self.io.write(text + "\n")
+
+    async def show_lines(self, title, lines):
+        self.io.write(title + "\n" + "".join("  %s\n" % l for l in lines))
+
+    async def ask_yes(self, title, lines, verb, yes=None):
+        self.io.write(" ".join(lines) + " Type Y for yes, or N for no. ")
+        await self.io.flush()
+        return (await self.io.readline()).strip().lower().startswith("y")
+
+    PLAIN_EVERY = ["Every game",
+                   "Type /resign to resign, after asking first. A line without a slash is",
+                   "said to the table. Type /leave to go back to the lobby, and the game",
+                   "goes on without you."]
+
+    async def help(self, page=1):
+        if page == 2:
+            lines = self.reference() + ["", self.EVERY_TABLE]
+        else:
+            lines = ["Commands"] + self.HELP_COMMANDS + [""] + self.PLAIN_EVERY + ["", "Type /help 2 for the reference."]
+        self.io.write("".join(" %s\n" % l if l else "\n" for l in lines))
+
+    async def said(self):
+        new = await self.pull()
+        for _, d in new:
+            if d:
+                self.io.write(" " + self.as_sentence(d) + "\n")
+
+    @staticmethod
+    def as_sentence(text):
+        """A log line printed between prompts: chat as it was said, an event as a sentence."""
+        return text if text.startswith("<") or text.endswith((".", "!", "?")) else text + "."
+
+    async def shared(self, line):
+        """As on the full screen, and the board is printed again when the line changed it."""
+        before = self.v
+        self.typed_reset()
+        lines = answer_lines(await self.s.command(self, line, self.tid))
+        if self.s.quitting:
+            return "menu"
+        new = await self.pull()
+        await self.refresh()
+        if self.v != before:
+            await self.draw()
+        else:
+            for _, d in new:
+                if d:
+                    self.io.write(" " + self.as_sentence(d) + "\n")
+        await self.answered(line, lines)
+        return None
 
 # The text screens of every game, from its module in adapters/games/: game type -> (full-screen class, plain
 # class). Worked out from the registry when used, so a new game module needs no edit here.
@@ -2398,8 +3079,7 @@ RENDERERS = games.Lookup(lambda m: (m.AnsiScreen, m.PlainScreen))
 
 # Names that moved to adapters/games/ and are still found here (tests and older code use them).
 _MOVED = {"AnsiReversi": "reversi", "PlainReversi": "reversi", "AnsiBackgammon": "backgammon",
-          "PlainBackgammon": "backgammon", "BgBase": "backgammon", "bg_glyphs": "backgammon",
-          "GAME_HELP": "reversi", "BG_HELP": "backgammon"}
+          "PlainBackgammon": "backgammon", "BgBase": "backgammon", "bg_glyphs": "backgammon"}
 
 
 def __getattr__(name):
@@ -2423,6 +3103,9 @@ class Session:
         self.games = []
         self.invites = []           # my invitations (IVL), loaded with the tables
         self.since = getattr(io, "since", None) or time.time()     # signed in: the time connected counts from here
+        self.history = []           # the command lines run, for Up and Down in command mode
+        self.quitting = False       # /quit at a table, said yes to: the session ends
+        self.practice_next = False  # /practice at a table: the lobby opens the practice game
 
     async def load(self):
         """-> (tables, {table id: (seat to move, secs left, turn secs, when)})
@@ -2457,82 +3140,64 @@ class Session:
         players = parse_players(data)
         bots = {n.lower() for n, bot in players if bot}
         names = [botflag.label(n, bots) for n in botflag.listed(players)]
-        return ("Online now: " + ", ".join(names))[:COLS - 2] if names else "Nobody is online."
+        if not names:
+            return "Nobody is online now."
+        text = "%s %s online now." % (and_list(names), "is" if len(names) == 1 else "are")
+        return text if len(text) <= COLS - 2 else "%d players are online now, %s and more." % (
+            len(names), ", ".join(names[:5]))
 
     def game_name(self, key):
         g = next((g for g in self.games if g["key"] == key), None)
         return g["name"] if g else key.split("/")[0].capitalize()
 
     # ---- profiles and the activity (PFL, FEED; docs/protocol.md) ---------------------------------------------
-    async def profile_lines(self, name, width=52):
-        """(title, lines) of a player's profile, or your own without a name: the preferred machine, the games
-        played and the programs and machines used at public tables, and the latest turns there, each wrapped
-        to width; (None, [reason]) when there is no such player."""
-        if not self.games:
-            await self.load()
-        data, final = await self.core.req("PFL %s" % name if name else "PFL")
-        if not final.startswith("OK"):
-            return None, ["There is no player named %s here." % name if "NOPLAYER" in final else
-                          "Can't: " + err_text(final)]
-        prof = parse_profile(data)
-        out = ["Preferred machine: %s" % (prof["pref"] or "none given")]
-        if prof["score"]:
-            sc = prof["score"]
-            out += textwrap.wrap("Score: %s%s" % (score_text(sc), ", number %d" % sc["rank"] if sc["rank"] else ""),
-                                 width, subsequent_indent="  ")
-        for label, items in (("Games played", [(self.game_name(k), n) for k, n in prof["games"]]),
-                             ("Played with", prof["progs"]), ("On", prof["machs"])):
-            if items:
-                out += textwrap.wrap("%s: %s" % (label, ", ".join("%s (%d)" % kv for kv in items)), width,
-                                     subsequent_indent="  ")
-        fdata, final = await self.core.req("FEED 3 %s" % prof["name"])
-        turns = parse_turns(fdata) if final.startswith("OK") else []
-        if turns:
-            out.append("Latest turns:")
-        for t in turns:
-            out += textwrap.wrap(turn_sentence(t, self.game_name(t["key"])), width, initial_indent="  ",
-                                 subsequent_indent="    ")
-        return "Profile of %s" % prof["name"], out
-
-    async def score_lines(self, game="", width=52, most=10):
-        """The leaderboard (TOP), by every game or one (its type or its name, such as reversi or "grid"): a
-        table of the first most players, then the note that scores are easy to get (SCORES_NOTE)."""
-        if not self.games:
-            await self.load()
-        key = ""
-        if game:
-            low = game.lower()
-            key = next((g["key"] for g in self.games if low in (g["key"], g["key"].split("/")[0])
-                        or g["name"].lower().replace(" ", "").startswith(low)), "")
-            if not key:
-                return ["There is no game %s here." % game[:20]]
-        data, final = await self.core.req("TOP %d%s" % (most, " game=" + key if key else ""))
-        if final.startswith("ERR NOSCORES") or final.startswith("ERR UNKNOWN"):
-            return ["This server shows no leaderboard."]
-        if not final.startswith("OK"):
-            return ["Can't: " + err_text(final)]
-        rows = parse_top(data)
-        out = ["In %s:" % self.game_name(key)] if key else []
-        if rows:
-            out.append("%4s %-12s %6s %4s %4s %4s %4s" % ("Rank", "Player", "Points", "Won", "Draw", "Lost", "Res"))
-            out += ["%4d %-12s %6d %4d %4d %4d %4d" % (r["rank"], r["name"], r["points"], r["wins"], r["draws"],
-                                                      r["losses"], r["resigns"]) for r in rows]
-        else:
-            out.append("No scores yet: finish a game to get one.")
-        return out + textwrap.wrap(SCORES_NOTE, width)
-
     async def activity_lines(self, width=52, most=5):
         """The latest turns at public tables (FEED), each a sentence wrapped to width."""
         if not self.games:
             await self.load()
         data, final = await self.core.req("FEED %d" % most)
         if not final.startswith("OK"):
-            return ["Can't: " + err_text(final)]
+            return ["That didn't work. %s" % sentence(err_text(final))]
         out = []
         for t in parse_turns(data):
             out += textwrap.wrap("%s: %s" % (turn_time(t["at"]), turn_sentence(t, self.game_name(t["key"]))),
                                  width, subsequent_indent="  ")
         return out or ["No turns at public tables yet."]
+
+    async def cmd(self, line, tid=None, sure=False):
+        """One command line on the server: CMD [table] [YES] /line (docs/protocol.md, Commands) -> (the dialog
+        it asks for as (kind, table), or None, and the lines it answered)."""
+        if len(line) + 1 > CMD_MAX:
+            return None, ["A command line takes up to %d characters." % CMD_MAX]
+        head = " ".join(w for w in (tid or "", "YES" if sure else "") if w)
+        data, final = await self.core.req("CMD %s/%s" % (head + " " if head else "", line))
+        if not final.startswith("OK"):
+            return None, ["Not so fast. Wait a moment and type it again." if final.startswith("ERR RATE")
+                          else "That didn't work. %s" % sentence(err_text(final))]
+        dialog, lines = None, []
+        for l in data:
+            f = l.split()
+            if f[:1] == ["DLG"] and len(f) >= 2:
+                dialog = (f[1], f[2] if len(f) > 2 else None)
+            elif f[:1] == ["INF"]:
+                lines.append(l[4:])
+        return dialog, lines
+
+    async def command(self, view, line, tid=None):
+        """A command line on the server, asking first where the server asks: the dialog on view (its ask_yes),
+        with the server's words, and its Yes sends the confirmed form -> the lines to show. A confirmed /quit
+        signs you out, and the session ends (quitting)."""
+        dialog, lines = await self.cmd(line, tid)
+        if dialog is None:
+            return lines
+        kind, at = dialog
+        words = dialog_lines(" ".join(l for l in lines if l.strip()))
+        if not await view.ask_yes(DIALOG_TITLES.get(kind, kind.capitalize()), words, kind):
+            return []
+        _, lines = await self.cmd(kind, at, sure=True)
+        if kind == "quit":
+            self.quitting = True
+        return lines
 
     def table_state(self, t, clocks):
         """Status of one of this player's tables -> (text, attribute)."""
@@ -2550,7 +3215,7 @@ class Session:
         _, final = await self.core.req("NEW %s %s turn=%s%s" % (game["key"], rules or game["rules"], turn,
                                                               " players=%d" % players if players else ""))
         if not final.startswith("OK"):
-            return None, "Can't: " + err_text(final)
+            return None, "That didn't work. %s" % sentence(err_text(final))
         return final.split()[1], None
 
     async def enter(self, tid, watch=False, sit=False):
@@ -2571,11 +3236,11 @@ class Session:
         else:
             if not watch and tab["status"] != "open":
                 if sit:
-                    return "Table %s is already playing; type watch %s to watch it." % (tid, tid)
+                    return "Table %s is already playing. Type /watch %s to watch it." % (tid, tid)
                 watch = True
             _, final = await self.core.req("%s %s" % ("SEE" if watch else "JON", tid))
             if not final.startswith("OK"):
-                return "Can't: " + err_text(final)
+                return "That didn't work. %s" % sentence(err_text(final))
             me = -1 if watch else int(final.split()[1])
         try:
             screen = RENDERERS[tab["key"]][0 if self.ansi else 1](self, tid, tab["key"], me)
@@ -2591,11 +3256,33 @@ class Session:
             await self.core.req("LVE %s" % tid)
         return err
 
+    async def practice(self):
+        """Open the practice game (adapters/telnet_practice.py) on the full screen; back when the player leaves."""
+        from .telnet_practice import run_practice
+        self.practice_next = False
+        await run_practice(self)
+
+    async def offer_practice(self):
+        """Once, at a sign-in on the full screen: ask whether the player wants the practice game, and keep the
+        answer with the player (PRF) so that the question never comes back."""
+        load = getattr(self.core, "load_pref", None)
+        if not load or await load(PRACTICE_PREF, PRACTICE_STATES, "new") != "new":
+            return
+        menu = AnsiMenu(self)
+        yes = await menu.dialog("Practice game", ["Would you like a two-minute practice game to learn",
+                                                  "the keys? It is not played on the parlor."],
+                                ("Yes", "No"), 0, "Press Y for yes, or N for no.")
+        await self.core.save_pref(PRACTICE_PREF, "asked")
+        if yes:
+            await self.practice()
+
     async def run(self):
         mouse = self.ansi and getattr(self.io, "mouse", False)
         if mouse:
             self.io.write(MOUSE_ON)
         try:
+            if self.ansi:
+                await self.offer_practice()
             for tries in range(4):
                 menu = AnsiMenu(self) if self.ansi else PlainMenu(self)
                 if tries:
@@ -2770,10 +3457,10 @@ async def keep_moves(core, moves):
 
 async def ask_moves(io):
     """The movement keys, asked line by line at login -> a key of MOVE_SETS (Enter: the arrows only)."""
-    io.write("\nMovement keys: letters that move the cursor as the arrows do (arrows work too).\n")
+    io.write("\nLetters can move the cursor as the arrows do, and the arrows work too.\n")
     for i, m in enumerate(MOVE_ORDER, 1):
         io.write("  %d) %s\n" % (i, move_label(m)))
-    io.write("They are kept for your next visit; O in the menu changes them.\nChoice [1]: ")
+    io.write("They are kept for your next visit, and /keys in the lobby changes them.\nChoice [1]: ")
     await io.flush()
     choice = (await io.readline()).strip()
     numbers = [str(i) for i in range(1, len(MOVE_ORDER) + 1)]
@@ -2860,13 +3547,13 @@ async def main_session(io, args, ticket=None, title_first=True):
             io.mouse = mouse_for_ttype(ttype)
         offer = mode != "plain" and not arrows_for_ttype(ttype)
         io.write("\nHello, %s.\n" % name)
-        io.write("To play the bot, start a table and type bot while you wait for an opponent.\n")
         if offer:
             io.write("Your terminal may not send arrow keys. Letters can move the cursor instead.\n")
         moves = await load_moves(core) if mode != "plain" else "arrows"
         if moves != "arrows":
-            io.write("Movement keys: %s, as you chose before (O in the menu changes them).\n" % moves.upper())
-        io.write("Press Enter for the menu%s." % (", or K and Enter to choose movement keys" if offer else ""))
+            io.write("You move the cursor with %s, as you chose before. /keys in the lobby changes that.\n"
+                     % moves.upper())
+        io.write("Press Enter for the lobby%s." % (", or K and Enter to choose movement keys" if offer else ""))
         await io.flush()
         if (await io.readline()).strip().lower() in ("k", "keys") and mode != "plain":
             moves = await ask_moves(io)

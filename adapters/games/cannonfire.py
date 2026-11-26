@@ -9,10 +9,11 @@ power and MOVE L n or MOVE R n. It works out which columns a move can reach
 (reach()) with the spec's path rule, only to offer them to the player.
 """
 import math
+import textwrap
 import re
 
-from ..telnet import (A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_TEXT, A_YELLOW, COLS, ROWS, AnsiGame, Canvas,
-                      GameBase, PlainGame, clock_text, fmt_secs, rule, status_bar, title_bar)
+from ..telnet import (A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_TEXT, A_YELLOW, AnsiGame, COLS, Canvas, GameBase,
+                      PlainGame, ROWS, and_list, rule, title_bar)
 from ..telnet import describe_event as describe_common
 from ..board import Canvas as Picture
 from ..web import a, board_html, esc, hidden_fields
@@ -598,22 +599,6 @@ def landscape(v, sw, glyphs, aims, trail, me=-1):
     return grid, col
 
 
-HELP = [
-    "Left/Right   turn the barrel by 1 degree",
-    "Up/Down      power up or down by 1",
-    "< >  Home End  turn the barrel by 10 degrees",
-    "+ -  PgUp PgDn power up or down by 10",
-    "Enter/Space  fire",
-    "[ ]          move left or right as far as you can",
-    "             (once a turn, before firing)",
-    "Mouse        click the sky to aim there, the ground",
-    "             beside your tank to drive there",
-    "T  talk      R  resign (asks first)",
-    "Esc          back to the menu; the game goes on",
-    "Typed: 45 60 or fire 45 60 (angle, power),",
-    "move l 5, move r 5, move -5 (columns of path),",
-    "say <text>, resign, redraw, menu, help.",
-]
 
 
 def hp_bar(hp, full="#", empty="."):
@@ -625,7 +610,27 @@ def hp_bar(hp, full="#", empty="."):
 class CannonBase(GameBase):
     """What both Cannon Fire screens share: the view, the events, typed shots, the last shot's path."""
 
+    HELP_MOVING = ["Left and Right turn the barrel, and Up and Down change the power.",
+                   "Press Enter to fire. A click in the sky aims there, and a click on",
+                   "the Fire button fires."]
+    HELP_KEYS = ["< and > turn the barrel by 10, and + and - change the power by 10.",
+                 "[ and ] drive the tank as far as it can go, before you fire."]
+    HELP_COMMANDS = ["Press / to type one. /fire 45 60 fires at angle 45 with power 60,",
+                     "and /45 60 does the same. /drive left 5 drives 5 columns to the",
+                     "left, and /drive left goes as far as it can."]
+    HELP_REFERENCE = ["Aiming",
+                      "Angle 0 points right, 90 points straight up and 180 points left.",
+                      "Power goes from 0 to 100, and the wind pushes the shell.",
+                      "",
+                      "Driving",
+                      "You may drive once a turn, before you fire. A slope takes more of",
+                      "the distance you have, and a game gives you four drives."]
+
     parse = staticmethod(parse_view)
+    GAME = NAME
+    MOVE_EXAMPLE = "/45 60"
+    COMMANDS = {"fire": "/fire 45 60 fires at angle 45 with power 60, and so does /45 60.",
+                "drive": "/drive left 5 drives 5 columns to the left, and /drive left goes as far as it can."}
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
@@ -635,6 +640,26 @@ class CannonBase(GameBase):
     def describe(self, text):
         d = describe_event(text, self.names)
         return d if d is not None else describe_common(text, self.names)
+
+    shot = None             # [who fired, angle, power, who was hit, whether it flew out]
+
+    def last_move(self, text):
+        p = text.split()
+        if not p:
+            return None
+        if p[0] == "FIRE" and len(p) == 4:
+            self.shot = [int(p[1]), p[2], p[3], [], False]
+        elif p[0] == "DMG" and len(p) == 3 and self.shot and p[1].isdigit():
+            if int(p[1]) not in self.shot[3]:
+                self.shot[3].append(int(p[1]))
+        elif p[0] == "OUT" and self.shot:
+            self.shot[4] = True
+        else:
+            return None
+        seat, ang, pw, hit, out = self.shot
+        names = and_list(["you" if s == self.me else self.who(self.name(s)) for s in hit])
+        tail = " and hit %s" % names if hit else " and missed" if out else ""
+        return "%s fired at angle %s with power %s%s." % (self.actor(seat), ang, pw, tail)
 
     def on_event(self, text):
         p = text.split()
@@ -646,14 +671,14 @@ class CannonBase(GameBase):
 
     def move_word(self, cmd, words=()):
         w = list(words)
-        if w and w[0].lower() == "move":            # move l 5, move left 5, move -5, move +5, move r
+        if w and w[0].lower() == "drive":           # /drive left 5, /drive right, as far as it can
             w = [x.lower() for x in w[1:]]
-            if len(w) == 1 and w[0][:1] in "-+" and w[0][1:].isdigit() and len(w[0]) <= 4:
-                return "MOVE %s%d" % (w[0][0], int(w[0][1:]))
-            if w and w[0] in DIRS and (len(w) == 1 or (len(w) == 2 and w[1].isdigit() and len(w[1]) <= 3)):
+            if w and w[0] in ("left", "right") and (len(w) == 1 or (len(w) == 2 and w[1].isdigit()
+                                                                      and len(w[1]) <= 3)):
+                side = "L" if w[0] == "left" else "R"
                 if len(w) == 1:
-                    return full_move(self.v, -1 if DIRS[w[0]] == "L" else 1) if self.v else None
-                return "MOVE %s %d" % (DIRS[w[0]], int(w[1]))
+                    return full_move(self.v, -1 if side == "L" else 1) if self.v else None
+                return "MOVE %s %d" % (side, int(w[1]))
             return None
         if w and w[0].lower() == "fire":
             w = w[1:]
@@ -708,9 +733,8 @@ class CannonBase(GameBase):
 class AnsiCannon(CannonBase, AnsiGame):
     """Cannon Fire, full screen: the landscape across the top, the aim on row 1, players and log below."""
 
-    HOTKEYS = "rt?<>,.+=-[]"
+    HOTKEYS = "rt?<>+-[]"
     LOG_TOP, LOG_ROWS = 15, 6
-    TITLE, HELP = "Cannon Fire", HELP
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
@@ -731,8 +755,7 @@ class AnsiCannon(CannonBase, AnsiGame):
     def compose(self):
         cv = Canvas()
         g = self.g
-        right = "watching" if self.me < 0 else "you are tank %s" % letter(self.me)
-        title_bar(cv, g, "Cannon Fire %s table %s" % (g["v"], self.tid), right)
+        title_bar(cv, g, self.title_text())
         started = bool(self.v and self.v["rows"])
         sw, off = self.geometry()
         if started:
@@ -742,26 +765,21 @@ class AnsiCannon(CannonBase, AnsiGame):
             cv.put(off - 1, y, g["v"], A_BORDER)
             cv.put(off + sw, y, g["v"], A_BORDER)
         rule(cv, g, 0, 14, COLS, A_BORDER, "Players", tattr=A_HEAD)
-        cv.put(42, 14, " Log ", A_HEAD)
+        cv.put(42, 14, " Turn, chat and log ", A_HEAD)
         for y in range(15, 21):
             cv.put(40, y, g["v"], A_BORDER)
         self.draw_players(cv)
-        self.draw_log(cv, 42, COLS - 43)
+        self.draw_turn(cv)
         if not started:
             self.draw_waiting(cv, 26, 5)
-        text, attr = (self.msg, self.msg_attr) if self.msg else self.hint()
+        text, attr = self.sentence(self.hint)
         cv.put(1, ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
-        tail = [("T", "talk"), ("R", "resign"), ("?", "help"), ("Esc", "menu")]
-        if self.buf:
-            keys = [("Enter", "send"), ("Esc", "cancel"), ("Backspace", "erase")]
-        elif self.my_turn():
-            keys = [("Arrows", "aim"), ("Enter", "fire")] + ([("[ ]", "move")] if self.mobile() else []) + tail
-        elif self.me >= 0 and self.playing():
-            keys = tail
+        if self.my_turn():
+            keys = self.keys("aim", "fire", [("[ ]", "drive", "drive")] if self.mobile() else [])
         else:
-            keys = [("T", "talk"), ("?", "help"), ("Esc", "menu")]
-        status_bar(cv, keys)
+            keys = self.keys()
+        self.keys_line(cv, keys)
         return cv
 
     def draw_info(self, cv):
@@ -779,7 +797,7 @@ class AnsiCannon(CannonBase, AnsiGame):
             ang, pw = self.aim
             text = "Angle %3d%s  Power %3d" % (ang, cf["deg"], pw)
             cv.put(16, 1, text, A_BRIGHT)
-            cv.put(42, 1, "[ Fire ]", A_FIRE)
+            cv.put(42, 1, "[ Fire ]", A_FIRE if self.lit() else A_TEXT)
             cv.hot_area(42, 1, 8, 1, ("fire",))
             if self.mobile():
                 left = v["left"][self.me]
@@ -788,16 +806,7 @@ class AnsiCannon(CannonBase, AnsiGame):
                 cv.put(55, 1, "%d" % left, A_TEXT)
                 cv.put(57, 1, "[>]", A_BRIGHT)
                 cv.hot_area(57, 1, 3, 1, ("move", 1))
-        elif self.over:
-            cv.put(16, 1, self.over[:46], A_YELLOW)
-        elif self.playing() and v["turn"] >= 0:
-            s = v["turn"]
-            cv.put(16, 1, ("Tank %s (%s) to fire" % (letter(s), _who(self.names, s)))[:46], A_TEXT)
-        c = self.clock()
-        if c:
-            seat, left, _ = c
-            text = "%s %s left" % (letter(seat), fmt_secs(left))
-            cv.put(COLS - 2 - len(text), 1, text, A_RED if seat == self.me and left < 60 else A_DIM)
+
 
     def draw_land(self, cv, sw, off):
         grid, col = landscape(self.v, sw, self.cf, self.shooter_aim(), self.trail, self.me)
@@ -816,6 +825,23 @@ class AnsiCannon(CannonBase, AnsiGame):
             for r in range(LAND_ROWS):
                 for j in range(sw):
                     cv.hot_area(off + j, LAND_TOP + r, 1, 1, ("sky", j, r))
+
+    def draw_turn(self, cv):
+        """Under the landscape on the right, in the shared order: the turn, the clock and the last shot, then
+        the chat and log in the rows left."""
+        clock, urgent = self.clock_sentence()
+        y = 15
+        for text, attr in ((self.turn_sentence(), A_YELLOW), (clock, A_RED if urgent else A_TEXT),
+                           (self.last if self.v and self.v["rows"] else "", A_TEXT)):
+            for l in textwrap.wrap(text, COLS - 43):
+                if y < 20:
+                    cv.put(42, y, l, attr)
+                    y += 1
+        self.LOG_TOP, self.LOG_ROWS = y, 21 - y
+        self.draw_log(cv, 42, COLS - 43)
+
+    def turn_sentence(self):
+        return "Your shot." if self.my_turn() else super().turn_sentence()
 
     def draw_players(self, cv):
         v = self.v
@@ -837,30 +863,25 @@ class AnsiCannon(CannonBase, AnsiGame):
 
     def hint(self):
         if not (self.v and self.v["rows"]):
-            return ("Table %s starts when someone joins: telnet, the web (port 6500) or the native protocol."
-                    % self.tid, A_DIM)
+            return self.waiting_hint()
         if self.over:
-            return "%s. Esc goes back to the menu." % self.over, A_YELLOW
+            return self.over_hint()
         if self.me < 0:
-            return "Watching. T talks to the table, Esc goes back to the menu.", A_DIM
-        if self.mobile():
-            return ("Your shot: arrows aim, Enter fires; first [ or ] moves (%d left, %s each)"
-                    % (self.v["left"][self.me], budget_text(self.v)), A_TEXT)
+            return self.watch_hint()
         if self.my_turn():
-            if self.move_set():
-                return ("Your shot: %s/%s angle, %s/%s power, Enter fires. Or type: 45 60"
-                        % tuple(self.move_key(d) for d in ("LEFT", "RIGHT", "UP", "DOWN")), A_TEXT)
-            return "Your shot: Left/Right angle, Up/Down power, Enter fires. Or type: 45 60", A_TEXT
+            aim = self.move_set().upper() if self.move_set() else "the arrows"
+            text = "Your shot. Aim with %s and press Enter to fire." % aim
+            return (text + " [ and ] drive first." if self.mobile() else text), A_TEXT
         if self.me < len(self.v["tanks"]) and self.v["tanks"][self.me][1] <= 0:
-            return "Your tank is destroyed; the game goes on. Esc goes back to the menu.", A_DIM
+            return "Your tank is destroyed, and the game goes on. Press Esc to go back to the menu.", A_DIM
         if self.v["turn"] < 0:
-            return "Game over. Esc goes back to the menu.", A_YELLOW
-        return "Waiting for %s to fire. Leaving or logging off never resigns." % self.name(self.v["turn"]), A_DIM
+            return self.over_hint()
+        return self.their_hint(self.v["turn"])
 
     # ---- keys --------------------------------------------------------------
     def turn_by(self, da=0, dp=0):
         if not self.my_turn():
-            return self.say("It is not your shot." if self.me >= 0 else "You are watching this table.")
+            return self.say(self.not_yours())
         self.aim = [min(180, max(0, self.aim[0] + da)), min(100, max(0, self.aim[1] + dp))]
         return None
 
@@ -869,14 +890,13 @@ class AnsiCannon(CannonBase, AnsiGame):
         return self.turn_by(da, dp)
 
     async def on_key(self, k):
-        if not self.buf and k in ("HOME", "END", "PGUP", "PGDN"):
+        if not self.buf and not self.chatting and k in ("HOME", "END", "PGUP", "PGDN"):
             da, dp = {"HOME": (10, 0), "END": (-10, 0), "PGUP": (0, 10), "PGDN": (0, -10)}[k]
             return self.turn_by(da, dp)
         return await super().on_key(k)
 
     async def hotkey(self, k):
-        steps = {"<": (10, 0), ",": (10, 0), ">": (-10, 0), ".": (-10, 0), "+": (0, 10), "=": (0, 10),
-                 "-": (0, -10)}
+        steps = {"<": (10, 0), ">": (-10, 0), "+": (0, 10), "-": (0, -10)}
         if k in steps:
             return self.turn_by(*steps[k])
         if k in "[]":
@@ -918,13 +938,11 @@ class AnsiCannon(CannonBase, AnsiGame):
 
     async def drive(self, word):
         """Play a move (MOVE L n or MOVE R n): only on the player's turn, before the shot."""
-        if self.me < 0:
-            return self.say("You are watching this table.")
         if not self.my_turn():
-            return self.say("It is not your turn." if self.playing() else (self.over or "No game is running."))
+            return self.say(self.not_yours())
         if not self.mobile():
-            return self.say("You have moved this turn: now fire." if self.v["moved"] else
-                            "Your tank has no moves left: fire.")
+            return self.say("You have driven this turn, so now you fire." if self.v["moved"] else
+                            "Your tank can't drive any more, so you fire.")
         if word:
             err = await self.move(word)
             if err:
@@ -948,12 +966,8 @@ class AnsiCannon(CannonBase, AnsiGame):
         self.aim[0] = min(180, max(0, ang))
 
     async def fire(self):
-        if self.me < 0:
-            return self.say("You are watching this table.")
-        if not self.playing():
-            return self.say(self.over or "The game has not started yet.")
         if not self.my_turn():
-            return self.say("It is %s's shot." % self.name(self.v["turn"]))
+            return self.say(self.not_yours())
         err = await self.move("FIRE %d %d" % tuple(self.aim))
         if err:
             self.say(err, A_RED)
@@ -964,22 +978,13 @@ class PlainCannon(CannonBase, PlainGame):
     """Cannon Fire for plain terminals: the landscape in ASCII, typed shots."""
 
     BOARD_KINDS = ("HIT", "OUT", "MOVE", "TURN", "JOIN", "LEAVE", "START", "END")
-    HELP_TEXT = (" Type the angle and the power to fire, like 45 60 (or fire 45 60).\n"
-                 " Angle 0 points right, 90 straight up, 180 left; power 0 to 100.\n"
-                 " Before firing you may move once: move l 5 or move r 5 (columns of path;\n"
-                 " a slope takes more), move l or move r to go as far as you can. Four a game.\n"
-                 " say <text> talks to the table; resign gives up (it asks first).\n"
-                 " menu goes back to the menu; the game goes on and leaving never resigns.")
     SW = 76
 
     def lines(self):
         v, me = self.v, self.me
-        you = "you are watching" if me < 0 else "you are tank %s" % letter(me)
-        out = ["", "== Cannon Fire, table %s: %s ==" % (self.tid, you)]
+        out = [""] + self.plain_header()
         if not v["rows"]:
-            return out + ["", "Waiting for an opponent.",
-                          "The game starts when someone joins table %s from telnet, the web" % self.tid,
-                          "(port 6500) or another client. Type menu to go back; the table stays open."]
+            return out + self.plain_waiting()
         w = v["w"]
         sw = min(w, self.SW)
         grid, col = landscape(v, sw, cf_glyphs("plain"), list(v["aim"]), self.trail)
@@ -1004,36 +1009,25 @@ class PlainCannon(CannonBase, PlainGame):
         else:
             for i in range(0, n, 2):
                 out.append((" " + cells[i].ljust(39) + (cells[i + 1] if i + 1 < n else "")).rstrip())
-        line = wind_text(v["wind"]).capitalize() + "."
-        if self.over or v["turn"] < 0:
-            line += " " + (self.over or "Game over.")
-        elif self.my_turn():
+        clock, _ = self.clock_sentence()
+        lines = ["The wind is %s." % ("still" if not v["wind"] else "%d to the %s" % (
+            abs(v["wind"]), "right" if v["wind"] > 0 else "left")), self.turn_sentence(), clock, self.last_said()]
+        if self.my_turn():
             ang, pw = v["aim"][me] if me < len(v["aim"]) else (45, 50)
-            line += " Your shot; your last aim was angle %d, power %d." % (ang, pw)
-        else:
-            line += " %s to fire." % self.name(v["turn"])
-        out.append(" " + line[:78])
+            lines.append("Your last aim was angle %d with power %d." % (ang, pw))
         if self.mobile():
             ends = sorted(reach(v, me))
             x0 = v["tanks"][me][0]
-            out.append((" Before firing: move l n or move r n, up to %s columns of path (%d left)."
-                        % (budget_text(v), v["left"][me]))[:79])
-            out.append((" This turn it can reach columns %d to %d (it stands at %d)."
-                        % (min(ends + [x0]), max(ends + [x0]), x0))[:79])
+            lines.append("You may drive first with /drive left or /drive right, up to %s columns of path. You "
+                         "can reach columns %d to %d, and you stand at %d." % (budget_text(v), min(ends + [x0]),
+                                                                              max(ends + [x0]), x0))
         elif self.my_turn() and v["moved"]:
-            out.append(" You have moved this turn: now fire.")
-        if not self.over:
-            out.append(" " + clock_text(v, self.names)[:78])
-        for l in self.log[-6:]:
-            out.append(" " + l[:78])
-        return out
+            lines.append("You have driven this turn, so now you fire.")
+        out += [" " + l for l in textwrap.wrap(" ".join(t for t in lines if t), 78)]
+        return out + self.plain_log(6)
 
-    def prompt(self):
-        if self.my_turn():
-            ang, pw = self.v["aim"][self.me] if self.me < len(self.v["aim"]) else (45, 50)
-            more = ", or move l/r n" if self.mobile() else ""
-            return "Your shot: angle power (like %d %d)%s > " % (ang, pw, more)
-        return "> "
-
+    def turn_prompt(self):
+        ang, pw = self.v["aim"][self.me] if self.me < len(self.v["aim"]) else (45, 50)
+        return "Your shot. Type /fire %d %d%s." % (ang, pw, ", or /drive left or /drive right" if self.mobile() else "")
 
 AnsiScreen, PlainScreen = AnsiCannon, PlainCannon

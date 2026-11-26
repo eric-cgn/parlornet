@@ -1294,13 +1294,15 @@ const g = mod.create(api);
 g.view(%(view)s, {});
 const items = g.frame(0).items;
 console.log(JSON.stringify({discs: items.filter((it) => it.t === 'disc').length,
-  labels: items.filter((it) => it.t === 'tile' || it.t === 'text').map((it) => it.text)}));
+  labels: items.filter((it) => it.t === 'tile' || it.t === 'text').map((it) => it.text),
+  counts: items.filter((it) => it.t === 'disc' && it.text).map((it) => [it.text, it.a, it.ink])}));
 """
 
 
 class BackgammonStacks(unittest.TestCase):
-    """Backgammon in Play: a stack squeezes closer together up to nine checkers; past that it shows eight and
-    +n in the ninth place, on the points and the bar. With Node, when it is installed."""
+    """Backgammon in Play: a stack squeezes closer together up to nine checkers; past that it draws nine, and the
+    ninth shows how many checkers it stands for (docs/design.md, "Stacks of pieces"), on the points and the bar.
+    With Node, when it is installed."""
 
     def test_tall_stacks(self):
         import shutil
@@ -1314,5 +1316,7 @@ class BackgammonStacks(unittest.TestCase):
         out = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
         got = json.loads(out.stdout)
-        self.assertEqual(got["discs"], 8 + 9 + 8 + 5 + 8)          # 11 on 6, 9 on 8, 10 on 19, 5 on 24, 12 on the bar
-        self.assertEqual(sorted(got["labels"]), ["+2", "+3", "+4"])
+        self.assertEqual(got["discs"], 9 + 9 + 9 + 5 + 9)          # 11 on 6, 9 on 8, 10 on 19, 5 on 24, 12 on the bar (red)
+        self.assertEqual(got["labels"], [])
+        white, red, dark, light = "#f4efe5", "#b3261e", "#2a2420", "#f4efe5"
+        self.assertEqual(sorted(got["counts"]), [["2", red, light], ["3", white, dark], ["4", red, light]])

@@ -5,11 +5,11 @@ MOV, which UND takes back and END finishes. The game words roll, double,
 take, drop, accept and reject are moves too.
 """
 import re
+import textwrap
 import time
 
-from ..telnet import (A_AXIS, A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_SEL, A_TEXT, A_YELLOW, COLS, ROWS,
-                      AnsiGame, Canvas, GameBase, PlainGame, clock_text, fmt_secs, rule, status_bar, title_bar,
-                      turn_text, wrap)
+from ..telnet import (A_AXIS, A_BRIGHT, A_DIM, A_RED, A_SEL, A_TEXT, A_YELLOW, AnsiGame, COLS, Canvas, GameBase,
+                      PlainGame, ROWS, and_list, or_list, title_bar)
 from ..telnet import box, describe_event as describe_common
 from ..board import SMALL, Canvas as Picture, text_size
 from ..web import BG_HOME_PAGE, a, board_html, esc, hidden_fields, make_gif
@@ -220,8 +220,8 @@ def pips(v, s):
 
 
 def board_image(v, seat, sel):
-    """Backgammon as one image: the 24 points (five slices of images() each; a taller stack shows four
-    checkers and +n for the rest in the fifth place), the point numbers, the bar with its checkers, a bear-off tray per side with
+    """Backgammon as one image: the 24 points (five slices of images() each; on a taller stack the fifth checker
+    shows how many checkers it stands for, docs/design.md, Stacks of pieces), the point numbers, the bar with its checkers, a bear-off tray per side with
     the checkers borne off, the dice, the doubling cube and both pip counts. Your side is at the bottom
     with your home board on the right (seat 1's board is the mirror of seat 0's). On your turn a point or
     the bar you can move from picks a checker up (sel=), drawn yellow; with one picked, its targets show a
@@ -258,20 +258,19 @@ def board_image(v, seat, sel):
         c.disc(cx, cy, 8.6, rim)
         c.disc(cx, cy, 7.6, BG_PAL[3] if who == 0 else BG_PAL[4])
 
-    def more_label(cx, cy, more):
-        """+more in a white box centered on cx, cy: the checkers of a stack that are not drawn."""
-        t = "+%d" % more
+    def stands_for(cx, cy, who, n):
+        """The number on the last checker drawn of a tall stack, centered on it in the checker's contrasting
+        color: how many checkers that one stands for, itself and the ones not drawn."""
+        t = str(n)
         tw, th = text_size(t)
-        c.fill(cx - tw // 2 - 2, cy - th // 2 - 2, tw + 4, th + 4, INK)
-        c.fill(cx - tw // 2 - 1, cy - th // 2 - 1, tw + 2, th + 2, WHITE)
-        c.text(cx - tw // 2, cy - th // 2, t, INK)
+        c.text(cx - tw // 2, cy - th // 2, t, INK if who in (0, "w") else WHITE)
 
     def point(p, i, is_top):
         x = col_x(i)
         n = v["pts"][p - 1]
         who, cnt = ("w" if n > 0 else "k"), abs(n)
         colour = "r" if i % 2 == 0 else "c"
-        shown = cnt if cnt <= BG_SLICES else BG_SLICES - 1
+        shown = min(cnt, BG_SLICES)
         for slot in range(BG_SLICES):
             if slot < shown:
                 kind = ("s" + who) if str(p) == sel and slot == shown - 1 else who
@@ -281,9 +280,9 @@ def board_image(v, seat, sel):
                 kind = "n"
             y = y_top + slot * BG_H if is_top else y_bot + half_h - (slot + 1) * BG_H
             c.tile("/img/bg/%s%s%s%d.gif" % ("t" if is_top else "b", colour, kind, slot), x, y)
-        if cnt > BG_SLICES:             # the last place: +n for the checkers not drawn
+        if cnt > BG_SLICES:             # the last checker drawn stands for itself and the ones not drawn
             y = y_top + (BG_SLICES - 1) * BG_H if is_top else y_bot + half_h - BG_SLICES * BG_H
-            more_label(x + BG_W // 2, y + BG_H // 2, cnt - shown)
+            stands_for(x + 12, y + 9, who, cnt - BG_SLICES + 1)
         if str(p) in targets and cnt >= BG_SLICES:      # a full point: the dot goes on the outermost checker
             y = y_top + (shown - 1) * BG_H if is_top else y_bot + half_h - shown * BG_H
             c.disc(x + 11.5, y + 8.5, 3.0, YELLOW)
@@ -298,21 +297,21 @@ def board_image(v, seat, sel):
     for i, p in enumerate(bottom):
         point(p, i, False)
 
-    # the bar: each side's checkers on its own half, nearest the middle; three places, the last +n past three
+    # the bar: each side's checkers on its own half, nearest the middle; three places, and past three the third
+    # checker shows how many it stands for
     bar_x = mx(BG_FRAME + 6 * BG_W, BG_W)
     c.fill(bar_x, BG_LABEL, BG_W, h - 2 * BG_LABEL, WOOD)
     c.fill(x_felt, y_mid, 13 * BG_W, BG_MID, WOOD)
     for s in (0, 1):
         n = v["bar"][s]
         mine = s == me
-        shown = n if n <= 3 else 2
+        shown = min(n, 3)
         for k in range(shown):
             cy = (y_bot + 10 + 19 * k) if mine else (y_mid - 10 - 19 * k)
             picked = mine and sel == "bar" and k == shown - 1
             checker(bar_x + 11.5, cy, s, YELLOW if picked else BG_PAL[5])
         if n > 3:
-            cy = (y_bot + 10 + 19 * 2) if mine else (y_mid - 10 - 19 * 2)
-            more_label(bar_x + 12, cy, n - shown)
+            stands_for(bar_x + 12, (y_bot + 10 + 19 * 2) if mine else (y_mid - 10 - 19 * 2), s, n - 2)
     if my_turn and "bar" in froms and sel != "bar":
         c.area("rect", (bar_x, y_top, bar_x + BG_W - 1, y_bot + half_h - 1), "enter from the bar", "/table.htm",
                sel="bar")
@@ -423,27 +422,10 @@ A_DIE = "0;30;47"
 A_FELT = "0;30;42"
 A_PT = ("0;31;", "0;37;")               # point colors; the felt (or cursor) background is added
 A_CHK = ("0;1;37;", "0;30;")            # checkers, per seat
+A_STANDS = ("0;30;47", "0;1;37;40")     # the number on a tall stack's last checker: the checker's color reversed
 A_MARK = "0;1;33;"
-BG_HELP = [
-    "Arrow keys   move the cursor over the points,",
-    "             the bar (middle) and the tray (right)",
-    "Enter/Space  pick up a checker, then put it down on",
-    "             a highlighted point; Enter also rolls",
-    "Mouse        click a checker, then where it goes",
-    "U  undo the last step     E  end the turn",
-    "D  double                 A  take    P  drop",
-    "T  talk                   R  resign (asks first)",
-    "H  your home board on the left or the right",
-    "Esc  back to the menu (the game goes on)",
-    "",
-    "Typed: 13-9, bar-22, 6-off, roll, double, take,",
-    "drop, undo, end, say <text>, resign, menu,",
-    "home left, home right.",
-]
 BG_STEP_RE = re.compile(r"^(bar|b|\d{1,2})[-/](off|o|\d{1,2})\Z")
-BG_WORDS = {"roll": "roll", "double": "double", "take": "take", "accept": "take", "drop": "drop",
-            "pass": "drop", "reject": "drop", "undo": "undo", "und": "undo", "end": "end", "done": "end"}
-BG_RESIGN = {"take": "accept", "drop": "reject"}     # the same words answer a resignation offer
+BG_WORDS = {"roll": "roll", "double": "double", "undo": "undo", "end": "end"}
 
 
 def bg_glyphs(mode):
@@ -498,7 +480,31 @@ class BgBase(GameBase):
     (Enter in plain mode, whose lines come in at Enter) does nothing else, so the turn waits as before.
     A countdown that was stopped, or that ran, does not start again until the turn moves on."""
 
+    HELP_MOVING = ["Press Enter to roll the dice. The arrows move over the points, the",
+                   "bar and the tray. Enter picks up a checker, Enter on a marked point",
+                   "moves it there and Esc puts it back. Enter ends a finished turn."]
+    HELP_KEYS = ["D offers to double the stakes, before you roll.",
+                 "H moves your home board to the other side.",
+                 "U takes back your last step, and E ends your turn."]
+    HELP_COMMANDS = ["Press / to type one. /13-9 moves a checker from 13 to 9. /roll,",
+                     "/double, /undo, /end and /home left or /home right do what they say."]
+    HELP_REFERENCE = ["The points",
+                      "Your points count from 1 in your home board up to 24. The bar is",
+                      "in the middle, and the tray holds the checkers you bear off once",
+                      "all of yours are home. The pip count says how far they still go.",
+                      "A * beside a point's number marks where the other checkers went.",
+                      "",
+                      "The cube",
+                      "Doubling offers to play on for twice the stakes. The other player",
+                      "accepts and takes the cube, or declines and loses the game. You",
+                      "may double before you roll, while the cube is yours or free."]
+
     BACKLOG = 24
+    GAME = NAME
+    MOVE_EXAMPLE = "/13-9"
+    COMMANDS = {"roll": "/roll rolls the dice.", "double": "/double offers to double the stakes.",
+                "undo": "/undo takes back your last step.", "end": "/end ends your turn.",
+                "home": "/home left or /home right draws your home board on that side."}
     now = staticmethod(time.monotonic)      # the countdowns' clock (tests set their own)
 
     def __init__(self, sess, tid, key, me):
@@ -580,6 +586,36 @@ class BgBase(GameBase):
         if p[0] == "ROLL" and len(p) == 4:
             self.rolled = (int(p[1]), int(p[2]), int(p[3]))
 
+    moved_to = ()           # the points the other player's checkers moved to in their last turn
+    turn_says = None        # [seat, the roll's words, the steps] of the turn being told
+
+    def last_move(self, text):
+        p = text.split()
+        k = p[0]
+        if k == "ROLL" and len(p) == 4:
+            self.turn_says = [int(p[1]), "rolled %s and %s" % (p[2], p[3]), []]
+            if int(p[1]) != self.me:
+                self.moved_to = set()
+        elif k == "STEP" and len(p) >= 4 and self.turn_says and self.turn_says[0] == int(p[1]):
+            self.turn_says[2].append("%s-%s" % (p[2], p[3]))
+            if int(p[1]) != self.me:
+                self.moved_to = set(self.moved_to) | {p[3]}
+        elif k == "UNDO" and len(p) >= 4 and self.turn_says and "%s-%s" % (p[2], p[3]) in self.turn_says[2]:
+            self.turn_says[2].remove("%s-%s" % (p[2], p[3]))
+        elif k == "DBL" and len(p) >= 3:
+            return "%s doubled to %s." % (self.actor(p[1]), p[2])
+        elif k == "TAKE" and len(p) >= 2:
+            return "%s accepted the double." % self.actor(p[1])
+        elif k == "DROP" and len(p) >= 2:
+            return "%s declined the double." % self.actor(p[1])
+        else:
+            return None
+        if not self.turn_says:
+            return None
+        seat, roll, steps = self.turn_says
+        moved = " and moved %s" % and_list(steps) if steps else ""
+        return "%s %s%s." % (self.actor(seat), roll, moved)
+
     async def refresh(self):
         if getattr(self.s, "bghome", None) is None:
             self.s.bghome = await load_home(self.core)
@@ -609,13 +645,11 @@ class BgBase(GameBase):
         """The home command: side "right", "left", or "" (the full screen asks; plain says how)."""
         raise NotImplementedError
 
-    async def command(self, line):
-        p = line.split()
-        if p and p[0].lower() == "home" and len(p) <= 2:
-            side = p[1].lower() if len(p) == 2 else ""
-            if side in BG_HOMES or not side:
-                return await self.home(side)
-        return await super().command(line)
+    async def game_command(self, cmd, args):
+        if cmd == "home" and len(args) <= 1 and (not args or args[0].lower() in BG_HOMES):
+            await self.home(args[0].lower() if args else "")
+            return True
+        return False
 
     # ---- state ------------------------------------------------------------
     def playing(self):
@@ -630,6 +664,13 @@ class BgBase(GameBase):
 
     def steps(self):
         return [m for m in self.v["moves"] if "-" in m] if self.phase() == "move" else []
+
+    def stepped(self):
+        """True once a step of this turn is played, so that U has one to take back."""
+        if not self.rolled or self.rolled[0] != self.me:
+            return bool(self.v["dice"]) is False and self.phase() == "move"
+        d1, d2 = self.rolled[1:]
+        return len(self.v["dice"]) < (4 if d1 == d2 else 2)
 
     def froms(self):
         out = []
@@ -673,49 +714,13 @@ class BgBase(GameBase):
         i = (top, bot)[r].index(p)
         return r, i if i < 6 else i + 1
 
-    def state_text(self):
-        """-> (whose turn and the phase, attribute)."""
-        v = self.v
-        if not v["rows"]:
-            return "Waiting for an opponent", A_YELLOW
-        if self.over or v["phase"] == "over":
-            return self.over or "Game over", A_YELLOW
-        t, ph, mine = v["turn"], v["phase"], self.my_turn()
-        if ph == "roll":
-            return ("Your turn: roll or double", A_YELLOW) if mine else ("%s to roll or double" % self.name(t), A_TEXT)
-        if ph == "resign" and v.get("offer"):
-            s, pts, kind = v["offer"]
-            if mine:
-                return "%s resigns (%s, %d): accept or reject?" % (self.name(s), kind, pts), A_YELLOW
-            return "%s to answer the resignation" % self.name(t), A_TEXT
-        if ph == "take":
-            if mine:
-                return "%s doubles to %d: take or drop?" % (self.name(1 - t), v["cube"] * 2), A_YELLOW
-            return "%s to take or drop (cube %d)" % (self.name(t), v["cube"] * 2), A_TEXT
-        if mine:
-            return ("Your move" if self.steps() else "Your move: all played"), A_YELLOW
-        return "%s to move" % self.name(t), A_TEXT
-
-    def dice_text(self):
-        v = self.v
-        if not v["dice"]:
-            return "Dice: not rolled yet" if v["phase"] == "roll" else "Dice: -"
-        left = " ".join(str(d) for d in v["dice"])
-        if self.rolled and self.rolled[0] == v["turn"]:
-            return "Rolled %d-%d, to play: %s" % (self.rolled[1], self.rolled[2], left)
-        return "Dice to play: %s" % left
-
-    def cube_text(self):
-        v = self.v
-        if v["cube_owner"] < 0:
-            return "Cube: %d, in the middle" % v["cube"]
-        return "Cube: %d, %s's" % (v["cube"], self.name(v["cube_owner"]))
-
-    def seat_line(self, seat):
-        empty = seat >= len(self.names) or self.names[seat] == "-"
-        return ("(empty seat)" if empty else self.names[seat]) + (" (you)" if seat == self.me else ""), empty
-
     # ---- the board ----------------------------------------------------------
+    def stands_for(self, cv, x, y, side, n):
+        """A tall stack's last checker drawn carries how many checkers it stands for, itself and the ones not
+        drawn (docs/design.md, Stacks of pieces): the number in the checker's middle, in its color reversed.
+        The middle holds one digit: + stands for 10 or more, which 15 checkers in BG_SLOTS places never need."""
+        cv.put(x + 1, y, str(n) if n < 10 else "+", A_STANDS[side])
+
     def draw_bg(self, cv, cur=None, sel=None):
         """The board into cv; with cur (a cursor position) and sel (the
         point of a picked-up checker), the player's highlights too."""
@@ -746,7 +751,7 @@ class BgBase(GameBase):
                 bg = "46" if tok == curtok else "42"
                 n = v["pts"][p - 1]
                 cnt, side = abs(n), (0 if n > 0 else 1)
-                shown = cnt if cnt <= BG_SLOTS else BG_SLOTS - 1
+                shown = min(cnt, BG_SLOTS)
                 kind = (i + r) % 2
                 tri = G["top" if r == 0 else "bot"][kind]
                 for s in range(BG_SLOTS):
@@ -754,14 +759,16 @@ class BgBase(GameBase):
                     if s < shown:
                         picked = tok == sel and s == shown - 1
                         cv.put(x, y, G["sel" if picked else "chk"][side], A_CHK[side] + ("43" if picked else bg))
-                    elif s == shown and cnt > BG_SLOTS:     # the last place: +n for the checkers not drawn
-                        cv.put(x, y, ("+%d" % (cnt - shown)).center(3), A_CHK[side] + bg)
+                        if s == shown - 1 and cnt > BG_SLOTS:
+                            self.stands_for(cv, x, y, side, cnt - BG_SLOTS + 1)
                     elif s == cnt and tok in marks:
                         cv.put(x, y, G["mark"], A_MARK + bg)
                     else:
                         cv.put(x, y, tri[s], A_PT[kind] + bg)
-                lattr = A_SEL if tok == curtok else A_YELLOW if tok in marks else A_BRIGHT if tok in froms else A_AXIS
-                cv.put(x, 1 if r == 0 else 19, tok.rjust(2).ljust(3), lattr)
+                moved = tok in self.moved_to         # where the other player's checkers went last turn
+                lattr = A_SEL if tok == curtok else A_YELLOW if tok in marks or moved else \
+                    A_BRIGHT if tok in froms else A_AXIS
+                cv.put(x, 1 if r == 0 else 19, (tok.rjust(2) + "*" if moved else tok.rjust(2).ljust(3)), lattr)
                 cv.hot_area(x, 1 if r == 0 else 11, 3, 9, ("pt", r, c))
         for side in (topseat, bottom):
             r = 0 if side == topseat else 1
@@ -772,14 +779,13 @@ class BgBase(GameBase):
                 cv.put(bar_x, y, "   ", "0;30;" + bar_bg)
                 cv.put(off_x, y, "   ", "0;30;" + off_bg)
             n = v["bar"][side]
-            shown = n if n <= BG_SLOTS else BG_SLOTS - 1
-            for s in range(min(n, BG_SLOTS)):
+            shown = min(n, BG_SLOTS)
+            for s in range(shown):
                 y = 9 - s if r == 0 else 11 + s
-                if s < shown:
-                    picked = sel == "bar" and side == self.me and s == shown - 1
-                    cv.put(bar_x, y, G["sel" if picked else "chk"][side], A_CHK[side] + bar_bg)
-                else:
-                    cv.put(bar_x, y, ("+%d" % (n - shown)).center(3), A_CHK[side] + bar_bg)
+                picked = sel == "bar" and side == self.me and s == shown - 1
+                cv.put(bar_x, y, G["sel" if picked else "chk"][side], A_CHK[side] + bar_bg)
+                if s == shown - 1 and n > BG_SLOTS:
+                    self.stands_for(cv, bar_x, y, side, n - BG_SLOTS + 1)
             n = v["off"][side]
             rows = (n + 2) // 3
             for i in range(rows):
@@ -808,19 +814,42 @@ class BgBase(GameBase):
     # ---- game words ---------------------------------------------------------
     async def act(self, word):
         """roll, double, take, drop, undo, end or a step -> an error text or None."""
-        if self.me < 0:
-            return "You are watching this table."
-        if not self.playing():
-            return self.over or "The game has not started yet."
         if not self.my_turn():
-            return "It is %s's turn." % self.name(self.v["turn"])
+            return self.not_yours()
         if word == "undo":
             return await self.staged("UND", "take that back")
         if word == "end":
             return await self.staged("END", "end the turn")
-        if self.v["phase"] == "resign":
-            word = BG_RESIGN.get(word, word)
+        if word == "drop" and self.v["phase"] == "take" and not await self.ask_drop():
+            return None
         return await self.move(word)
+
+    def offer(self):
+        """A double or an offer to resign, waiting for this player's answer (docs/design.md, Dialogs)."""
+        v = self.v
+        ph = self.phase() if v and v.get("rows") else ""
+        if ph == "take":
+            cube = v["cube"]
+            by = self.who(self.name(1 - self.me))
+            return (("take", cube), "Double", [
+                "%s doubles to %d." % (by, cube * 2),
+                "If you accept, the game goes on for %d points." % (cube * 2),
+                "If you decline, you lose %d point%s and the game." % (cube, "" if cube == 1 else "s")],
+                True, "take", "drop", "%s doubles to %d. Press Enter to answer." % (by, cube * 2))
+        if ph == "resign" and v.get("offer"):
+            s, pts, kind = v["offer"]
+            by = self.who(self.name(s))
+            what = "%s offers to resign%s." % (by, "" if kind in ("single", "") else " a " + kind)
+            return (("resign", s, pts, kind), "Offer to resign", [
+                what, "If you accept, you win %d point%s and the game." % (pts, "" if pts == 1 else "s"),
+                "If you decline, the game goes on."], False, "accept", "reject", what[:-1] + ". Press Enter to answer.")
+        return None
+
+    async def ask_drop(self):
+        """Every way of dropping a double asks first: True when the player says yes."""
+        cube = self.v["cube"]
+        return await self.ask_yes("Drop", ["Drop the double? You lose %d point%s and the game." % (
+            cube, "" if cube == 1 else "s")], "drop it", "Drop")
 
     @staticmethod
     def game_word(cmd):
@@ -845,9 +874,8 @@ class AnsiBackgammon(BgBase, AnsiGame):
     picked-up checker and where it can go highlighted), players, dice,
     cube, clock and log on the right."""
 
-    HOTKEYS = "udeaprth?"
+    HOTKEYS = "udehrt?"
     LOG_TOP, LOG_ROWS = 12, 7
-    TITLE, HELP = "Backgammon", BG_HELP
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
@@ -870,112 +898,90 @@ class AnsiBackgammon(BgBase, AnsiGame):
     def compose(self):
         cv = Canvas()
         g = self.g
-        right = "watching" if self.me < 0 else "you play %s %s" % (BG_NAMES[self.me], self.bg["chk"][self.me])
-        title_bar(cv, g, "Backgammon %s table %s" % (g["v"], self.tid), right)
-        showcur = self.me >= 0 and self.playing()
+        title_bar(cv, g, self.title_text())
+        showcur = self.me >= 0 and self.playing() and self.lit()
         self.draw_bg(cv, self.cur if showcur else None, self.sel)
         if not self.v["rows"]:
             self.draw_waiting(cv, 11, 7)
         self.draw_panel(cv)
         steps = self.steps()
         if steps:
-            line = "Steps: " + " ".join(steps)
+            line = "You can play %s." % ", ".join(steps)
             cv.put(1, 20, line if len(line) <= COLS - 2 else line[:COLS - 5] + "...", A_DIM)
-        text, attr = (self.auto_text(), A_YELLOW) if self.auto else (self.msg, self.msg_attr) if self.msg \
-            else self.hint()
+        text, attr = (self.auto_text(), A_YELLOW) if self.auto and not self.buf else self.sentence(self.hint)
         cv.put(1, ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
         ph = self.phase()
-        tail = [("T", "talk"), ("R", "resign"), ("?", "help"), ("Esc", "menu")]
-        if self.buf:
-            keys = [("Enter", "send"), ("Esc", "cancel"), ("Backspace", "erase")]
-        elif ph == "roll":
-            keys = [("Enter", "roll")] + ([("D", "double")] if "double" in self.v["moves"] else []) + tail
-        elif ph == "take":
-            keys = [("A", "take"), ("P", "drop")] + tail
-        elif ph == "resign":
-            keys = [("A", "accept"), ("P", "reject")] + tail
+        home = [("h", "home", "home")] if self.me >= 0 else []
+        if ph == "roll":
+            keys = self.keys("look", "roll", ([("d", "double", "double")] if "double" in self.v["moves"] else [])
+                             + home)
+        elif ph in ("take", "resign"):
+            keys = self.keys("look", "answer")
         elif ph == "move" and steps:
-            keys = [("Arrows", "move"), ("Enter", "pick"), ("U", "undo")] + tail
+            undo = [("u", "undo", "undo")] if self.stepped() else []
+            keys = self.keys("move", "place" if self.sel else "pick", undo + home, cancel=bool(self.sel))
         elif ph == "move":
-            keys = [("E", "end turn"), ("U", "undo")] + tail
+            keys = self.keys("look", "end turn", [("u", "undo", "undo"), ("e", "end turn", "end")] + home)
         elif self.me >= 0 and self.playing():
-            keys = [("Arrows", "look")] + tail
+            keys = self.keys("look", None, home)
         else:
-            keys = [("T", "talk"), ("?", "help"), ("Esc", "menu")]
-        status_bar(cv, keys)
+            keys = self.keys()
+        self.keys_line(cv, keys)
         return cv
 
     def draw_panel(self, cv):
-        g, v = self.g, self.v
-        px, pw = 49, COLS - 50
-        inner = pw - 4
-        box(cv, g, px, 1, pw, 19, A_BORDER, "Players", tattr=A_HEAD)
-        for i, seat in enumerate((1 - self.bottom(), self.bottom())):
-            y = 2 + 2 * i
-            tomove = self.playing() and v["turn"] == seat
-            label, empty = self.seat_line(seat)
-            cv.put(px + 2, y, g["ptr"] if tomove else " ", A_YELLOW)
-            cv.put(px + 4, y, self.bg["chk"][seat], A_CHK[seat] + "42")
-            cv.put(px + 8, y, label[:inner - 6], A_BRIGHT if tomove else A_DIM if empty else A_TEXT)
-            if v["rows"]:
-                extra = "  bar %d" % v["bar"][seat] if v["bar"][seat] else ""
-                cv.put(px + 4, y + 1, ("pips %d  off %d%s" % (self.pips(seat), v["off"][seat], extra))[:inner - 2],
-                       A_DIM)
-        rule(cv, g, px, 6, pw, A_BORDER)
-        text, attr = self.state_text()
-        cv.put(px + 2, 7, text[:inner], attr)
+        v = self.v
+        players = [(seat, (self.bg["chk"][seat], A_CHK[seat] + "42"), "pips %d" % self.pips(seat))
+                   for seat in (1 - self.bottom(), self.bottom())]
+        facts = []
         if v["rows"] and not self.over:
-            cv.put(px + 2, 8, self.dice_text()[:inner], A_TEXT)
-            cv.put(px + 2, 9, self.cube_text()[:inner], A_TEXT)
-        c = self.clock()
-        if c:
-            seat, left, limit = c
-            clock = "Clock: %s left of %s" % (fmt_secs(left), turn_text(limit))
-            if len(clock) > inner:
-                clock = "Clock: %s left" % fmt_secs(left)
-            cv.put(px + 2, 10, clock[:inner], A_RED if seat == self.me and left < 60 else A_TEXT)
-        elif self.turn_secs and not self.over:
-            cv.put(px + 2, 10, ("Time per turn: %s" % turn_text(self.turn_secs))[:inner], A_DIM)
-        rule(cv, g, px, 11, pw, A_BORDER, "Log", tattr=A_HEAD)
-        self.draw_log(cv, px + 2, inner)
+            if v["dice"]:
+                facts.append("The dice to play are %s." % and_list(str(d) for d in v["dice"]))
+            if v["cube_owner"] < 0:
+                facts.append("The cube is at %d, in the middle." % v["cube"])
+            else:
+                facts.append("The cube is at %d, and %s." % (
+                    v["cube"], "it is yours" if v["cube_owner"] == self.me else
+                    "%s has it" % self.who(self.name(v["cube_owner"]))))
+            for seat in (self.bottom(), 1 - self.bottom()):
+                bar, off = v["bar"][seat], v["off"][seat]
+                if bar or off:
+                    facts.append("%s %s %s." % (self.actor(seat), "have" if seat == self.me else "has", and_list(
+                        (["%d on the bar" % bar] if bar else []) + (["%d borne off" % off] if off else []))))
+        self.draw_panel_parts(cv, 49, 1, COLS - 50, players, facts)
 
     def hint(self):
         v = self.v
         if not v["rows"]:
-            return ("Table %s starts when someone joins: telnet, the web (port 6500) or another client."
-                    % self.tid, A_DIM)
+            return self.waiting_hint()
         if self.over or v["phase"] == "over":
-            return "%s. Esc goes back to the menu." % (self.over or "Game over"), A_YELLOW
+            return self.over_hint()
         if self.me < 0:
-            return "Watching. T talks to the table, Esc goes back to the menu.", A_DIM
+            return self.watch_hint()
         ph = self.phase()
         if not ph:
-            what = {"roll": "roll or double", "take": "answer the double"}.get(v["phase"], "move")
-            return "Waiting for %s to %s. Leaving never resigns." % (self.name(v["turn"]), what), A_DIM
+            if v["phase"] == "take" and v["turn"] != self.me:
+                return "You offered to double to %d. Waiting for %s." % (
+                    v["cube"] * 2, self.who(self.name(v["turn"]))), A_DIM
+            return self.their_hint(v["turn"])
         if ph == "roll":
             if "double" in v["moves"]:
-                return "Your turn: Enter rolls the dice, %s doubles the cube to %d." % (self.kn("D"), v["cube"] * 2), \
-                    A_TEXT
-            return "Your turn: Enter rolls the dice.", A_TEXT
-        if ph == "resign":
-            return ("Your opponent offers to resign: %s accepts (the game ends), P rejects (it goes on)."
-                    % self.kn("A"), A_TEXT)
-        if ph == "take":
-            return ("%s takes the cube at %d (it is then yours); P drops and loses %d point%s."
-                    % (self.kn("A"), v["cube"] * 2, v["cube"], "" if v["cube"] == 1 else "s"), A_TEXT)
+                return "Your turn. Press Enter to roll the dice, or %s to double to %d." % (
+                    self.kn("d", "double"), v["cube"] * 2), A_TEXT
+            return "Your turn. Press Enter to roll the dice.", A_TEXT
+        if ph in ("take", "resign"):
+            o = self.offer()
+            return (o[6] if o else "Your turn."), A_YELLOW
         if not self.steps():
-            return "Nothing left to play: %s ends your turn, U takes back the last step." % self.kn("E"), A_TEXT
+            return "Your dice are played. Press Enter to end your turn, or %s to undo a step." % self.kn("u"), A_TEXT
         tok = self.tok_at(self.cur)
         if self.sel:
-            t = self.targets(self.sel)
-            if tok in t:
-                return "Enter moves %s-%s. Esc puts the checker back." % (self.sel, tok), A_TEXT
-            return "From %s it can go to %s: put the cursor there, press Enter." % (self.sel, ", ".join(t)), A_TEXT
+            return "Press Enter on a marked point to move there, or Esc to put it back.", A_TEXT
+        rolled = "You rolled %d and %d. " % self.rolled[1:] if self.rolled and self.rolled[0] == self.me else ""
         if tok in self.froms():
-            return "%s: Enter picks up a checker; it can go to %s." % (tok, ", ".join(self.targets(tok))), A_TEXT
-        return "Nothing of yours to move from %s. Checkers that can move: %s." % (
-            tok, ", ".join(self.froms())), A_DIM
+            return "%sPress Enter to pick up the checker on %s." % (rolled or "Your turn. ", tok), A_TEXT
+        return "%sYou can move a checker from %s." % (rolled or "Your turn. ", or_list(self.froms())), A_DIM
 
     # ---- the countdowns (BgBase) ----------------------------------------------------
     STOP_KEYS = ("ESC",)
@@ -989,7 +995,7 @@ class AnsiBackgammon(BgBase, AnsiGame):
         return "Rolling in %s. Press Esc to wait." % n
 
     def paused(self):
-        return bool(self.buf) or self.overlay is not None
+        return bool(self.buf) or self.chatting or self.overlay is not None
 
     async def auto_run(self, kind):
         self.sel = None
@@ -998,7 +1004,7 @@ class AnsiBackgammon(BgBase, AnsiGame):
     async def auto_stopped(self, kind):
         if kind == "roll":
             return self.say("The dice wait for you. Press Enter when you want to roll.", A_TEXT)
-        return self.say("Your move waits. Press %s to send it, or U to take a step back." % self.kn("E"), A_TEXT)
+        return self.say("Your move waits. Press Enter to send it, or %s to undo a step." % self.kn("u"), A_TEXT)
 
     def cursor_at(self):
         if self.me >= 0 and self.playing():
@@ -1030,17 +1036,11 @@ class AnsiBackgammon(BgBase, AnsiGame):
         return "menu"
 
     async def on_enter(self):
-        if self.me < 0:
-            return self.say("You are watching this table.")
-        if not self.playing():
-            return self.say(self.over or "The game has not started yet.")
         ph = self.phase()
         if not ph:
-            return self.say("It is %s's turn." % self.name(self.v["turn"]))
+            return self.say(self.not_yours())
         if ph == "roll":
             return await self.play("roll")
-        if ph == "take":
-            return self.say("Your answer to the double: %s takes, P drops." % self.kn("A"))
         if not self.steps():
             return await self.play("end")
         return await self.pick()
@@ -1069,9 +1069,8 @@ class AnsiBackgammon(BgBase, AnsiGame):
             self.say(err, A_RED)
         self.snap(stepped=True)
 
-    async def typed_move(self, word):
+    def typed_reset(self):
         self.sel = None
-        await self.play(word)
 
     async def home(self, side):
         """H or the home command: with no side, ask which; then draw it so and keep it."""
@@ -1089,7 +1088,7 @@ class AnsiBackgammon(BgBase, AnsiGame):
     async def hotkey(self, k):
         ph = self.phase()
         if k == "h":
-            return await self.home("")
+            return await self.home("left" if not self.flipped() else "right")
         if k in ("r", "t", "?"):
             return await super().hotkey(k)
         if k == "u":
@@ -1099,28 +1098,15 @@ class AnsiBackgammon(BgBase, AnsiGame):
             return await self.play("undo")
         if k == "e":
             if ph != "move":
-                return self.say("It is not your move.")
+                return self.say(self.not_yours() if not self.my_turn() else "You haven't rolled yet.")
             if self.steps():
-                return self.say("You still have steps to play: %s." % " ".join(self.steps()))
+                return self.say("You still have steps to play, such as %s." % self.steps()[0])
             return await self.play("end")
         if k == "d":
             if ph != "roll" or "double" not in self.v["moves"]:
-                return self.say("You can double at the start of your turn, before rolling, with the cube "
+                return self.say("You can double at the start of your turn, before you roll, while the cube is "
                                 "yours or in the middle.")
             return await self.play("double")
-        if k == "a":
-            if ph not in ("take", "resign"):
-                return self.say("There is no double to take.")
-            return await self.play("take")
-        if k == "p":
-            if ph == "resign":
-                return await self.play("drop")
-            if ph != "take":
-                return self.say("There is no double to drop.")
-            cube = self.v["cube"]
-            if await self.confirm("Drop", ["Drop the double? The game ends now and you",
-                                           "lose %d point%s." % (cube, "" if cube == 1 else "s")]):
-                return await self.play("drop")
         return None
 
 
@@ -1128,68 +1114,41 @@ class PlainBackgammon(BgBase, PlainGame):
     """Backgammon for plain terminals: the board in ASCII, typed moves."""
 
     BOARD_KINDS = ("ROLL", "STEP", "UNDO", "DBL", "TAKE", "DROP", "PASS", "TURN", "JOIN", "LEAVE", "START", "END")
-    HELP_TEXT = (" A step like 13-9 (or bar-22, 6-off) moves one checker; undo takes it\n"
-                 " back and end finishes the turn. roll, double, take, drop. say <text>\n"
-                 " talks to the table; resign gives up (it asks first). menu goes back\n"
-                 " to the menu; the game goes on and leaving never resigns. home left\n"
-                 " draws your home board (points 1-6) on the left, home right on the\n"
-                 " right; moves are typed the same either way.")
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
         self.bg = bg_glyphs("plain")
 
     async def home(self, side):
-        """The home command: home left or home right draws the board so and keeps it; home alone says which."""
+        """/home left or /home right draws the board so and keeps it; /home alone says which."""
         if not side:
-            return await self.notice(" %s Type home left or home right to change it." % self.home_text())
+            return self.tell(" %s Type /home left or /home right to change it." % self.home_text())
         kept = await self.set_home(side)
         self.io.write(" %s\n" % self.home_text(kept))
         return await self.draw()
 
     def lines(self):
-        v, me, G = self.v, self.me, self.bg
-        you = "you are watching" if me < 0 else "you play %s %s" % (BG_NAMES[me], G["chk"][me])
-        out = ["", "== Backgammon, table %s: %s ==" % (self.tid, you)]
+        v, G = self.v, self.bg
+        out = [""] + self.plain_header()
         if not v["rows"]:
-            return out + ["", "Waiting for an opponent.",
-                          "The game starts when someone joins table %s from telnet, the web" % self.tid,
-                          "(port 6500) or another client. Type menu to go back; the table stays open."]
+            return out + self.plain_waiting()
         cv = Canvas()
         self.draw_bg(cv)
-        side = []
-        for seat in (1 - self.bottom(), self.bottom()):
-            label, _ = self.seat_line(seat)
-            mark = ">" if self.playing() and v["turn"] == seat else " "
-            side.append("%s %s %s" % (mark, G["chk"][seat], label))
-            side.append("    pips %d  off %d%s" % (self.pips(seat), v["off"][seat],
-                                                   "  bar %d" % v["bar"][seat] if v["bar"][seat] else ""))
-        side += ["", self.state_text()[0]]
+        facts = []
         if not self.over:
-            side += [self.dice_text(), self.cube_text()]
-        side.append("")
-        ph = self.phase()
-        if ph == "roll":
-            side.append("Type roll%s." % (" or double" if "double" in v["moves"] else ""))
-        elif ph == "take":
-            side.append("Type take or drop.")
-        elif ph == "resign":
-            side.append("Type accept or reject.")
-        elif ph == "move" and self.steps():
-            side += ["Type a step like %s;" % self.steps()[0], "undo takes one back."]
-        elif ph == "move":
-            side += ["Type end to finish the turn,", "or undo."]
-        side.append("say <text>, resign, menu, help")
+            if v["dice"]:
+                facts.append("The dice to play are %s." % and_list(str(d) for d in v["dice"]))
+            facts.append("The cube is at %d, %s." % (v["cube"], "in the middle" if v["cube_owner"] < 0 else
+                                                       "and it is yours" if v["cube_owner"] == self.me else
+                                                       "and %s has it" % self.who(self.name(v["cube_owner"]))))
+        side = self.side_text([(seat, G["chk"][seat], "pips %d" % self.pips(seat))
+                               for seat in (1 - self.bottom(), self.bottom())], facts, COLS - 50)
         for i, l in enumerate(side):
             cv.put(49, 2 + i, l[:COLS - 50])
         out += cv.lines()[1:20]
         if self.steps():
-            out += [" " + l for l in wrap("Steps: " + " ".join(self.steps()), 78)]
-        if not self.over:
-            out.append(" " + clock_text(v, self.names))
-        for l in self.log[-4:]:
-            out.append(" " + l[:78])
-        return out
+            out += [" " + l for l in textwrap.wrap("You can play %s." % ", ".join(self.steps()), 78)]
+        return out + self.plain_log()
 
     # ---- the countdowns (BgBase): one line, no redraw ---------------------------------
     STOP_KEYS = ("ENTER", "ESC")
@@ -1198,7 +1157,7 @@ class PlainBackgammon(BgBase, PlainGame):
         if self.auto[0] == "end":
             text = "Sending your move in %s. Press Enter to change it." % seconds(AUTO_SECS)
         elif "double" in self.v["moves"]:
-            text = "Rolling in %s. Type double, or press Enter to wait." % seconds(AUTO_SECS)
+            text = "Rolling in %s. Type /double, or press Enter to wait." % seconds(AUTO_SECS)
         else:
             text = "Rolling in %s. Press Enter to wait." % seconds(AUTO_SECS)
         await self.notice(" " + text)
@@ -1208,22 +1167,18 @@ class PlainBackgammon(BgBase, PlainGame):
         await (self.notice(err) if err else self.draw())
 
     async def auto_stopped(self, kind):
-        await self.notice(" Type roll when you want to roll." if kind == "roll" else
-                          " Type end to send your move, or undo to take a step back.")
+        await self.notice(" Type /roll when you want to roll." if kind == "roll" else
+                          " Type /end to send your move, or /undo to take a step back.")
 
-    def prompt(self):
+    def turn_prompt(self):
         ph = self.phase()
         if ph == "roll":
-            return "Roll%s > " % (" or double" if "double" in self.v["moves"] else "")
-        if ph == "take":
-            return "Take or drop > "
-        if ph == "resign":
-            return "Accept or reject > "
+            return "Your turn. Type /roll%s." % (", or /double to double to %d" % (self.v["cube"] * 2)
+                                                 if "double" in self.v["moves"] else "")
         if ph == "move" and self.steps():
-            return "Your move (like %s) > " % self.steps()[0]
+            return "Your turn. Type a step such as /%s." % self.steps()[0]
         if ph == "move":
-            return "Turn complete: end or undo > "
-        return "> "
-
+            return "Your dice are played. Type /end, or /undo."
+        return "Your turn."
 
 AnsiScreen, PlainScreen = AnsiBackgammon, PlainBackgammon

@@ -1139,7 +1139,7 @@ class Screens(unittest.TestCase):
                 elif me >= 0:
                     self.assertIn("Waiting for", shown)
                 else:
-                    self.assertIn("Watching", shown)
+                    self.assertIn("You are watching", shown)
                 self.assertFalse([r for r in reqs if r.startswith("MOV")])
 
     def test_keys_aim_and_fire(self):
@@ -1153,13 +1153,17 @@ class Screens(unittest.TestCase):
             (["<", "WAIT", "+", "WAIT", "ENTER"], (ang + 10, pw + 10)),
             ([">", "WAIT", "-", "WAIT", "ENTER"], (ang - 10, pw - 10)),
             (["HOME", "PGDN", "ENTER"], (ang + 10, pw - 10)),
-            (list("30 70") + ["ENTER"], (30, 70)),
-            (list("fire 120 99") + ["ENTER"], (120, 99)),
+            (["/"] + list("30 70") + ["ENTER"], (30, 70)),
+            (["/"] + list("fire 120 99") + ["ENTER"], (120, 99)),
             ([("CLICK", 43, 1)], (ang, pw)),                    # the [ Fire ] button
             ([("CLICK", 1, 23)], None),                         # the status bar's Arrows item: nothing
         ]
         for keys, shot in cases:
+            typed = "".join(k for k in keys[1:-1]) if keys[0] == "/" else None
             for mode, (shown, reqs) in ansi_screens(self, G, lines, seat, keys=keys).items():
+                if typed:                               # a typed shot runs on the server (CMD)
+                    self.assertIn("CMD 3 /" + typed, reqs, (keys, mode))
+                    continue
                 movs = [r for r in reqs if r.startswith("MOV")]
                 want = [] if shot is None else ["MOV 3 FIRE %d %d" % (min(180, max(0, shot[0])),
                                                                       min(100, max(0, shot[1])))]
@@ -1179,18 +1183,16 @@ class Screens(unittest.TestCase):
                 self.assertEqual(pw, 50)                     # a click aims; the power stays
 
     def test_keys_move(self):
-        """[ and ] drive as far as the tank can; a typed move l 5, move -5, move r; the [<] and [>] buttons; a click
+        """[ and ] drive as far as the tank can; a typed /drive left 5 or /drive right; the [<] and [>] buttons; a click
         on the ground within reach (or the cell above it) drives there. Only before the shot, on your turn."""
         st = flat(xs=(10, 60))
         lines = view_lines(st, 0)
         cases = [
             (["[", "WAIT"], "MOVE L 8"),
             (["]", "WAIT"], "MOVE R 8"),
-            (list("move l 5") + ["ENTER"], "MOVE L 5"),
-            (list("move left 2") + ["ENTER"], "MOVE L 2"),
-            (list("move -5") + ["ENTER"], "MOVE -5"),
-            (list("move +3") + ["ENTER"], "MOVE +3"),
-            (list("move r") + ["ENTER"], "MOVE R 8"),
+            (["/"] + list("drive left 5") + ["ENTER"], "MOVE L 5"),
+            (["/"] + list("drive left 2") + ["ENTER"], "MOVE L 2"),
+            (["/"] + list("drive right") + ["ENTER"], "MOVE R 8"),
             ([("CLICK", 52, 1)], "MOVE L 8"),                    # [<]
             ([("CLICK", 58, 1)], "MOVE R 8"),                    # [>]
             ([("CLICK", 4 + 15, 10)], "MOVE R 5"),               # the ground at column 15
@@ -1198,9 +1200,13 @@ class Screens(unittest.TestCase):
             ([("CLICK", 4 + 6, 10)], "MOVE L 4"),
         ]
         for keys, mv in cases:
+            typed = "".join(k for k in keys[1:-1]) if keys[0] == "/" else None
             for mode, (shown, reqs) in ansi_screens(self, G, lines, 0, keys=keys).items():
-                self.assertEqual([r for r in reqs if r.startswith("MOV")], ["MOV 3 " + mv], (keys, mode))
-                self.assertIn("[ or ] moves (4 left, 7.2 each)", shown)
+                if typed:                               # a typed drive runs on the server (CMD)
+                    self.assertIn("CMD 3 /" + typed, reqs, (keys, mode))
+                else:
+                    self.assertEqual([r for r in reqs if r.startswith("MOV")], ["MOV 3 " + mv], (keys, mode))
+                self.assertIn("[ and ] drive first.", shown)
                 self.assertIn("[<] 4 [>]", shown)
         # out of reach on the ground, or in the sky: a click aims (and Enter fires)
         for target in ((4 + 30, 10), (4 + 15, 4)):
@@ -1216,7 +1222,7 @@ class Screens(unittest.TestCase):
                 self.assertFalse([r for r in reqs if r.startswith("MOV") and "MOVE" in r], (me, mode))
                 self.assertNotIn("[<]", shown)
         for mode, (shown, _) in ansi_screens(self, G, moved, 0, keys=["[", "WAIT"]).items():
-            self.assertIn("You have moved this turn: now fire.", shown)
+            self.assertIn("You have driven this turn, so now you fire.", shown)
 
     def test_hit_points_and_moves_shown(self):
         st = flat(n=3, xs=(10, 35, 60))
@@ -1233,12 +1239,13 @@ class Screens(unittest.TestCase):
         text = plain_screen(self, G, lines, 0)
         self.assertIn("##### 100 hp 4mv", text)
         self.assertIn("##...  30 hp 1mv", text)
-        self.assertIn("Before firing: move l n or move r n, up to 7.2 columns of path (4 left).", text)
-        self.assertIn("This turn it can reach columns 3 to 17 (it stands at 10).", text)
-        self.assertIn("or move l/r n >", text)
+        flat_text = " ".join(text.split())
+        self.assertIn("You may drive first with /drive left or /drive right, up to 7.2 columns of path.", flat_text)
+        self.assertIn("You can reach columns 3 to 17, and you stand at 10.", flat_text)
+        self.assertIn(", or /drive left or /drive right. >", text)
         moved = plain_screen(self, G, view_lines(play(st, 0, "MOVE R 2")["state"], 0), 0)
-        self.assertIn("You have moved this turn: now fire.", moved)
-        self.assertNotIn("move l/r", moved)
+        self.assertIn("You have driven this turn, so now you fire.", " ".join(moved.split()))
+        self.assertNotIn("/drive", moved)
         self.assertIn("4mv", plain_screen(self, G, lines, 1))
 
     def test_burst_and_path(self):
@@ -1282,7 +1289,7 @@ class Screens(unittest.TestCase):
                 self.assertIn(NAMES8[7], shown)
                 self.assertIn("Wind", shown)
         text = plain_screen(self, G, lines, 7, names=NAMES8)
-        self.assertIn("Wind 9 to the left", text)
+        self.assertIn("The wind is 9 to the left.", text)
         self.assertIn("---", text)                             # the destroyed tanks
 
     def test_narrow_arena(self):
@@ -1310,12 +1317,12 @@ class Screens(unittest.TestCase):
         st, events = midgame()
         seat = st["turn"]
         text = plain_screen(self, G, view_lines(st, seat), seat)
-        self.assertIn("Your shot: angle power (like", text)
-        self.assertIn("you are tank %s" % G.letter(seat), text)
+        self.assertIn("Your shot. Type /fire", text)
+        self.assertIn("You are abcdefghijkl.", text)
         self.assertIn(" 0         10        20", text)
         self.assertEqual(text.count("\n |"), 12)
         watch = plain_screen(self, G, view_lines(st, -1), -1)
-        self.assertIn("you are watching", watch)
+        self.assertIn("You are watching.", watch)
         self.assertTrue(watch.endswith("> "))
         g = G.PlainScreen.__new__(G.PlainScreen)
         self.assertEqual(G.CannonBase.move_word(g, "45", ["45", "60"]), "FIRE 45 60")
@@ -1327,8 +1334,8 @@ class Screens(unittest.TestCase):
         lines = ["V cannonfire/1 1", "S Waiting for players"]
         self.assertFalse(G.parse_view(lines)["rows"])
         for mode, (shown, _) in ansi_screens(self, G, lines, 0).items():
-            self.assertIn("Waiting for an opponent", shown)
-        self.assertIn("Waiting for an opponent", plain_screen(self, G, lines, 0))
+            self.assertIn("Waiting for a second player", shown)
+        self.assertIn("Waiting for a second player", plain_screen(self, G, lines, 0))
 
 
 if __name__ == "__main__":

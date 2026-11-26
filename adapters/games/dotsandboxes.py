@@ -12,10 +12,9 @@ down and (odd, odd) a box. The telnet cursor sits on a line of the lattice.
 """
 import re
 
-from ..telnet import (A_AXIS, A_AXIS_HI, A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_TEXT, A_YELLOW, COLS, ROWS,
-                      AnsiGame, Canvas, GameBase, PlainGame, clock_text, fmt_secs, rule, status_bar, title_bar,
-                      turn_text)
-from ..telnet import box, describe_event as describe_common
+from ..telnet import (A_AXIS, A_AXIS_HI, A_DIM, A_RED, A_TEXT, AnsiGame, COLS, Canvas, GameBase, PlainGame, ROWS,
+                      title_bar)
+from ..telnet import describe_event as describe_common
 from ..board import Canvas as Picture
 from ..web import board_html, esc, hidden_fields, make_gif
 
@@ -318,20 +317,6 @@ def web_parts(v, tid, link, seat, names, sel):
 
 # ---- telnet --------------------------------------------------------------------------
 
-HELP = [
-    "Arrow keys   move the cursor from line to line",
-    "Enter/Space  draw the line under the cursor",
-    "Mouse        click an open line to draw it",
-    "T            talk: type a line to the table",
-    "R            resign (asks first)",
-    "Esc          back to the menu; the game goes on",
-    "",
-    "Closing a box takes it (your letter fills it)",
-    "and you move again. Most boxes wins.",
-    "Typed commands work too: a line like a1-b1,",
-    "say <text>, resign, redraw, menu, help.",
-    "Leaving or logging off never resigns.",
-]
 OWNER_BG = ("44", "41", "42", "45")         # seats A-D: blue, red, green, magenta (the letter says it too)
 A_LINE = "0;1;37"
 A_LAST = "0;1;33"
@@ -351,7 +336,21 @@ def dots_glyphs(mode):
 class DotsBase(GameBase):
     """What both Dots and Boxes screens share: the view, the events, typed lines."""
 
+    HELP_MOVING = ["The arrows move the cursor from line to line. Press Enter to draw",
+                   "the line under the cursor. A click on a line does the same."]
+    HELP_KEYS = []
+    HELP_COMMANDS = ["Press / to type one. /a1-b1 draws the line from a1 to b1."]
+    HELP_REFERENCE = ["Lines",
+                      "A line is named by its two dots. a1-b1 goes across, and a1-a2",
+                      "goes down. The last line drawn is doubled.",
+                      "",
+                      "Boxes",
+                      "Closing a box takes it, and then it's your turn again. The player",
+                      "with the most boxes wins."]
+
     parse = staticmethod(parse_view)
+    GAME = NAME
+    MOVE_EXAMPLE = "/a1-b1"
 
     def describe(self, text):
         return describe_event(text, self.names) or describe_common(text, self.names)
@@ -368,6 +367,14 @@ class DotsBase(GameBase):
     def seats(self):
         return max(2, len(self.v["counts"]) if self.v else 0, len(self.names))
 
+    def last_move(self, text):
+        p = text.split()
+        if p and p[0] == "LINE" and len(p) >= 3 and p[1].isdigit():
+            boxes = p[4:] if len(p) > 4 and p[3] == "BOX" else []
+            closed = "" if not boxes else " and closed a box" if len(boxes) == 1 else " and closed %d boxes" % len(boxes)
+            return "%s drew %s%s." % (self.actor(p[1]), p[2], closed)
+        return None
+
     def playing(self):
         """Started, and nobody has seen the end yet (W - says the game is over before its END is read)."""
         return bool(self.v and self.v["rows"]) and not self.over and self.v["turn"] >= 0
@@ -378,26 +385,12 @@ class DotsBase(GameBase):
     def end_text(self):
         return self.over or (self.v["status"] if "Game over" in self.v["status"] else "Game over")
 
-    def turn_line(self):
-        v = self.v
-        if not (v and v["rows"]):
-            return "Waiting for an opponent"
-        if not self.playing():
-            return self.end_text()
-        if self.my_turn():
-            return "Your move again: box closed" if self.again() else "Your move"
-        if is_gone(v, self.me):
-            return "You left; %s to move" % self.name(v["turn"])
-        return "%s to move" % self.name(v["turn"])
-
-
 class AnsiDots(DotsBase, AnsiGame):
     """Dots and Boxes, full screen: the board on the left (a cursor on the lines), players, boxes, clock
     and log on the right."""
 
     HOTKEYS = "rt?"
     LOG_TOP, LOG_ROWS = 9, 11
-    TITLE, HELP = "Dots and Boxes", HELP
     PX = 43                 # the panel's left edge
 
     def __init__(self, sess, tid, key, me):
@@ -459,28 +452,26 @@ class AnsiDots(DotsBase, AnsiGame):
     # ---- drawing ---------------------------------------------------------
     def compose(self):
         cv = Canvas()
-        right = "watching" if self.me < 0 else "you are %s" % LETTERS[self.me] if self.me < 4 else ""
-        title_bar(cv, self.g, "Dots and Boxes %s table %s" % (self.g["v"], self.tid), right)
+        title_bar(cv, self.g, self.title_text())
         self.draw_board(cv)
         self.draw_panel(cv)
-        text, attr = (self.msg, self.msg_attr) if self.msg else self.hint()
+        text, attr = self.sentence(self.hint)
         cv.put(1, ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
-        if self.buf:
-            keys = [("Enter", "send"), ("Esc", "cancel"), ("Backspace", "erase")]
+        if self.my_turn():
+            keys = self.keys("move", "draw")
         elif self.me >= 0 and self.playing() and not is_gone(self.v, self.me):
-            keys = [("Arrows", "move"), ("Enter", "draw"), ("T", "talk"), ("R", "resign"),
-                    ("?", "help"), ("Esc", "menu")]
+            keys = self.keys("look")
         else:
-            keys = [("T", "talk"), ("?", "help"), ("Esc", "menu")]
-        status_bar(cv, keys)
+            keys = self.keys()
+        self.keys_line(cv, keys)
         return cv
 
     def draw_board(self, cv):
         v, G = self.v, self.dg
         w, h, sx, sy, bx, by = self.geometry()
         self.shown_top()
-        showcur = self.me >= 0 and self.playing() and not is_gone(v, self.me)
+        showcur = self.me >= 0 and self.playing() and self.lit() and not is_gone(v, self.me)
         cur = self.cur if showcur else None
         ends = set()
         if cur:
@@ -539,65 +530,35 @@ class AnsiDots(DotsBase, AnsiGame):
             self.draw_waiting(cv, bx + max(0, sx * w + 1 - bw) // 2, by + (min(sy * h + 1, 19) - 5) // 2, bw)
 
     def draw_panel(self, cv):
-        g, v = self.g, self.v
-        px = self.PX
-        pw = COLS - 1 - px
-        inner = pw - 4
-        box(cv, g, px, 1, pw, 20, A_BORDER, "Players", tattr=A_HEAD)
+        v = self.v
         started = bool(v and v["rows"])
-        n = self.seats()
-        for i in range(n):
-            y = 2 + i
-            tomove = self.playing() and v["turn"] == i
-            empty = i >= len(self.names) or self.names[i] == "-"
-            cv.put(px + 2, y, g["ptr"] if tomove else " ", A_YELLOW)
-            cv.put(px + 4, y, " %s " % LETTERS[i % 4], "0;1;37;" + OWNER_BG[i % 4])
-            label = ("(empty seat)" if empty else self.names[i]) + (" (you)" if i == self.me else "")
+        players = []
+        for i in range(self.seats()):
             count = v["counts"][i] if started and i < len(v["counts"]) else 0
-            cnt = "%2d box%s" % (count, "" if count == 1 else "es")
-            if started and is_gone(v, i):
-                cnt = "%2d left" % count
-            cv.put(px + 8, y, label[:inner - 6 - 8], A_BRIGHT if tomove else A_DIM if empty else A_TEXT)
-            if started:
-                cv.put(px + pw - 2 - 8, y, cnt.ljust(8), A_BRIGHT if tomove else A_TEXT)
-        y = 2 + n
-        rule(cv, g, px, y, pw, A_BORDER)
-        turn = self.turn_line()
-        cv.put(px + 2, y + 1, turn[:inner], A_YELLOW if (not self.playing() or self.my_turn()) else A_TEXT)
-        c = self.clock()
-        if c:
-            seat, left, limit = c
-            clock = "Clock: %s left of %s" % (fmt_secs(left), turn_text(limit))
-            cv.put(px + 2, y + 2, clock[:inner], A_RED if seat == self.me and left < 60 else A_TEXT)
-        elif self.turn_secs and self.playing():
-            cv.put(px + 2, y + 2, ("Time per turn: %s" % turn_text(self.turn_secs))[:inner], A_DIM)
-        if started:
-            info = "Boxes left: %d of %d" % (boxes_left(v), v["w"] * v["h"])
-            if v["last"]:
-                info += "  last %s" % v["last"]
-            cv.put(px + 2, y + 3, info[:inner], A_DIM)
-        rule(cv, g, px, y + 4, pw, A_BORDER, "Log", tattr=A_HEAD)
-        self.LOG_TOP, self.LOG_ROWS = y + 5, 20 - (y + 5)
-        self.draw_log(cv, px + 2, inner)
+            score = "left" if started and is_gone(v, i) else "%d box%s" % (count, "" if count == 1 else "es")
+            players.append((i, (" %s " % LETTERS[i % 4], "0;1;37;" + OWNER_BG[i % 4]), score))
+        facts = ["%d of %d boxes are left." % (boxes_left(v), v["w"] * v["h"])] if started else []
+        self.draw_panel_parts(cv, self.PX, 1, COLS - 1 - self.PX, players, facts)
 
     def hint(self):
         v = self.v
         if not (v and v["rows"]):
-            return ("Table %s starts when someone joins: from telnet or the web (port 6500)."
-                    % self.tid, A_DIM)
+            return self.waiting_hint()
         if not self.playing():
-            return "%s. Esc goes back to the menu." % self.end_text(), A_YELLOW
+            return self.over_hint(self.end_text())
         if self.me < 0:
-            return "Watching. T talks to the table, Esc goes back to the menu.", A_DIM
+            return self.watch_hint()
         if is_gone(v, self.me):
-            return "You have left this game; the others play on. Esc goes back to the menu.", A_DIM
+            return "You have left this game, and the others play on. Press Esc to go back to the menu.", A_DIM
         if self.my_turn():
             tok = line_at(*self.cur)
-            again = "You closed a box: move again. " if self.again() else "Your move. "
+            a, b = tok.split("-") if "-" in tok else (tok, tok)
+            if tok in v["moves"] and self.again():
+                return "You closed a box, so it's your turn again. Press Enter to draw %s." % tok, A_TEXT
             if tok in v["moves"]:
-                return "%s%s: Enter draws this line." % (again, tok), A_TEXT
-            return "%s%s is drawn; open lines show %s." % (again, tok, self.dg["open"]), A_DIM
-        return "Waiting for %s. Leaving or logging off never resigns." % self.name(v["turn"]), A_DIM
+                return "Your turn. Press Enter to draw the line from %s to %s." % (a, b), A_TEXT
+            return "Your turn. The line from %s to %s is drawn already. The dots show open lines." % (a, b), A_DIM
+        return self.their_hint(v["turn"])
 
     def cursor_at(self):
         if self.me >= 0 and self.playing():
@@ -612,8 +573,7 @@ class AnsiDots(DotsBase, AnsiGame):
     async def on_click(self, value):
         if value[0] == "ln" and self.me >= 0 and self.playing():
             self.cur, self.gx = (value[1], value[2]), value[2]
-            if self.my_turn() and line_at(*self.cur) in self.v["moves"]:
-                return await self.draw()       # a click on an open line draws it
+            return await self.draw()             # a click does what Enter does there
         return None
 
     def on_arrow(self, k):
@@ -637,15 +597,13 @@ class AnsiDots(DotsBase, AnsiGame):
         return await self.draw()
 
     async def draw(self):
-        if self.me < 0:
-            return self.say("You are watching this table.")
-        if not self.playing():
-            return self.say(self.end_text() if self.v["rows"] else "The game has not started yet.")
         if not self.my_turn():
-            return self.say("It is %s's move." % self.name(self.v["turn"]))
+            if self.v["rows"] and not self.playing():
+                self.over = self.over or self.end_text()
+            return self.say(self.not_yours())
         tok = line_at(*self.cur)
         if tok not in self.v["moves"]:
-            return self.say("%s is drawn already: pick an open line." % tok)
+            return self.say("The line %s is drawn already, so pick an open line." % tok)
         err = await self.move(tok)
         if err:
             self.say(err, A_RED)
@@ -656,37 +614,14 @@ class PlainDots(DotsBase, PlainGame):
     """Dots and Boxes for plain terminals: the board printed line by line, typed lines at a prompt."""
 
     BOARD_KINDS = ("LINE", "JOIN", "LEAVE", "START", "END")
-    HELP_TEXT = (" A line like a1-b1 (across) or a1-a2 (down) draws it; closing a box\n"
-                 " takes it, and you move again. say <text> talks to the table.\n"
-                 " resign gives up (it asks first). menu goes back to the menu;\n"
-                 " the game goes on and leaving never resigns. redraw or Enter\n"
-                 " shows the board again.")
 
     def lines(self):
-        v, me = self.v, self.me
-        you = "you are watching" if me < 0 else "you are %s" % LETTERS[me % 4]
-        out = ["", "== Dots and Boxes, table %s: %s ==" % (self.tid, you)]
+        v = self.v
+        out = [""] + self.plain_header()
         if not v["rows"]:
-            return out + ["", "Waiting for an opponent.",
-                          "The game starts when someone joins table %s from telnet, the web" % self.tid,
-                          "(port 6500) or another client. Type menu to go back;",
-                          "the table stays open."]
+            return out + self.plain_waiting()
         G = dots_glyphs("plain")
         w, h = v["w"], v["h"]
-        side = []
-        for i in range(self.seats()):
-            mark = ">" if self.playing() and v["turn"] == i else " "
-            n = v["counts"][i] if i < len(v["counts"]) else 0
-            side.append("%s %s %-12s %2d%s" % (mark, LETTERS[i % 4], self.name(i)[:12], n,
-                                               " left" if is_gone(v, i) else ""))
-        side += ["", "Boxes left: %d of %d" % (boxes_left(v), w * h)]
-        if v["last"]:
-            side.append("Last line: %s" % v["last"])
-        side += ["", self.turn_line() + "."]
-        if me >= 0 and self.playing() and not is_gone(v, me):
-            side += ["Type a line like a1-b1 or a1-a2,", "say <text>, resign, menu, help."]
-        else:
-            side.append("Type say <text>, menu or help.")
         board = ["      " + "".join(chr(97 + i).ljust(4) for i in range(w + 1))]
         for r in range(2 * h + 1):
             row = " %2d   " % (r // 2 + 1) if r % 2 == 0 else "      "
@@ -700,25 +635,18 @@ class PlainDots(DotsBase, PlainGame):
                     row += {"open": "   ", "drawn": G["h"] * 3, "last": G["hl"] * 3}[st]
                 else:
                     row += {"open": " ", "drawn": G["v"], "last": G["vl"]}[st]
-            board.append(row)
-        if max(len(row) for row in board) > 46:     # the 13 by 11 board (59 columns): the rest goes below
-            out += [row.rstrip() for row in board] + [" " + text for text in side if text]
-            side = []
-        for i, row in enumerate(board if side else ()):
-            text = side[i - 1] if 1 <= i <= len(side) else ""
-            out.append((row.ljust(46) + text)[:80].rstrip())
-        for text in side[len(board) - 1:]:
-            out.append((" " * 46 + text)[:80])
-        if self.playing():
-            out.append(" " + clock_text(v, self.names))
-        for l in self.log[-4:]:
-            out.append(" " + l[:78])
-        return out
+            board.append(row.rstrip())
+        players = []
+        for i in range(self.seats()):
+            n = v["counts"][i] if i < len(v["counts"]) else 0
+            players.append((i, LETTERS[i % 4], "left" if is_gone(v, i) else "%d" % n))
+        side = self.side_text(players, ["%d of %d boxes are left." % (boxes_left(v), w * h)])
+        if max(len(row) for row in board) > 46:     # the 13 by 11 board (59 columns): the side text goes below
+            return out + board + [" " + t for t in side if t] + self.plain_log()
+        return out + self.beside(board, side, 46) + self.plain_log()
 
-    def prompt(self):
-        if self.my_turn():
-            return "Your move%s (like %s) > " % (" again" if self.again() else "", sorted(self.v["moves"])[0])
-        return "> "
-
+    def turn_prompt(self):
+        first = "You closed a box, so it's your turn again." if self.again() else "Your turn."
+        return "%s Type a line such as /%s." % (first, sorted(self.v["moves"])[0])
 
 AnsiScreen, PlainScreen = AnsiDots, PlainDots

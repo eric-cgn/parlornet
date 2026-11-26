@@ -886,7 +886,7 @@ class PasswordEmail(MailCapture, Stack):
         b.send("tem\r\n")
         b.until("Password (or press Enter")
         b.send("Tem pass 1\r\n")
-        b.until("Press Enter for the menu")
+        b.until("Press Enter for the lobby")
         b.close()
 
     def test_telnet_stopping_before_the_new_password(self):
@@ -916,7 +916,7 @@ class PasswordEmail(MailCapture, Stack):
         a.send("Tod's own 1\r\n")
         a.until("Type it again")
         a.send("Tod's own 1\r\n")
-        a.until("Press Enter for the menu")
+        a.until("Press Enter for the lobby")
         a.close()
 
 
@@ -1146,8 +1146,11 @@ class TelnetBase(Stack):
             if new:
                 c.until("Type it again")
                 c.send(pw + "\r\n")
-        out = c.until("Press Enter for the menu")
+        out = c.until("Press Enter for the lobby")
         c.send("\r\n")
+        if c.display != "4":                    # the first sign-in on a full screen offers the practice game
+            c.until("Would you like a two-minute practice game", screen=True)
+            c.send("n")
         c.until("Your tables", screen=c.display != "4")
         return out
 
@@ -1157,40 +1160,44 @@ class Telnet(TelnetBase):
     def test_play_by_telnet(self):
         a, b = Client(self.tel_port), Client(self.tel_port)
         self.login(a, "tess", "4")                       # plain text
-        a.send("new reversi 5m\r\n")
-        a.until("Waiting for an opponent")
+        a.send("open\r\n")                               # the questions: the game, then the time per turn
+        a.until("Which game?")
+        a.send("reversi\r\n")
+        a.until("How long is each turn?")
+        a.send("5m\r\n")
+        a.until("Waiting for a second player")
         self.login(b, "tom", "1")                       # PC characters, full screen
-        b.send("join 1\r\n")
+        b.send("/join 1\r")
         b.until("\xbb")                                 # CP437 double-line corner
         self.assertIn("\x1b[", b.raw.decode("latin-1"))
-        b.until("you play white", screen=True)
-        out = a.until("Your move (like", timeout=8)
+        b.until("Reversi, table 1, with tess", screen=True)
+        out = a.until("Your turn. Type a square such as", timeout=8)
         self.assertIn("a  b  c  d  e  f  g  h", out)
         self.assertIn("tess", out)
-        self.assertIn("left to move (limit 5:00 a turn)", out)
-        a.send("d3\r\n")
+        self.assertIn("You have 4:", out)
+        a.send("/d3\r\n")
         a.until("tess plays d3")
-        b.send("a1\r\n")                                # typed moves work in full screen too
-        b.until("Can't play a1", screen=True)
-        b.send("say hi\r\n")
+        b.send("/a1\r")                                 # a typed move on the full screen
+        b.until("You can't play a1", screen=True)
+        b.send("/say hi\r")
         a.until("<tom> hi", timeout=8)
-        b.send("\x1b")                                  # Esc: back to the menu, game goes on
+        b.send("\x1b")                                  # Esc: back to the lobby, the game goes on
         b.until("Your tables", screen=True)
-        b.send("quit\r\n")
-        b.until("Log off?", screen=True)
-        b.send("y\r\n")
+        b.send("/quit\r")
+        b.until("Sign out?", screen=True)
+        b.send("y")
         b.until("Bye.")
         b.close()
         self.assertEqual(b.vt.errors, [])
-        a.send("redraw\r\n")
+        a.send("\r\n")
         out = a.until("> ")
         self.assertNotIn("resigned", out)
         c = Client(self.tel_port)                       # tom comes back with his password
         out = self.login(c, "tom", "4", new=False)
         self.assertNotIn("tom-Pass-word", out)          # never echoed
         c.send("join 1\r\n")
-        c.until("you play white")
-        a.send("resign\r\n")
+        c.until("Reversi, table 1, with tess")
+        a.send("/resign\r\n")
         a.until("Resign this game?")
         a.send("y\r\n")
         a.until("tess resigned")
@@ -1207,7 +1214,7 @@ class TelnetNone(TelnetBase):
         a = Client(self.tel_port)
         out = self.login(a, "noel", "1")
         a.send("?")
-        a.until("this help", screen=True)
+        a.until("Lobby help", screen=True)
         self.assertNotIn("token", a.vt.text().lower())
         self.assertNotIn("token", a.raw.decode("latin-1").lower())
         self.assertNotIn("password", a.raw.decode("latin-1").lower())
@@ -1223,47 +1230,47 @@ class TelnetFullScreen(TelnetBase):
     def test_menu_and_board_by_keys(self):
         a, b = Client(self.tel_port), Client(self.tel_port, enc="utf-8")
         self.login(a, "ann", "1")                        # PC characters
-        a.until("Start a new Reversi table", screen=True)
-        a.until("No other tables yet", screen=True)
-        a.send("n")                                      # N: new table, time-per-turn picker
-        a.until("Time per turn", screen=True)
+        a.until("You have no games yet. Press N to open a table.", screen=True)
+        a.send("n")                                      # N: the game picker, Reversi first
+        a.until("Which game do you want to play?", screen=True)
+        a.send("\r")
+        a.until("How long is each turn?", screen=True)
         a.send(self.UP)                                  # 1 day (default) -> 1 hour
         a.send("\r")
-        a.until("Waiting for an opponent", screen=True)
-        a.until("Time per turn: 1 hour", screen=True)
-        a.send(self.ESC)                                 # menu; the table stays open
+        a.until("Whom do you want to play?", screen=True)
+        a.send(self.DOWN + "\r")                         # anyone who joins
+        a.until("Waiting for a second player", screen=True)
+        a.until("Each turn has 1 hour.", screen=True)
+        a.send(self.ESC)                                 # the lobby; the table stays open
         scr = a.until("waiting for an opponent", screen=True)
         self.assertIn("1 hour", scr)
 
         self.login(b, "bob", "2")                        # Unicode characters
-        b.until("open: Enter joins", screen=True)
-        b.send(self.DOWN * new_rows())                   # past the "new table" rows to ann's table
-        b.until("Table 1: ann (with telnet) waits for an opponent", screen=True)   # with what ann plays
+        b.until("ann (with telnet) waits at table 1. Press Enter to sit down.", screen=True)
         b.send("\r")                                     # Enter: sit down
-        b.until("you play white", screen=True)
-        b.until("ann to move", screen=True)
+        b.until("Reversi, table 1, with ann", screen=True)
+        b.until("Waiting for ann.", screen=True)
         self.assertIn("\u2554", b.vt.text())             # Unicode board frame
         self.assertNotIn("\ufffd", b.vt.text())
 
-        a.send("r")                                      # R: refresh the menu
-        a.until("It is your move at table 1", screen=True)
-        a.send(self.UP)                                  # select the table, Enter opens it
-        a.until("Enter goes back to your game against bob (with telnet).", screen=True)
+        a.send("/list\r")                                # the lobby, listed again
+        a.until("It's your turn at table 1.", screen=True)
+        a.until("Press Enter to go back to your game with bob (with telnet) at table 1.", screen=True)
         a.send("\r")
-        a.until("Your move. d3", screen=True)            # cursor on a legal square
+        a.until("Your turn. Press Enter to place a disc on d3.", screen=True)     # the cursor on a legal square
         self.assertIn("bob sat down with telnet", a.vt.text(), "the JOIN and its CLIENT, one line in the log")
         a.send(self.RIGHT)
-        a.until("e3 is not a legal square", screen=True)
+        a.until("You can't place a disc on e3.", screen=True)
         a.send("\r")
-        a.until("Can't play e3", screen=True)
+        a.until("You can't play e3", screen=True)
         a.send(self.LEFT)
-        a.until("Your move. d3", screen=True)
+        a.until("Press Enter to place a disc on d3.", screen=True)
         a.send(" ")                                      # Space places
         a.until("ann plays d3 (flips 1)", screen=True)
         b.until("ann plays d3 (flips 1)", screen=True)
-        b.until("Your move", screen=True)
+        b.until("Your turn", screen=True)
 
-        b.send("say hello\r")                            # typed command
+        b.send("/say hello\r")                           # a command
         a.until("<bob> hello", screen=True)
         b.send("r")                                      # R: resign asks first
         b.until("Resign this game?", screen=True)
@@ -1274,8 +1281,8 @@ class TelnetFullScreen(TelnetBase):
         for c in (a, b):
             c.send(self.ESC)
             c.until("Your tables", screen=True)
-            c.send("q")
-            c.until("Log off?", screen=True)
+            c.send("/quit\r")
+            c.until("Sign out?", screen=True)
             c.send("y")
             c.until("Bye.")
             c.close()
@@ -1297,12 +1304,6 @@ def wait_any(clients, texts, timeout=10):
             c.pump()
 
 
-def new_rows():
-    """The telnet menu's "Start a new ... table" rows: one per game with a frontend module (and its plugin)."""
-    from adapters import games
-    return len(games.all_games())
-
-
 @slow
 class TelnetBackgammon(TelnetBase):
     """Backgammon by telnet: a table started from the menu, steps played
@@ -1313,42 +1314,41 @@ class TelnetBackgammon(TelnetBase):
     def test_backgammon_by_keys(self):
         a, b = Client(self.tel_port), Client(self.tel_port)
         self.login(a, "bea", "1")                         # PC characters
-        a.until("Start a new Backgammon table", screen=True)
-        a.send(self.DOWN)                                 # from the Reversi row to the Backgammon row
-        a.until("Enter starts a new Backgammon table", screen=True)
-        a.send("\r")
-        a.until("Time per turn", screen=True)
+        a.send("n")
+        a.until("Which game do you want to play?", screen=True)
+        a.send(self.DOWN + "\r")                          # Backgammon, after Reversi
+        a.until("How long is each turn?", screen=True)
         a.send("\r")                                      # the default, 1 day
-        a.until("Waiting for an opponent", screen=True)
+        a.until("Whom do you want to play?", screen=True)
+        a.send(self.DOWN + "\r")                          # anyone who joins
+        a.until("Waiting for a second player", screen=True)
         self.assertIn("Backgammon", a.vt.lines()[0])
 
         self.login(b, "bert", "3")                        # ASCII characters
-        b.until("open: Enter joins", screen=True)
-        b.send(self.DOWN * new_rows())
-        b.until("bea (with telnet) waits for an opponent", screen=True)
+        b.until("bea (with telnet) waits at table 1. Press Enter to sit down.", screen=True)
         b.send("\r")
-        b.until("you play black (X)", screen=True)
+        b.until("Backgammon, table 1, with bea", screen=True)
         self.assertIn("(O)", b.vt.text())                 # ASCII checkers and frame
         self.assertIn("+==================+===+", b.vt.text())
 
-        m, _ = wait_any((a, b), ["Your move"])            # the opening roll decides who starts
+        m, _ = wait_any((a, b), ["Your turn"])            # the opening roll decides who starts
         o = b if m is a else a
         who = "bea" if m is a else "bert"
-        o.until("%s to move" % who, screen=True)
+        o.until("Waiting for %s." % who, screen=True)
         steps = 0
         for _ in range(5):
             if "Sending your move in" in m.vt.text():
                 break
             m.send(" ")                                   # Space picks up a checker that can move
-            m.until("Enter moves", screen=True)           # ... and the cursor is on its nearest target
+            m.until("Press Enter on a marked point", screen=True)    # ... and the cursor is on its nearest target
             m.send("\r")                                  # Enter puts it down
             steps += 1
             m.mark = len(m.raw)
-            wait_any((m,), ["Enter picks up", "Sending your move in"])
+            wait_any((m,), ["Press Enter to pick up", "Sending your move in"])
         self.assertGreaterEqual(steps, 2)
-        m.until("E end turn", screen=True)                # the status bar offers it now
+        m.until("E end turn", screen=True)                # the keys line offers it now
         m.send(self.ESC)                                  # Esc stops the countdown: the move waits
-        m.until("Your move waits. Press E to send it", screen=True)
+        m.until("Your move waits. Press Enter to send it", screen=True)
         m.send("e")
         m.until("Waiting for", screen=True)
         o.until("%s moves" % who, screen=True)            # the other player sees the steps
@@ -1361,8 +1361,8 @@ class TelnetBackgammon(TelnetBase):
         for c in (a, b):
             c.send(self.ESC)
             c.until("Your tables", screen=True)
-            c.send("q")
-            c.until("Log off?", screen=True)
+            c.send("/quit\r")
+            c.until("Sign out?", screen=True)
             c.send("y")
             c.until("Bye.")
             c.close()
@@ -1382,33 +1382,34 @@ class TelnetMouse(TelnetBase):
         b = Client(self.tel_port)
         self.login(a, "mia", "")                          # xterm: Unicode by default
         self.assertIn("\x1b[?1000h\x1b[?1006h", a.raw.decode("latin-1"))
-        a.until("Enter starts a new Reversi table", screen=True)
-        a.click(*a.find("Start a new Reversi table"))    # selected already: a click opens it
-        a.until("Time per turn", screen=True)
-        a.click(*a.find("1 hour"))                        # a click picks an option
-        a.until("Waiting for an opponent", screen=True)
-        a.until("Time per turn: 1 hour", screen=True)
+        a.click(*a.find("N new table"))                   # the keys on the bottom line are buttons
+        a.until("Which game do you want to play?", screen=True)
+        a.click(*a.find("Reversi"))                       # a click picks an option
+        a.until("How long is each turn?", screen=True)
+        a.click(*a.find("1 hour"))
+        a.until("Whom do you want to play?", screen=True)
+        a.click(*a.find("Reversi with anyone who joins"))
+        a.until("Waiting for a second player", screen=True)
+        a.until("Each turn has 1 hour.", screen=True)
 
         self.login(b, "max", "1")
-        b.until("open: Enter joins", screen=True)
-        b.send(self.DOWN * new_rows())
-        b.until("Table 1: mia (with telnet (xterm-256color)) waits. Enter sits down", screen=True)
+        b.until("mia (with telnet (xterm-256color)) waits", screen=True)
         b.send("\r")
-        b.until("you play white", screen=True)
+        b.until("Reversi, table 1, with mia", screen=True)
 
-        a.until("Your move. d3", screen=True)
+        a.until("Press Enter to place a disc on d3.", screen=True)
         # cells are 4 columns apart from column 7, rows 2 apart from row 5 (1-based)
-        a.click(7 + 4 * 4, 5 + 2 * 2)                     # e3: not legal, the cursor goes there
-        a.until("e3 is not a legal square", screen=True)
+        a.click(7 + 4 * 4, 5 + 2 * 2)                     # e3: not legal, so nothing is played
+        a.until("You can't play e3", screen=True)
         a.click(7 + 4 * 3, 5 + 2 * 2)                     # d3: legal, a click plays it
         a.until("mia plays d3 (flips 1)", screen=True)
         b.until("mia plays d3 (flips 1)", screen=True)
 
         a.send("\x1b")
         a.until("Your tables", screen=True)
-        a.click(*a.find("Q quit"))                        # status bar items are buttons
-        a.until("Log off?", screen=True)
-        a.click(*a.find("Y  yes"))
+        a.send("/quit\r")
+        a.until("Sign out?", screen=True)
+        a.click(*a.find("Yes"))
         a.until("Bye.")
         self.assertIn("\x1b[?1000l\x1b[?1006l", a.raw.decode("latin-1"))
         self.assertEqual(a.vt.errors, [])
@@ -1447,8 +1448,31 @@ class FakeIO:
         return bool(self.keys)
 
 
+async def fake_cmd(req, text, me, tabs, gam, typed=None):
+    """CMD [table] [YES] /line as the core answers it, for the fakes that stand in for the core: the shared
+    commands (parlord/commands.py) run with the fake's own requests (req), as the player me, and the reply is
+    INF lines, with DLG first for a dialog. typed(words), when given, stands in for the game's plugin reading a
+    typed move (docs/plugins.md, typed); without it a typed move is no command here."""
+    from parlord import commands
+    head, _, tail = text.split(None, 1)[1].partition("/")
+    words = head.split()
+    sure = words[-1:] == ["YES"]
+    words = words[:-1] if sure else words
+    at = None
+    if words:
+        from adapters.common import parse_tables
+        t = next(t for t in parse_tables(tabs) if t["id"] == words[0])
+        at = commands.At(t["id"], t["key"], t["rules"], t["status"], t["seat_of"].get(me, -1), False)
+    games = [(g.split()[1], g.split()[3].replace("_", " "), g.split()[2]) for g in gam]
+    con = commands.CoreConsole(req, me, games, at, sure, typed, width=74)
+    await con.handle("/" + tail)
+    out = ["DLG %s%s" % (con.dialog[0], " %s" % con.dialog[1] if con.dialog[1] else "")] if con.dialog else []
+    return out + ["INF " + l if l else "INF" for l in con.lines], "OK"
+
+
 class FakeCore:
     auth = "password"
+    me = "abcdefghijkl"         # LONG, the player the tests sign in
 
     def __init__(self, tabs):
         self.tabs = tabs
@@ -1461,6 +1485,8 @@ class FakeCore:
             return self.tabs, "OK"
         if verb == "VUE":
             return ["V reversi/1 9", "CLK 1 3599 86400"], "OK"
+        if verb == "CMD":
+            return await fake_cmd(self.req, text, self.me, self.tabs, ["GAM reversi/1 standard Reversi 2 2"])
         return [], "OK"
 
     async def pwd(self):
@@ -1528,17 +1554,17 @@ class TelnetScreens(unittest.TestCase):
         return io
 
     def test_menus(self):
-        keys = ["DOWN"] * 20 + ["UP"] * 3 + ["PGUP", "END", "HOME", "?", "WAIT", "x",
-                                             "p", "WAIT", "a", "b", "BS", "ENTER", "n", "WAIT", "DOWN", "ESC",
-                                             "q", "WAIT", "n", "x", "y", "z", "REDRAW"]
+        keys = ["DOWN"] * 20 + ["UP"] * 3 + ["PGUP", "END", "HOME", "?", "ESC", "/"] + list("password") + [
+            "ENTER", "a", "b", "BS", "ENTER", "n", "DOWN", "ESC", "/"] + list("quit") + ["ENTER", "n", "/", "x", "y", "z",
+                                                                                        "REDRAW"]
         for mode in ("pc", "utf8", "ansi"):
             io = self.run_menu(mode, keys)
             text = "\n".join("\n".join(s) for s in io.screens)
-            for want in ("Your tables", "Other tables", "more", "Log off?", "Time per turn", "Current password",
-                         "Type your password first.", "Your password is changed", "their move", "your move", "> xyz"):
+            for want in ("Your tables", "Other tables", "more", "Sign out?", "How long is each turn?", "Current password",
+                         "Type your password first.", "Your password is changed", "their move", "your move", "/xyz"):
                 self.assertIn(want, text, mode)
             empty = self.run_menu(mode, ["DOWN"], tabs=[])
-            self.assertIn("No other tables yet", "\n".join(empty.screens[-1]))
+            self.assertIn("The practice game teaches the keys.", "\n".join(empty.screens[-1]))
 
     def test_boards(self):
         for mode in ("pc", "utf8", "ansi"):
@@ -1546,7 +1572,7 @@ class TelnetScreens(unittest.TestCase):
                 for me, filled, turn, over in ((0, True, 0, False), (1, True, 0, False), (-1, True, 1, False),
                                                (0, True, 0, True), (0, False, 0, False)):
                     s, io = self.session(mode, ["RIGHT", "DOWN", "LEFT", "UP", "t", "WAIT", "x", "ESC",
-                                                        "?", "WAIT", "z", "r", "WAIT", "n"])
+                                                        "?", "ESC", "r", "n"])
                     g = T.AnsiReversi(s, "3", "reversi/1", me)
                     g.names, g.turn_secs, g.v = [LONG, LONG.upper()], 300, view(n, filled, turn, over)
                     g.over = "Game over: %s wins 30-29" % LONG if over else ""
@@ -1565,9 +1591,9 @@ class TelnetScreens(unittest.TestCase):
                     shown = "\n".join("\n".join(s) for s in io.screens)
                     if filled and not over and me == 0:
                         self.assertIn("Resign this game?", shown)
-                        self.assertIn("Your move", shown)
+                        self.assertIn("Your turn", shown)
                     if not filled:
-                        self.assertIn("Waiting for an opponent", shown)
+                        self.assertIn("Waiting for a second player", shown)
 
     def test_painter_matches_canvas(self):
         """Diff painting leaves the terminal showing exactly the last canvas."""
@@ -1644,9 +1670,10 @@ class TelnetBackgammonScreens(unittest.TestCase):
 
     SCENES = [("roll", 0, False), ("move", 0, False), ("move", 1, False), ("done", 0, False), ("take", 0, False),
               ("take", 1, False), ("over", 0, False), ("move", 0, True), ("move", 1, True), ("waiting", 0, False)]
-    KEYS = ["RIGHT", "LEFT", "UP", "DOWN", "ENTER", "ENTER", " ", "u", "WAIT", "e", "WAIT", "d", "WAIT", "a", "WAIT",
-            "p", "WAIT", "n", "ESC", "t", "WAIT", "x", "ESC", "?", "WAIT", "z", ("CLICK", 3, 5), ("CLICK", 15, 15),
-            ("CLICK", 30, 23), ("CLICK", 60, 10), "r", "WAIT", "n", "1", "3", "-", "8", "ENTER", "ESC", "ESC"]
+    KEYS = ["RIGHT", "LEFT", "UP", "DOWN", "ENTER", "ENTER", " ", "u", "e", "d", "a", "p", "n", "t", "x", "ESC",
+            "?", "z", ("CLICK", 3, 5), ("CLICK", 15, 15), ("CLICK", 30, 23), ("CLICK", 60, 10), "r", "n",
+            "/", "1", "3", "-", "8", "ENTER", "ESC", "ESC"]
+    TAKE_KEYS = ["n", "n", "y", "ESC"]          # decline, no to dropping, then accept
 
     def session(self, mode, keys, lines, tabs=BG_TABS):
         io = FakeIO(mode, keys)
@@ -1692,23 +1719,30 @@ class TelnetBackgammonScreens(unittest.TestCase):
         return "\n".join("\n".join(scr) for scr in io.screens), core
 
     def test_every_mode_and_phase(self):
-        want = {"roll": "Enter rolls the dice", "move": "Steps: ", "done": "Nothing left to play",
-                "take": "A takes the cube", "over": "Game over", "waiting": "Waiting for an opponent"}
+        want = {"roll": "Press Enter to roll the dice", "move": "You can play", "done": "Your dice are played",
+                "take": "doubles to 2", "over": "Game over", "waiting": "Waiting for a second player"}
         for mode in ("pc", "utf8", "ansi"):
             for phase, turn, crowded in self.SCENES:
                 for me in (0, 1, -1):
-                    shown, core = self.screen(mode, me, phase, turn, crowded)
+                    shown, core = self.screen(mode, me, phase, turn, crowded,
+                                              self.TAKE_KEYS if phase == "take" and me == turn else None)
                     what = (mode, phase, turn, crowded, me)
                     self.assertIn("Backgammon", shown, what)
                     if me == turn or phase in ("over", "waiting"):
                         self.assertIn(want[phase], shown, what)
                     if crowded:
-                        self.assertIn(" +6", shown, what)          # 12 on a point: 6 drawn, +6 for the rest
-                        self.assertIn(" +3", shown, what)          # 9 on the bar: 6 drawn, +3
+                        # a tall stack's seventh checker shows how many it stands for: 12 on a point is 6, 9 on
+                        # the bar is 3 (docs/design.md, Stacks of pieces), never +n and never the total
+                        chk = "(▒)" if mode != "ansi" else "(X)"
+                        self.assertIn("(6)", shown, what)
+                        self.assertIn("(3)", shown, what)
+                        self.assertNotIn("+6", shown, what)
+                        self.assertNotIn("(1)", shown, what)
+                        self.assertIn(chk, shown, what)
                     if me == turn and phase == "move" and not crowded:
                         mv = [r for r in core.reqs if r.startswith("MOV")]
                         self.assertEqual(mv[0], "MOV 3 %s" % ("24-21" if me == 0 else "1-4"), what)
-                        self.assertIn("MOV 3 13-8", core.reqs, what)   # typed
+                        self.assertIn("CMD 3 /13-8", core.reqs, what)   # typed: it runs on the server
                     if me == turn and phase == "done":
                         self.assertIn("END 3", core.reqs, what)        # Enter (and E) end the turn
                     if me == turn and phase == "roll":
@@ -1726,17 +1760,16 @@ class TelnetBackgammonScreens(unittest.TestCase):
 
     def test_clicks_pick_and_put(self):
         # point 13 is top left (x 2-4), point 8 bottom, fifth from the left (x 14-16)
-        shown, core = self.screen("pc", 0, "move", 0, False, keys=[("CLICK", 3, 5), "WAIT", ("CLICK", 15, 15)])
-        self.assertIn("Enter moves 13-10", shown)       # picked up: the cursor is on the nearest target
+        shown, core = self.screen("pc", 0, "move", 0, False, keys=[("CLICK", 3, 5), ("CLICK", 15, 15)])
+        self.assertIn("Press Enter on a marked point to move there", shown)     # picked up
         self.assertIn("MOV 3 13-8", core.reqs)
         shown, core = self.screen("pc", 0, "move", 0, False, keys=[("CLICK", 15, 15)])
-        self.assertIn("Enter moves 8-5", shown)         # a click on a checker only picks it up
+        self.assertIn("Press Enter on a marked point to move there", shown)     # a click only picks it up
         self.assertFalse([r for r in core.reqs if r.startswith("MOV")])
 
     def test_typed_words(self):
-        for line, req in (("13-8", "MOV 3 13-8"), ("13/8", "MOV 3 13-8"), ("b-22", "MOV 3 bar-22"),
-                          ("6-o", "MOV 3 6-off"), ("undo", "UND 3"), ("end", "END 3"), ("roll", "MOV 3 roll"),
-                          ("double", "MOV 3 double"), ("take", "MOV 3 take"), ("drop", "MOV 3 drop")):
+        for line in ("13-8", "13/8", "b-22", "6-o", "undo", "end", "roll", "double"):    # each runs on the server
+            req = "CMD 3 /" + line
             for cls in (T.AnsiBackgammon, T.PlainBackgammon):
                 lines = bg_lines("move", 0)
                 s, io, core = self.session("pc" if cls is T.AnsiBackgammon else "plain", [], lines)
@@ -1746,14 +1779,14 @@ class TelnetBackgammonScreens(unittest.TestCase):
                 self.assertIn(req, core.reqs, (cls, line))
 
     def test_menu_offers_both_games(self):
-        keys = ["n", "WAIT", "DOWN", "ENTER", "ESC"]       # N on a table row
+        keys = ["n", "DOWN", "ENTER", "ESC"]                # N: a game picker, then the time per turn
         s, io, core = self.session("pc", keys, bg_lines())
         with self.assertRaises(EOFError):
             asyncio.run(T.AnsiMenu(s).run())
         shown = "\n".join("\n".join(scr) for scr in io.screens)
-        self.assertIn("Start a new Backgammon table", shown)
-        self.assertIn("Which game?", shown)                 # N away from a new-table row: a game picker
-        self.assertIn("New Backgammon table", shown)        # then the time per turn
+        self.assertIn("Which game do you want to play?", shown)
+        self.assertIn("Backgammon", shown)
+        self.assertIn("New Backgammon table", shown)
 
     def test_plain_board(self):
         for phase, turn, crowded in self.SCENES:
@@ -1774,7 +1807,7 @@ class TelnetBackgammonScreens(unittest.TestCase):
                     self.assertIn("(O)", text)
                     self.assertIn("(X)", text)
                 if me == turn and phase == "move":
-                    self.assertIn("Your move (like", text)
+                    self.assertIn("Your turn. Type a step such as /", text)
 
 
 class LineIO(FakeIO):
@@ -1807,36 +1840,40 @@ class NewTableTelnet(unittest.TestCase):
                 return [], "OK"
         return Core()
 
-    def run_new(self, mode, args, keys):
+    def run_new(self, mode, args, keys, whom="anyone"):
         io = (LineIO if mode == "plain" else FakeIO)(mode, keys)
         core = self.core()
+        core.reqs = []
         s = T.Session(io, core, mode, "ann")
         menu = (T.PlainMenu if mode == "plain" else T.AnsiMenu)(s)
         asyncio.run(s.load())
         try:
-            asyncio.run(menu.new(args))
+            asyncio.run(menu.new(args, whom=whom))
         except EOFError:
             pass
+        self.reqs = core.reqs
         return [r for r in core.reqs if r.startswith("NEW ")], "\n".join("\n".join(x) for x in io.screens)
 
-    def test_one_entry_per_game(self):
+    def test_n_asks_the_game_and_whom_to_play(self):
         s = T.Session(FakeIO("pc"), self.core(), "pc", "ann")
         menu = T.AnsiMenu(s)
         asyncio.run(menu.load())
-        new = [it[1] for it in menu.mine if it[0] == "new"]
-        self.assertEqual([g["key"] for g in new], ["reversi/1", "mancala/1", "rummytile/1"])
-        self.assertEqual(new[1]["rulesets"], ["kalah", "oware"])
-        menu.sel = 1
-        self.assertEqual("Enter starts a new Mancala table; you choose rules and time per turn.", menu.describe())
-        menu.sel = 2
-        self.assertEqual("Enter: a new Rummy Tile Classic table; you choose players and time per turn.",
-                         menu.describe())
-        menu.sel = 0
-        self.assertEqual("Enter starts a new Reversi table; you choose the time per turn.", menu.describe())
+        self.assertFalse([it for it in menu.items if it[0] not in ("table", "invite", "practice")])  # no new-table rows
+        reqs, text = self.run_new("pc", ["reversi"], ["ENTER", "ENTER"], whom=None)     # a day a turn, the bot
+        self.assertIn("Whom do you want to play?", text)
+        self.assertIn("Reversi against the bot", text)
+        self.assertEqual(reqs, ["NEW reversi/1 standard turn=1d"])
+        self.assertIn("INV 7 bot", self.reqs)
+        reqs, text = self.run_new("pc", ["reversi"], ["ENTER", "DOWN", "DOWN", "ENTER"] + list("dan") + ["ENTER"],
+                                  whom=None)
+        self.assertIn("INV 7 dan", self.reqs)
+        reqs, _ = self.run_new("plain", ["reversi"], ["", ""], whom=None)                # Enter: anyone
+        self.assertEqual(reqs, ["NEW reversi/1 standard turn=1d"])
+        self.assertFalse([r for r in self.reqs if r.startswith("INV")])
 
     def test_pickers_full_screen(self):
         reqs, text = self.run_new("pc", ["mancala"], ["DOWN", "ENTER", "ENTER"])
-        self.assertIn("Which rules?", text)
+        self.assertIn("Which rules do you want?", text)
         self.assertIn("Store rules", text)
         self.assertEqual(reqs, ["NEW mancala/1 oware turn=1d"])
         reqs, text = self.run_new("ansi", ["rummytile"], ["DOWN", "ENTER", "ENTER"])
@@ -1844,7 +1881,7 @@ class NewTableTelnet(unittest.TestCase):
         self.assertIn("4 players", text)
         self.assertEqual(reqs, ["NEW rummytile/1 standard turn=1d players=3"])
         reqs, text = self.run_new("pc", ["reversi"], ["ENTER"])          # one ruleset, two players: no picker
-        self.assertNotIn("Which rules?", text)
+        self.assertNotIn("Which rules do you want?", text)
         self.assertNotIn("How many players?", text)
         self.assertEqual(reqs, ["NEW reversi/1 standard turn=1d"])
         reqs, _ = self.run_new("pc", ["mancala"], ["ESC"])               # Esc cancels

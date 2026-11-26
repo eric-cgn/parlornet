@@ -482,15 +482,15 @@ class Telnet(unittest.TestCase):
             for st in (OPENING, JUMPING, DONE, OFFER, OVER, CROWDED):
                 for mode, (shown, reqs) in ansi_screens(self, C, view_lines(st, me), me, keys=["LEFT", "UP"]).items():
                     self.assertIn("Checkers", shown)
-                    self.assertNotIn("Waiting for an opponent", shown)
+                    self.assertNotIn("Waiting for a second player", shown)
                     self.assertIn(("(█)" if mode != "ansi" else "(x)"), shown, (mode, me))
                     self.assertFalse([r for r in reqs if r.split()[0] in ("MOV", "UND", "END")], reqs)
                 text = plain_screen(self, C, view_lines(st, me), me)
                 self.assertIn("(x)", text)
         shown = ansi_screens(self, C, view_lines(CROWDED, 0), 0)["pc"][0]
         self.assertIn("«▒»", shown)               # a white king
-        self.assertIn("No capture or man move: 399/400", shown)
-        self.assertIn("to answer the draw", shown)
+        self.assertIn("399 of 400 turns.", shown)
+        self.assertIn("offered a draw", shown)
 
     def test_keys_pick_and_put_down(self):
         _, reqs = ansi_screens(self, C, view_lines(OPENING, 0), 0, keys=["ENTER", "ENTER"])["pc"]
@@ -498,7 +498,7 @@ class Telnet(unittest.TestCase):
         _, reqs = ansi_screens(self, C, view_lines(OPENING, 0), 0, keys=["RIGHT", "ENTER", "ENTER"])["ansi"]
         self.assertIn("MOV 3 10-14", reqs)                       # Black's board is turned round: right is 10
         shown, _ = ansi_screens(self, C, view_lines(OPENING, 0), 0, keys=["ENTER", "ESC"])["utf8"]
-        self.assertIn("Enter plays 11-15", shown)
+        self.assertIn("Press Enter on a marked square to move there", shown)
         self.assertIn("»11«", shown)                   # the picked piece's number
         # a cursor off the movable pieces goes to the first of them when the turn starts
         _, reqs = ansi_screens(self, C, view_lines(OPENING, 0), 0, keys=["ENTER", "ENTER"],
@@ -514,57 +514,61 @@ class Telnet(unittest.TestCase):
         x, y = disp_xy(27, 0)
         _, reqs = ansi_screens(self, C, view_lines(JUMPING, 0), 0, keys=[("CLICK", x, y)])["ansi"]
         self.assertIn("MOV 3 18x27", reqs)
-        _, reqs = ansi_screens(self, C, view_lines(OPENING, 0), 0, keys=list("11-15") + ["ENTER"])["pc"]
-        self.assertIn("MOV 3 11-15", reqs)
-        _, reqs = ansi_screens(self, C, view_lines(JUMPING, 0), 0, keys=list("18x27") + ["ENTER"])["pc"]
-        self.assertIn("MOV 3 18x27", reqs)
+        for typed in ("11-15", "18x27"):                    # typed, a move runs on the server (CMD)
+            _, reqs = ansi_screens(self, C, view_lines(OPENING, 0), 0, keys=["/"] + list(typed) + ["ENTER"])["pc"]
+            self.assertIn("CMD 3 /" + typed, reqs)
 
     def test_hotkeys(self):
-        cases = [(DONE, 0, ["e", "WAIT"], "END 3"), (DONE, 0, ["ENTER"], "END 3"), (DONE, 0, ["u", "WAIT"], "UND 3"),
-                 (JUMPING, 0, ["u", "WAIT"], "UND 3"), (OFFER, 1, ["a", "WAIT"], "MOV 3 accept"),
-                 (OFFER, 1, ["n", "WAIT"], "MOV 3 reject"), (OPENING, 0, ["d", "WAIT", "y"], "MOV 3 draw"),
-                 (OPENING, 1, ["d", "WAIT", "y"], "MOV 3 draw"), (DONE, 0, list("end") + ["ENTER"], "END 3"),
-                 (OFFER, 1, list("accept") + ["ENTER"], "MOV 3 accept")]
+        cases = [(DONE, 0, ["e"], "END 3"), (DONE, 0, ["ENTER"], "END 3"), (DONE, 0, ["u"], "UND 3"),
+                 (JUMPING, 0, ["u"], "UND 3"), (OFFER, 1, ["y"], "MOV 3 accept"),
+                 (OFFER, 1, ["n"], "MOV 3 reject"), (OFFER, 1, ["ENTER"], "MOV 3 reject"),     # it starts on Decline
+                 (OPENING, 0, ["d"], "MOV 3 draw"), (OPENING, 1, ["d"], "MOV 3 draw"),
+                 (DONE, 0, ["/"] + list("end") + ["ENTER"], "CMD 3 /end")]
         for st, me, keys, want in cases:
             _, reqs = ansi_screens(self, C, view_lines(st, me), me, keys=keys)["pc"]
             self.assertIn(want, reqs, (keys, want))
-        _, reqs = ansi_screens(self, C, view_lines(OPENING, 0), 0, keys=["d", "WAIT", "n", "e", "WAIT"])["pc"]
+        _, reqs = ansi_screens(self, C, view_lines(OPENING, 0), 0, keys=["e"])["pc"]
         self.assertFalse([r for r in reqs if r.startswith(("MOV", "END"))], reqs)
-        _, reqs = ansi_screens(self, C, view_lines(OPENING, -1), -1, keys=["ENTER", "d", "WAIT"])["pc"]
+        _, reqs = ansi_screens(self, C, view_lines(OFFER, 1), 1, keys=["ESC", "x"])["pc"]       # put away
+        self.assertFalse([r for r in reqs if r.startswith("MOV")], reqs)
+        for word in ("accept", "reject", "decline"):
+            _, reqs = ansi_screens(self, C, view_lines(OFFER, 1), 1, keys=["ESC", "/"] + list(word) + ["ENTER"])["pc"]
+            self.assertFalse([r for r in reqs if r.startswith("MOV")], word)
+        _, reqs = ansi_screens(self, C, view_lines(OPENING, -1), -1, keys=["ENTER", "d"])["pc"]
         self.assertFalse([r for r in reqs if r.startswith("MOV")], reqs)
 
     def test_hints_and_status_bar(self):
         shown = ansi_screens(self, C, view_lines(JUMPING, 0), 0)["pc"][0]
-        self.assertIn("Keep jumping from 18", shown)
+        self.assertIn("You must jump.", shown)
         self.assertIn("U undo", shown)
         shown = ansi_screens(self, C, view_lines(DONE, 0), 0)["ansi"][0]
         self.assertIn("E end turn", shown)
         shown = ansi_screens(self, C, view_lines(OFFER, 1), 1)["ansi"][0]
-        self.assertIn("A accept", shown)
-        self.assertIn("N decline", shown)
+        self.assertIn("offers a draw. Press Enter to answer.", shown)
         shown = ansi_screens(self, C, view_lines(position({14: "x", 1: "x", 18: "o", 32: "o"}), 0), 0)["pc"][0]
-        self.assertIn("you must capture", shown)
+        self.assertIn("You must jump.", shown)
         shown = ansi_screens(self, C, view_lines(OVER, 1), 1)["pc"][0]
         self.assertIn("Game over", shown)
         self.assertIn("pieces left", shown)                     # long state texts wrap in the panel
         shown = ansi_screens(self, C, view_lines(OFFER, 1), 1)["pc"][0]
-        self.assertIn("abcdefghijkl offers a draw:", shown)
-        self.assertIn("  accept?", shown)
+        self.assertIn("abcdefghijkl offers a draw. Press Enter to answer.", shown)
 
     def test_plain(self):
         text = plain_screen(self, C, view_lines(OPENING, 0), 0)
-        self.assertTrue(text.endswith("Your move (like 9-13) > "))
-        self.assertIn("Moves: 9-13 9-14", text)
-        self.assertIn("Black: 12 men, 0 kings", text)
+        self.assertTrue(text.endswith("Your turn. Type a move such as /9-13. > "))
+        self.assertIn("You can play 9-13, 9-14", text)
+        self.assertIn("Men are (x) and (o), and kings are", text)
         self.assertLessEqual(len(text.split("\n")), 30)
-        self.assertTrue(plain_screen(self, C, view_lines(JUMPING, 0), 0).endswith("Keep jumping (like 18x27) > "))
-        self.assertTrue(plain_screen(self, C, view_lines(DONE, 0), 0).endswith("Turn complete: end or undo > "))
-        self.assertTrue(plain_screen(self, C, view_lines(OFFER, 1), 1).endswith("Accept or reject the draw > "))
+        self.assertTrue(plain_screen(self, C, view_lines(JUMPING, 0), 0).endswith("You must jump. Type /18x27. > "))
+        self.assertTrue(plain_screen(self, C, view_lines(DONE, 0), 0).endswith(
+            "Your move is complete. Type /end, or /undo. > "))
+        self.assertTrue(plain_screen(self, C, view_lines(OFFER, 1), 1).endswith(
+            "If you decline, the game goes on.\nType Y to accept, or N to decline. > "))
         self.assertIn("[O]", plain_screen(self, C, view_lines(CROWDED, 1), 1))
-        self.assertIn("Waiting for an opponent", plain_screen(self, C, WAITING, 0))
+        self.assertIn("Waiting for a second player", plain_screen(self, C, WAITING, 0))
         self.assertIn("no pieces left", plain_screen(self, C, view_lines(OVER, 0), 0))
         g = C.PlainScreen.__new__(C.PlainScreen)
-        for word, want in (("11-15", "11-15"), ("15x22x31", "15x22x31"), ("undo", "undo"), ("decline", "reject"),
+        for word, want in (("11-15", "11-15"), ("15x22x31", "15x22x31"), ("undo", "undo"), ("decline", None),
                            ("hello", None), ("d3", None)):
             self.assertEqual(g.move_word(word), want)
 

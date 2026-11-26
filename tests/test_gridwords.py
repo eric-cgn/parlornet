@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from game_checks import CSRF, ROOT, SID, ansi_screens, board_image, plain_screen, web_page
+from game_checks import CSRF, ROOT, SID, ansi_screens, board_image, plain_screen, reads_typed, web_page
 
 sys.path.insert(0, ROOT)
 from adapters.common import Refused  # noqa: E402
@@ -1023,56 +1023,56 @@ class Screens(WordList):
             for mode, (shown, reqs) in ansi_screens(self, G, view_lines(st, me), me, keys=["ENTER"]).items():
                 self.assertIn("Grid Words", shown)
                 self.assertIn("3W", shown)
-                self.assertIn("Tiles in the bag: 86", shown)
+                self.assertIn("86 tiles are in the bag.", shown)
                 if me >= 0:
                     self.assertIn("Your rack", shown)
                     self.assertIn([" H  E  L  _  O  A  T ", " Q  U  I  Z  J  A  X "][me], shown)       # letters only
                 else:
-                    self.assertIn("Hidden from watchers.", shown)
+                    self.assertIn("Watchers can't see them.", shown)
                 self.assertFalse([r for r in reqs if r.startswith(("MOV", "CHK"))], (mode, me))
                 if me == 0:
-                    self.assertIn("Your move", shown)
+                    self.assertIn("Your turn", shown)
                     self.assertIn("Your word starts at i8 and goes across.", shown)    # the cursor moved off the O on h8
                 if me == 1:
-                    self.assertIn("abcdefghijkl to move", shown)
-                    self.assertIn("Last: OAt h8 down, 13", shown)
+                    self.assertIn("Waiting for abcdefghijkl.", shown)
+                    self.assertIn("played OAt down from", shown)
 
     def test_cursor_start_and_typed_letters(self):
         st = midgame()
         lines = view_lines(st, 0)
-        # a click on g9 starts a word across there, Enter turns it down; type the rack's letters, Enter: the L
+        # a click on g9 starts a word across there, Down points it down; type the rack's letters, Enter: the L
         # above joins the word
-        keys = [("CLICK", 3 + 3 * 6 + 1, 2 + 9), "ENTER"] + list("eat") + ["ENTER"]
+        keys = [("CLICK", 3 + 3 * 6 + 1, 2 + 9), "DOWN"] + list("eat") + ["ENTER"]
         for mode, (shown, reqs) in ansi_screens(self, G, lines, 0, keys=keys).items():
             self.assertIn("MOV 3 PLAY 7 8 V LEAT", reqs, mode)
             self.assertIn("Your word starts at g9 and goes down.", shown)
             self.assertIn("[E]", shown)                          # the letters typed show on the board
-        # a click on a square starts a word there; Esc clears the start, a second Esc leaves
-        out = ansi_screens(self, G, lines, 0, keys=[("CLICK", 3 + 3 * 10 + 1, 2 + 6), "ESC"] + list("hi") + ["ENTER"])
+        # a click on a square starts a word there; Esc clears the start, and then letters are shortcuts
+        out = ansi_screens(self, G, lines, 0, keys=[("CLICK", 3 + 3 * 10 + 1, 2 + 6), "ESC"] + list("hi"))
         for mode, (shown, reqs) in out.items():
             self.assertIn("Your word starts at k6 and goes across.", shown)
-            self.assertFalse([r for r in reqs if r.startswith("MOV")], mode)   # no start: "hi" is not a play
-            self.assertIn("Unknown command: hi", shown)
+            self.assertFalse([r for r in reqs if r.startswith("MOV")], mode)
+            self.assertIn("H does nothing in Grid Words. Press ? to see the keys.", shown)
 
     def test_typed_commands(self):
         st = midgame()
         lines = view_lines(st, 0)
         # only the rack's letters, from an empty square; the tiles already on the board join the word
-        cases = [("h11 d h", "MOV 3 PLAY 8 8 V OATH"), ("g9 a _et", "MOV 3 PLAY 7 9 H _EAT"),
-                 ("k6 hi", "MOV 3 PLAY 11 6 H HI"), ("play 7 9 v eat", "MOV 3 PLAY 7 9 V EAT"),
-                 ("pass", "MOV 3 PASS"), ("exchange ql_", "MOV 3 EXCH QL_"), ("swap a", "MOV 3 EXCH A"),
-                 ("check g9 d eat", "CHK 3 PLAY 7 8 V LEAT"), ("k6 a pass", "MOV 3 PLAY 11 6 H PASS")]
-        for typed, want in cases:
-            for mode, (shown, reqs) in ansi_screens(self, G, lines, 0, keys=list(typed) + ["ENTER"]).items():
-                self.assertIn(want, reqs, (typed, mode))
+        # a typed play runs on the server (CMD), where the plugin reads it (tests/test_typed_moves.py)
+        for typed in ("h11 d h", "g9 a _et", "k6 hi", "pass", "exchange ql_", "check g9 d eat", "k6 a pass"):
+            keys = ["/"] + list(typed) + ["ENTER"]
+            for mode, (shown, reqs) in ansi_screens(self, G, lines, 0, keys=keys).items():
+                self.assertIn("CMD 3 /" + typed, reqs, (typed, mode))
         # a watcher's typed play goes nowhere
-        for mode, (shown, reqs) in ansi_screens(self, G, view_lines(st, -1), -1, keys=list("pass") + ["ENTER"]).items():
+        for mode, (shown, reqs) in ansi_screens(self, G, view_lines(st, -1), -1,
+                                                keys=["/"] + list("pass") + ["ENTER"]).items():
             self.assertFalse([r for r in reqs if r.startswith("MOV")])
-        # letters typed from a played square, or off the board: the reason in plain words, nothing sent
-        for typed, why in (("h8 a x", "There is already a tile on h8: start your word on an empty square."),
-                           ("check h9 d x", "There is already a tile on h9: start your word on an empty square."),
+        # letters typed from a played square, or off the board: the plugin's reason in plain words, nothing played
+        for typed, why in (("h8 a x", "There is already a tile on h8. Start your word on an empty square."),
+                           ("check h9 d x", "There is already a tile on h9. Start your word on an empty square."),
                            ("o1 a xy", "From o1 across, those letters run off the board.")):
-            for mode, (shown, reqs) in ansi_screens(self, G, lines, 0, keys=list(typed) + ["ENTER"]).items():
+            for mode, (shown, reqs) in ansi_screens(self, G, lines, 0, keys=["/"] + list(typed) + ["ENTER"],
+                                                    prepare=reads_typed(P, st, 0)).items():
                 self.assertIn(why, shown, (typed, mode))
                 self.assertFalse([r for r in reqs if r.startswith(("MOV", "CHK"))], (typed, mode))
 
@@ -1114,30 +1114,34 @@ class Screens(WordList):
         def ended(screen):          # the screen sets over from the END event; these tests give no events
             screen.over = "Game over: abcdefghijkl wins 15/-26"
         for mode, (shown, reqs) in ansi_screens(self, G, lines, 0, keys=["ENTER"], prepare=ended).items():
-            self.assertIn("Game over: abcdefghijkl wins 15/-26", shown)
-            self.assertIn("Esc goes back to the menu", shown)
+            self.assertIn("Game over. abcdefghijkl wins 15/-26.", shown)
+            self.assertIn("Press Esc to go back to the lobby", shown)
         text = plain_screen(self, G, lines, 0, prepare=ended)
-        self.assertIn("Game over: abcdefghijkl wins", text)
-        self.assertNotIn("Your play", text)
+        self.assertIn("Game over. abcdefghijkl wins", text)
+        self.assertNotIn("Your turn", text)
 
     def test_plain(self):
         st = midgame()
         text = plain_screen(self, G, view_lines(st, 0), 0)
-        self.assertIn("== Grid Words, table 3: you are seat 1 ==", text)
+        self.assertIn("Grid Words, table 3, with ABCDEFGHIJKL. You are abcdefghijkl.", text)
         self.assertIn("\n  8 |3W  .  .  H  E  L  L  O  .  .  . 2L  .  . 3W |\n", text)
-        self.assertIn("\n 10 | . 3L  .  .  . 3L  .  t  . 3L  .  .  . 3L  . | Last: OAt h8 down, 13\n", text)
-        self.assertIn("\n 15 |3W  .  . 2L  .  .  . 3W  .  .  . 2L  .  . 3W | Type help to learn more.\n", text)
-        self.assertIn("Rack: H E L _ O A T", text)
-        self.assertIn("Your play (like h8 a WORD) > ", text)
+        self.assertIn("ABCDEFGHIJKL played OAt", text)
+        self.assertIn("Your rack is H E L _ O A T.", text)
+        self.assertIn("Your turn. Type a play, /pass or /exchange. > ", text)
         watch = plain_screen(self, G, view_lines(st, -1), -1)
-        self.assertIn("you are watching", watch)
+        self.assertIn("You are watching.", watch)
         self.assertNotIn("Rack:", watch)
 
     def test_plain_typed_play(self):
         from game_checks import FakeIO, ScreenCore, session
         st = midgame()
         core = ScreenCore(G.KEY, view_lines(st, 0))
-        s = session(FakeIO("plain"), core, "plain")
+        io = FakeIO("plain", ["y"])                 # yes to the pass dialog
+
+        async def readline():
+            return await io.readkey()
+        io.readline = readline
+        s = session(io, core, "plain")
         g = G.PlainScreen(s, "3", G.KEY, 0)
         g.names, g.v = ["ann", "bob"], g.parse(view_lines(st, 0))
 
@@ -1145,11 +1149,9 @@ class Screens(WordList):
             for line in ("g9 d eat", "check h11 d h", "pass", "exchange zz", "hello"):
                 await g.command(line)
         asyncio.run(go())
-        self.assertIn("MOV 3 PLAY 7 8 V LEAT", core.reqs)
-        self.assertIn("CHK 3 PLAY 8 8 V OATH", core.reqs)
-        self.assertIn("MOV 3 PASS", core.reqs)
-        self.assertIn("MOV 3 EXCH ZZ", core.reqs)
-        self.assertEqual(len([r for r in core.reqs if r.startswith(("MOV", "CHK"))]), 4)
+        for line in ("g9 d eat", "check h11 d h", "pass", "exchange zz", "hello"):   # each runs on the server
+            self.assertIn("CMD 3 /" + line, core.reqs)
+        self.assertFalse([r for r in core.reqs if r.startswith(("MOV", "CHK"))])
 
 
 # ---- the shipped word list -------------------------------------------------------------
@@ -1301,35 +1303,54 @@ class TelnetDrawing(WordList):
         for mode, (shown, _) in ansi_screens(self, G, view_lines(st, 0), 0).items():
             rack = next(l for l in shown.split("\n") if " H  E  L  _  O  A  T " in l)
             self.assertNotRegex(rack.split("H  E  L")[1][:20], r"\d", mode)
-        self.assertIn("Rack: H E L _ O A T\n", plain_screen(self, G, view_lines(st, 0), 0))
+        self.assertIn("Your rack is H E L _ O A T.\n", plain_screen(self, G, view_lines(st, 0), 0))
 
     def test_help_has_a_second_page_with_the_points(self):
         st = midgame()
-        for mode, (shown, _) in ansi_screens(self, G, view_lines(st, 0), 0, keys=["?", "WAIT", " ", " "]).items():
-            self.assertIn("Press any key to see the letter points.", shown)
-            self.assertIn("Type pass to skip your turn.", shown)
-            self.assertIn("Letter points", shown)
-            self.assertIn("Q 10", shown)
-            self.assertIn("A blank is worth 0 points and can stand for any letter.", shown)
-        g = G.PlainScreen.__new__(G.PlainScreen)
-        g.v = G.parse_view(view_lines(st, 0))
-        text = g.HELP_TEXT
-        self.assertIn("Type pass to skip your turn.", text)
-        self.assertIn("Z 10", text)
-        self.assertTrue(all(len(l) < 80 for l in text.split("\n")))
+        for mode, (shown, _) in ansi_screens(self, G, view_lines(st, 0), 0, keys=["?", " ", "ESC", "v", "ESC"]).items():
+            self.assertIn("Grid Words help, page 1 of 2", shown)
+            self.assertIn("Press Space for page 2, or Esc to close.", shown)
+            self.assertIn("P passes your turn, and X opens the command line to exchange tiles.", shown)
+            self.assertIn("Grid Words help, page 2 of 2", shown)
+            self.assertIn("Letter values", shown)
+            self.assertIn("Q and Z are worth 10 points each.", shown)
+            self.assertIn("A blank is worth nothing. Type _E to lay a blank as an E.", shown)
+            self.assertEqual(shown.count("Grid Words help, page 2 of 2"), 2 * shown.count("page 2 of 2") // 2)
+        from game_checks import FakeIO, ScreenCore, session
+        io = FakeIO("plain")
+        io.out = []
+        io.write = io.out.append
+        g = G.PlainScreen(session(io, ScreenCore(G.KEY, view_lines(st, 0)), "plain"), "3", G.KEY, 0)
+        g.v = g.parse(view_lines(st, 0))
+        asyncio.run(g.help(1))
+        self.assertIn("/check h8 across QUIZ gives the score without playing.", "".join(io.out))
+        self.assertTrue("".join(io.out).rstrip().endswith("Type /help 2 for the reference."))
+        asyncio.run(g.help(2))
+        self.assertIn("Q and Z are worth 10 points each.", "".join(io.out))
+        self.assertTrue(all(len(l) < 80 for l in "".join(io.out).split("\n")))
 
     def test_your_turn_says_how_to_pass_or_exchange(self):
         st = midgame()
+        said = "Your turn. Press Enter where your word starts, P to pass or X to exchange."
         for mode, (shown, _) in ansi_screens(self, G, view_lines(st, 0), 0).items():
-            self.assertIn(G.PASS_HINT, shown, mode)
+            self.assertIn(said, shown, mode)
+            self.assertIn("P pass  X exchange", shown, mode)
         for me in (1, -1):              # not your turn, or watching: no such line
             for mode, (shown, _) in ansi_screens(self, G, view_lines(st, me), me).items():
-                self.assertNotIn(G.PASS_HINT, shown, (mode, me))
-        # once a word is started, letters type the word, so the line goes
-        for mode, (shown, _) in ansi_screens(self, G, view_lines(st, 0), 0, keys=["ENTER"]).items():
-            self.assertNotIn(G.PASS_HINT, shown.split("Arrows move")[-2], mode)
-        self.assertEqual(plain_screen(self, G, view_lines(st, 0), 0).count(G.PASS_HINT), 1)
-        self.assertNotIn(G.PASS_HINT, plain_screen(self, G, view_lines(st, 1), 1))
+                self.assertNotIn(said, shown, (mode, me))
+                self.assertNotIn("P pass", shown, (mode, me))
+        # P asks first (the server asks, with the plugin's reading), and X opens the command line with /exchange
+        reads = reads_typed(P, st, 0)
+        for keys, sent in ((["p", "n"], False), (["p", "y"], True)):
+            for mode, (shown, reqs) in ansi_screens(self, G, view_lines(st, 0), 0, keys=keys, prepare=reads).items():
+                self.assertIn("Pass your turn? You play nothing this turn.", shown)
+                self.assertEqual("MOV 3 PASS" in reqs, sent, (keys, mode))
+        for mode, (shown, reqs) in ansi_screens(self, G, view_lines(st, 0), 0, keys=["x"] + list("QL") + ["ENTER"],
+                                                prepare=reads).items():
+            self.assertIn("/exchange puts the tiles you name back in the bag and draws new ones.", shown)
+            self.assertIn("MOV 3 EXCH QL", reqs)
+        self.assertIn("Type a play, /pass or /exchange.", plain_screen(self, G, view_lines(st, 0), 0))
+        self.assertNotIn("/pass", plain_screen(self, G, view_lines(st, 1), 1))
 
     def test_an_exchange_with_too_few_tiles_in_the_bag(self):
         from game_checks import FakeIO, ScreenCore, session

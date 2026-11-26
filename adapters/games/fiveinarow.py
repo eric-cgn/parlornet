@@ -4,10 +4,10 @@ Laid out as Reversi's module (docs/games-howto.md): what the game is, the view
 and the events, the web page, then the telnet screens.
 """
 import re
+import textwrap
 
-from ..telnet import (A_AXIS, A_AXIS_HI, A_BORDER, A_BRIGHT, A_DIM, A_HEAD, A_RED, A_TEXT, A_YELLOW, COLS, ROWS,
-                      AnsiGame, Canvas, GameBase, PlainGame, box, clock_text, fmt_secs, rule, status_bar, title_bar,
-                      turn_text, wrap)
+from ..telnet import (A_AXIS, A_AXIS_HI, A_DIM, A_RED, A_TEXT, AnsiGame, COLS, Canvas, GameBase, PlainGame, ROWS,
+                      title_bar)
 from ..telnet import describe_event as describe_common
 from ..board import Canvas as Picture
 from ..web import board_html, esc, hidden_fields, make_gif
@@ -265,34 +265,45 @@ def with_bg(attr, bg):
     return ";".join(parts + [bg])
 
 
-HELP = [
-    "Arrow keys   move the cursor",
-    "Enter/Space  place a stone on the cursor point",
-    "Mouse        click an empty point to play it",
-    "T            talk: type a line to the table",
-    "R            resign (asks first)",
-    "Esc          back to the menu; the game goes on",
-    "Ctrl-L       redraw the screen",
-    "",
-    "Typed commands work too: a point like h8,",
-    "say <text>, resign, redraw, menu, help.",
-    "[ ] mark the last stone. Leaving or logging",
-    "off never resigns; your turn timer runs",
-    "while it is your move.",
-]
 
 
 class FiveBase(GameBase):
     """What both Five in a Row screens share: the view, the events, typed points. Every empty point is a
     legal move (the game has no move list), so it is your turn whenever W says so."""
 
+    HELP_MOVING = ["The arrows move the cursor over the points. Press Enter to place a",
+                   "stone there. A click on a point does the same."]
+    HELP_KEYS = []
+    HELP_COMMANDS = ["Press / to type one. /h8 places a stone on h8."]
+    HELP_REFERENCE = ["The board",
+                      "The letters name the columns from the left, and the numbers name",
+                      "the rows from the top. Brackets mark the last stone placed."]
+
+    def reference(self):
+        rules = self.rules_text()
+        return list(self.HELP_REFERENCE) + (["", "The rules"] + textwrap.wrap(rules, 68) if rules else [])
+
     parse = staticmethod(parse_view)
+    GAME = NAME
+    MOVE_EXAMPLE = "/h8"
 
     def describe(self, text):
         return describe_event(text, self.names) or describe_common(text, self.names)
 
     def move_word(self, cmd, words=()):
         return cmd if MOVE_RE.match(cmd) else None
+
+    def view_last(self):
+        v = self.v
+        if v and v.get("last") in (v.get("stones") or {}):
+            return "%s placed a stone on %s." % (self.actor(v["stones"][v["last"]]), sq(*v["last"]))
+        return ""
+
+    def last_move(self, text):
+        p = text.split()
+        if p[0] == "PUT" and len(p) >= 3:
+            return "%s placed a stone on %s." % (self.actor(p[1]), p[2])
+        return None
 
     def my_turn(self):
         return self.me >= 0 and self.playing() and self.v["turn"] == self.me
@@ -310,7 +321,6 @@ class AnsiFive(FiveBase, AnsiGame):
 
     HOTKEYS = "rt?"
     LOG_TOP, LOG_ROWS = 11, 9
-    TITLE, HELP = "Five in a Row", HELP
 
     def __init__(self, sess, tid, key, me):
         super().__init__(sess, tid, key, me)
@@ -353,23 +363,21 @@ class AnsiFive(FiveBase, AnsiGame):
 
     def compose(self):
         cv = Canvas()
-        right = "watching" if self.me < 0 else "you play %s" % self.colour(self.me)
-        title_bar(cv, self.g, "Five in a Row %s table %s" % (self.g["v"], self.tid), right)
+        title_bar(cv, self.g, self.title_text())
         self.draw_board(cv)
         self.draw_panel(cv)
-        text, attr = (self.msg, self.msg_attr) if self.msg else self.hint()
+        text, attr = self.sentence(self.hint)
         tall = self.geometry()[0] > 19              # the board's last row is the hint's: the hint goes below
         if not (tall and self.buf):
             cv.put(1, ROWS - 2 if tall else ROWS - 3, text[:COLS - 2], attr)
         self.input_line(cv)
-        if self.buf:
-            keys = [("Enter", "send"), ("Esc", "cancel"), ("Backspace", "erase")]
+        if self.my_turn():
+            keys = self.keys("move", "place")
         elif self.me >= 0 and self.playing():
-            keys = [("Arrows", "move"), ("Enter", "place"), ("T", "talk"), ("R", "resign"),
-                    ("?", "help"), ("Esc", "menu")]
+            keys = self.keys("look")
         else:
-            keys = [("T", "talk"), ("?", "help"), ("Esc", "menu")]
-        status_bar(cv, keys)
+            keys = self.keys()
+        self.keys_line(cv, keys)
         return cv
 
     def draw_board(self, cv):
@@ -378,7 +386,7 @@ class AnsiFive(FiveBase, AnsiGame):
         height = s * (n - 1) + 1
         started = bool(v and v["rows"])
         stones = v["stones"] if v else {}
-        showcur = self.me >= 0 and self.playing() and self.cur is not None
+        showcur = self.me >= 0 and self.playing() and self.lit() and self.cur is not None
         cur = self.cur if showcur else None
         for i in range(n):
             cv.put(bx + p * i, by - 1, chr(97 + i), A_AXIS_HI if cur and i == cur[0] else A_AXIS)
@@ -422,77 +430,35 @@ class AnsiFive(FiveBase, AnsiGame):
             self.draw_waiting(cv, bx + (p * (n - 1) + 1 - w) // 2, by + (height - 5) // 2, w)
 
     def draw_panel(self, cv):
-        g, v = self.g, self.v
+        v = self.v
         px = self.panel_x()
-        pw = COLS - 1 - px
-        inner = pw - 4
-        box(cv, g, px, 2, pw, 19, A_BORDER, "Players", tattr=A_HEAD)
         started = bool(v and v["rows"])
+        players = []
         for i in (0, 1):
-            y = 3 + i
-            tomove = self.playing() and v["turn"] == i
-            empty = i >= len(self.names) or self.names[i] == "-"
-            cv.put(px + 2, y, g["ptr"] if tomove else " ", A_YELLOW)
-            cv.put(px + 4, y, "(%s)" % self.G["stone"][i], self.stone_attr(i))
-            label = ("(empty seat)" if empty else self.names[i]) + (" (you)" if i == self.me else "")
-            cnt = ""
-            if started and inner >= 34:         # room for a 12-letter name, " (you)" and the count
-                c = v["counts"][i]
-                cnt = "%3d stone%s" % (c, "" if c == 1 else "s")
-            cv.put(px + 8, y, label[:inner - 6 - len(cnt)], A_BRIGHT if tomove else A_DIM if empty else A_TEXT)
-            if cnt:
-                cv.put(px + pw - 2 - len(cnt), y, cnt, A_BRIGHT if tomove else A_TEXT)
-        rule(cv, g, px, 5, pw, A_BORDER)
-        if not started:
-            turn, tattr = ["Waiting for an opponent"], A_YELLOW
-        elif self.over:
-            turn, tattr = wrap(self.over, inner), A_YELLOW
-            if len(turn) > 2:
-                turn = ["Game over:", "%s wins" % self.name(v["stones"].get(v["five"][0], 0))] if v["five"] \
-                    else turn[:2]
-        elif self.my_turn():
-            turn, tattr = ["Your move (%s)" % self.colour(self.me)], A_YELLOW
-        else:
-            turn, tattr = ["%s to move" % self.name(v["turn"])], A_TEXT
-        for k, line in enumerate(turn):
-            cv.put(px + 2, 6 + k, line[:inner], tattr)
-        c = self.clock()
-        if c and not self.over:
-            seat, left, limit = c
-            urgent = seat == self.me and left < 60
-            clock = "%s left of %s" % (fmt_secs(left), turn_text(limit))
-            clock = "Clock: " + clock if len(clock) + 7 <= inner else clock
-            cv.put(px + 2, 7, clock[:inner], A_RED if urgent else A_TEXT)
-        elif self.turn_secs and not self.over:
-            cv.put(px + 2, 7, ("Time per turn: %s" % turn_text(self.turn_secs))[:inner], A_DIM)
+            c = v["counts"][i] if started else 0
+            players.append((i, ("(%s)" % self.G["stone"][i], self.stone_attr(i)), "%d stone%s" % (c, "" if c == 1 else "s")))
+        facts = []
+        if started and v["five"]:
+            facts.append("The line is %s." % " ".join(sq(*p) for p in v["five"]))
         if started:
-            moves = len(v["order"][0]) + len(v["order"][1])
-            if v["five"]:
-                info = "Line " + " ".join(sq(*p) for p in v["five"])
-            elif v["last"]:
-                info = "Move %d, last %s" % (moves, sq(*v["last"]))
-            else:
-                info = "No stones yet"
-            cv.put(px + 2, 8, info[:inner], A_TEXT)
-            rules = self.rules_text() if len(self.rules_text()) <= inner else RULES_SHORT.get(self.v["rules"], "")
-            cv.put(px + 2, 9, rules[:inner], A_DIM)
-        rule(cv, g, px, 10, pw, A_BORDER, "Log", tattr=A_HEAD)
-        self.draw_log(cv, px + 2, inner)
+            facts.append(self.rules_text() if len(self.rules_text()) <= COLS - 5 - px else
+                         RULES_SHORT.get(v["rules"], ""))
+        self.draw_panel_parts(cv, px, 2, COLS - 1 - px, players, facts)
 
     def hint(self):
         if not (self.v and self.v["rows"]):
-            return "Table %s starts when someone joins, from telnet or the web (port 6500)." % self.tid, A_DIM
+            return self.waiting_hint()
         if self.over:
-            text = "%s. Esc goes back to the menu." % self.over
-            return (text if len(text) <= COLS - 2 else "%s. Esc: menu." % self.over), A_YELLOW
+            text, attr = self.over_hint()
+            return (text if len(text) <= COLS - 2 else self.over_sentence()), attr
         if self.me < 0:
-            return "Watching. T talks to the table, Esc goes back to the menu.", A_DIM
+            return self.watch_hint()
         if self.my_turn():
             p = sq(*self.cur)
             if self.cur in self.v["stones"]:
-                return "Your move. %s is taken: pick an empty point." % p, A_DIM
-            return "Your move. %s: Enter or Space places a stone here." % p, A_TEXT
-        return "Waiting for %s. Leaving or logging off never resigns." % self.name(self.v["turn"]), A_DIM
+                return "Your turn. A stone is on %s already, so pick an empty point." % p, A_DIM
+            return "Your turn. Press Enter to place a stone on %s." % p, A_TEXT
+        return self.their_hint(self.v["turn"])
 
     def cursor_at(self):
         if self.me >= 0 and self.playing() and self.cur is not None:
@@ -503,8 +469,7 @@ class AnsiFive(FiveBase, AnsiGame):
     async def on_click(self, value):
         if value[0] == "pt" and self.me >= 0 and self.playing():
             self.cur = (value[1], value[2])
-            if self.my_turn() and self.cur not in self.v["stones"]:
-                return await self.place()       # a click on an empty point plays it
+            return await self.place()             # a click does what Enter does there
         return None
 
     def on_arrow(self, k):
@@ -517,14 +482,10 @@ class AnsiFive(FiveBase, AnsiGame):
         return await self.place()
 
     async def place(self):
-        if self.me < 0:
-            return self.say("You are watching this table.")
-        if not self.playing():
-            return self.say(self.over or "The game has not started yet.")
         if not self.my_turn():
-            return self.say("It is %s's move." % self.name(self.v["turn"]))
+            return self.say(self.not_yours())
         if self.cur in self.v["stones"]:
-            return self.say("%s is taken: pick an empty point." % sq(*self.cur), A_RED)
+            return self.say("A stone is on %s already, so pick an empty point." % sq(*self.cur), A_RED)
         err = await self.move(sq(*self.cur))
         if err:
             self.say(err, A_RED)
@@ -535,44 +496,14 @@ class PlainFive(FiveBase, PlainGame):
     """Five in a Row for plain terminals: the board printed line by line, typed points at a prompt."""
 
     BOARD_KINDS = ("PUT", "JOIN", "LEAVE", "START", "END")
-    HELP_TEXT = (" A point like h8 plays there (columns a, b, c ... from the left, rows\n"
-                 " 1, 2, 3 ... from the top). X is black, O is white, [ ] marks the last\n"
-                 " stone. say <text> talks to the table. resign gives up (it asks first).\n"
-                 " menu goes back to the menu; the game goes on and leaving never resigns.\n"
-                 " redraw or Enter shows the board again.")
 
     def lines(self):
-        v, me = self.v, self.me
-        you = "you are watching" if me < 0 else "you play %s (%s)" % (self.colour(me), "XO"[me])
-        out = ["", "== Five in a Row, table %s: %s ==" % (self.tid, you)]
+        v = self.v
+        out = [""] + self.plain_header()
         if not v["rows"]:
-            return out + ["", "Waiting for an opponent.",
-                          "The game starts when someone joins table %s from telnet or the web" % self.tid,
-                          "(port 6500). Type menu to go back; the table stays open."]
+            return out + self.plain_waiting()
         n, stones = v["n"], v["stones"]
-        moves = len(v["order"][0]) + len(v["order"][1])
-        side = {}
-        for i in (0, 1):
-            mark = ">" if self.playing() and v["turn"] == i else " "
-            side[i] = "%s %s %-12s %3d" % (mark, "XO"[i], self.name(i)[:12], v["counts"][i])
-        if self.over:
-            for k, l in enumerate(wrap(self.over, 32)[:2]):
-                side[3 + k] = l
-        elif self.my_turn():
-            side[3] = "Your move."
-        else:
-            side[3] = "%s to move." % self.name(v["turn"])
-        if v["five"]:
-            side[5] = "Line " + " ".join(sq(*p) for p in v["five"])
-        elif v["last"]:
-            side[5] = "Move %d, last %s" % (moves, sq(*v["last"]))
-        side[6] = self.rules_text()
-        if me >= 0 and not self.over:
-            side[8], side[9] = "Type a point to play, or", "say <text>, resign, menu, help."
-        else:
-            side[8] = "Type say <text>, menu or help."
-        out.append("     " + " ".join(chr(97 + i) for i in range(n)))
-        width = 4 + 2 * n + 1 + 3
+        board = ["     " + " ".join(chr(97 + i) for i in range(n))]
         for y in range(n):
             cells = [" "] * (2 * n + 1)
             for x in range(n):
@@ -580,22 +511,15 @@ class PlainFive(FiveBase, PlainGame):
                 cells[2 * x + 1] = "." if s is None else "XO"[s]
             if v["last"] and v["last"][1] == y and v["last"] in stones:
                 cells[2 * v["last"][0]], cells[2 * v["last"][0] + 2] = "[", "]"
-            line = " %2d %s" % (y + 1, "".join(cells))
-            out.append((line.ljust(width) + side.get(y, "")[:80 - width]).rstrip())
-        for y in range(n, max(side) + 1):               # a small board: the side text goes on below it
-            out.append((" " * width + side.get(y, "")[:80 - width]).rstrip())
-        if not self.over:
-            out.append(" " + clock_text(v, self.names))
-        for l in self.log[-4:]:
-            out.append(" " + l[:78])
-        return out
+            board.append(" %2d %s" % (y + 1, "".join(cells)))
+        facts = ["The line is %s." % " ".join(sq(*p) for p in v["five"])] if v["five"] else []
+        side = self.side_text([(i, "XO"[i], "%d" % v["counts"][i]) for i in (0, 1)], facts + [self.rules_text()],
+                              min(32, 80 - (2 * n + 8)))
+        return out + self.beside(board, side, 2 * n + 8) + self.plain_log()
 
-    def prompt(self):
-        if self.my_turn():
-            v = self.v
-            n = v["n"]
-            return "Your move (like %s) > " % sq(*nearest_empty(v, v["last"] or (n // 2, n // 2)))
-        return "> "
-
+    def turn_prompt(self):
+        v = self.v
+        n = v["n"]
+        return "Your turn. Type a point such as /%s." % sq(*nearest_empty(v, v["last"] or (n // 2, n // 2)))
 
 AnsiScreen, PlainScreen = AnsiFive, PlainFive
