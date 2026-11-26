@@ -103,6 +103,8 @@ DOC_GROUPS = [
         ("/docs/protocol.html", "Native protocol", "is the reference for PARLORNET/1."),
         ("/docs/transports.html", "Transports", "covers serial lines, modems and bridges."),
         ("/docs/bandwidth.html", "Bandwidth", "shows what a game costs on a slow line."),
+        ("/docs/design.html", "Frontend design", "says how a frontend should look and work, with the principles, "
+         "the program flow from connecting to signing out, and the words every frontend shares."),
         ("/docs/design/trust.html", "Trust", "sets the rules that clients and server extensions follow, so that "
          "the server decides."),
     ]),
