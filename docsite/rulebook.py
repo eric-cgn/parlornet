@@ -2,8 +2,8 @@
 rulebook for GameMaster 1.0.0, which signs a Mac in to a parlor and carries its games over one connection.
 Its source, its build and its releases are in the rulebooks' own repository (eric-cgn/parlornet-gamemaster,
 rulebooks/parlornet). It has no download of its own: it comes in Install ParlorNet Rulebooks
-(docsite/gamerulebooks.py). The README comes from that repository's release pinned in docsite/downloads.json
-(docsite/downloads.py)."""
+(docsite/gamerulebooks.py). The README comes from that repository's source at the tag pinned in
+docsite/downloads.json (docsite/downloads.py)."""
 from adapters import clients as C
 from adapters.webstyle import a, font, h1, h2, p
 from . import downloads
