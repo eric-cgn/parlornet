@@ -121,7 +121,7 @@ Do not add `Strict-Transport-Security` on this name. Browsers would apply it to 
 
 ## Dial-in gateways and their time limits
 
-A dial-in gateway answers modem calls and carries each one to the dial-in extension on port 6521, so point the gateway at that port. A ParlorNet client sends `PARLORNET/1` within 5 seconds of the modems connecting and gets the native protocol. A terminal program gets the telnet service in plain text. The extension is called `dialin`. If you saved a list in the admin menus' Adapters screen, turn it on there. The gateway may start each connection with a PROXY protocol header that says the connection is a call. The parlor believes that header only from the addresses you list, as the container sees them. A gateway on the host itself comes from 172.30.4.1:
+A dial-in gateway answers modem calls and carries each one to the dial-in extension on port 6521, so point the gateway at that port. A ParlorNet client sends `PARLORNET/1` and a line ending within 15 seconds of the modems connecting, and it gets the native protocol. A terminal program gets the telnet service in plain text. The extension is called `dialin`. If you saved a list in the admin menus' Adapters screen, turn it on there. The gateway may start each connection with a PROXY protocol header that says the connection is a call. The parlor believes that header only from the addresses you list, as the container sees them. A gateway on the host itself comes from 172.30.4.1:
 
 ```
 PARLOR_DIALIN_GATEWAYS=172.30.4.1

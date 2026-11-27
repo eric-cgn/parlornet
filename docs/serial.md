@@ -90,7 +90,7 @@ A serial port server such as ser2net can do the same job; its own documentation 
 
 ## Dialing in by phone
 
-A parlor can also take calls from real modems over a phone line. A dial-in gateway answers each call and carries it to the parlor's dial-in extension. Dial-in access supports both telnet and the machine-specific ParlorNet clients, such as the Commodore 64 and the Apple IIe. A ParlorNet client sends PARLORNET/1 as soon as the modems connect, and it reaches the native protocol. A terminal program reaches the telnet service. The parlor waits 5 seconds after CONNECT without sending anything, and then it shows its title page in plain text and echoes what you type. Sign in at the Login prompt as on telnet. A call has time limits, and the parlor tells you when 5 minutes and 1 minute are left.
+A parlor can also take calls from real modems over a phone line. A dial-in gateway answers each call and carries it to the parlor's dial-in extension. Dial-in access supports both telnet and the machine-specific ParlorNet clients, such as the Commodore 64 and the Apple IIe. A ParlorNet client sends PARLORNET/1 as soon as the modems connect, and it reaches the native protocol. A terminal program reaches the telnet service. After CONNECT the parlor sends nothing until you press Enter, or for 15 seconds if you don't. Then it shows its title page in plain text and echoes what you type. Sign in at the Login prompt as on telnet. A call has time limits, and the parlor tells you when 5 minutes and 1 minute are left.
 
 ## The cable
 
