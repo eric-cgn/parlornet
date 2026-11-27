@@ -92,7 +92,7 @@ class Start(unittest.TestCase):
         async def motd(args):
             return []
 
-        async def sign_in(io_, args, ticket=None):
+        async def sign_in(io_, args, ticket=None, core=None):
             seen["out"], seen["ansi"] = io.w.data, io.ansi
             return None
         with mock.patch.object(T.MOTD, "get", motd), mock.patch.object(T, "sign_in", sign_in):

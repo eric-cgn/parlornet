@@ -121,6 +121,6 @@ def protocols_body(games):
                    (callout(p(C.original_html(C.ORIGINALS[k]), 2)) if k in C.ORIGINALS else "") +
                    p("<br>\n".join("<b>%s:</b> %s" % kv for kv in facts), 2) +
                    (p(NOTES[k], 2) if k in NOTES else ""))
-    out.append(p("Ports 6511 and 6521 to 6800 are kept free for more protocols. To write your own program, read the %s."
+    out.append(p("Ports 6511 and 6522 to 6800 are kept free for more protocols. To write your own program, read the %s."
                  % a("/docs/pnp.html", "protocol guide"), 2))
     return "".join(out)

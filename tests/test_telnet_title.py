@@ -217,7 +217,7 @@ class Session(unittest.TestCase):
             seen["title before motd"] = b"Press Enter" in io.w.data
             return ["Welcome."]
 
-        async def sign_in(io_, args, ticket=None):
+        async def sign_in(io_, args, ticket=None, core=None):
             seen["out"] = io.w.data
             return None
 
@@ -243,7 +243,7 @@ class Session(unittest.TestCase):
         async def motd(args):
             return []
 
-        async def sign_in(io_, args, ticket=None):
+        async def sign_in(io_, args, ticket=None, core=None):
             out["data"] = io.w.data
             return None
 

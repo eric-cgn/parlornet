@@ -30,7 +30,8 @@ One parlor (a deployment) listens on ports from 6500 to 6800.
 | 6518 | Checkers for xcheckers (X11) and telnet programs, over the ICDS protocol | ICDS extension, `adapters/icds.py` (game-network extension) |
 | 6519 | Reversi, Checkers and Five in a Row for Worthy Opponent 2.0 (DOS), dialed by modem (`ATDT host:6519`) | Worthy Opponent extension, `adapters/worthy.py` (game-network extension) |
 | 6520 | All ten games for GEnie's RSCARDS front ends (Mac, IBM PC, Commodore 128, Amiga), by WiFi modem or serial bridge | RSCARDS extension, `adapters/rscards.py` and `adapters/rscgames.py` |
-| 6511, 6521-6800 | further server extensions | |
+| 6521 | modem calls from dial-in gateways, for ParlorNet's own clients and for terminals | dial-in extension, `adapters/dialin.py` |
+| 6511, 6522-6800 | further server extensions | |
 
 Port 6510 is the admin console (below), an operator extension: the operator's blue-screen menus, not for players and not listed on the web site. The core's admin socket, 6599, listens on 127.0.0.1 inside the container only and is never published.
 
@@ -42,7 +43,7 @@ The web site's pages, their frame and what each holds are in [site.md](site.md),
 
 ## Declaring the protocol
 
-Every server extension that players connect to declares its protocol to the core (docs/protocol.md, Protocols; docs/design/protocol-declarations.md). Its module has `PROTOCOL = (key, name, description)`, and its `serve()` calls `declare.start(args, PROTOCOL)` (adapters/declare.py) once it listens: one connection to the core is kept open for `PRO key port name` and `PRD key description`, sent again every 5 minutes, and made again if the core goes away. The port is `--public-port` when the extension is published under another port than it listens on (Outland: 4000 in the container, 6506 on the host, which deploy/start.py passes from `catalog.PUBLISHED`; GameMaster: 6508, or another number where the host publishes 6508 under it and sets `PARLOR_GAMEMASTER_PORT`, which deploy/start.py passes on), else `--port`. The core lists the protocol while that connection is open, and the web's Protocols page shows it. The admin console and the bot declare nothing.
+Every server extension that players connect to declares its protocol to the core (docs/protocol.md, Protocols; docs/design/protocol-declarations.md). Its module has `PROTOCOL = (key, name, description)`, and its `serve()` calls `declare.start(args, PROTOCOL)` (adapters/declare.py) once it listens: one connection to the core is kept open for `PRO key port name` and `PRD key description`, sent again every 5 minutes, and made again if the core goes away. The port is `--public-port` when the extension is published under another port than it listens on (Outland: 4000 in the container, 6506 on the host, which deploy/start.py passes from `catalog.PUBLISHED`; GameMaster: 6508, or another number where the host publishes 6508 under it and sets `PARLOR_GAMEMASTER_PORT`, which deploy/start.py passes on), else `--port`. The core lists the protocol while that connection is open, and the web's Protocols page shows it. The admin console, the bot and the dial-in extension declare nothing. Callers reach the dial-in extension only through a gateway, and what it carries is the core's protocol and telnet's.
 
 | Extension | Key | Name |
 |---|---|---|
@@ -141,6 +142,27 @@ Built (adapters/telnet.py): the screen is 80x24. A connection opens with one lin
 - Time: `/time` shows the time signed in and the server's time in UTC, from the core's `TIM`: "Signed in 12:34. Server time 21:05 UTC." On a connection with time limits it adds each one: "This call has 63 minutes left. You have 40 minutes left this month." The title bar's clock shows both, as "12m onl unl rem".
 - The lobby lists the player's invitations. The plain lobby shows them under "Invitations for you". The full-screen lobby shows them in Your tables and gives a notice when a new one arrives. On the full screen Enter on an invitation opens its dialog with Accept and Decline, and the plain lobby asks once at the prompt, where Y accepts, N declines and Enter leaves it for later. `/join NAME` accepts one too. At a table, `/invite NAME` invites a player, `/invite bot` the bot, and `/uninvite NAME` withdraws the invitation. The table's log says how each invitation ended. `/who` lists the players who are online.
 - Leaving a table or disconnecting never resigns; only `RES` or the turn timer ends a game early.
+
+## Dial-in extension (port 6521)
+
+`adapters/dialin.py` takes the calls that dial-in gateways carry. A gateway answers a call from a modem, opens a TCP connection to port 6521 and relays the bytes both ways. Dial-in access supports both telnet and the machine-specific ParlorNet clients, such as the Commodore 64 and the Apple IIe. The gateway knows nothing of ParlorNet, so the extension tells the two kinds of caller apart by what they send:
+
+- The gateway may send a PROXY protocol header first, with the caller ID, the number dialed, the modulation, the rate and how long the call has been up (docs/protocol.md, Dial-in gateways). The extension reads it with the core's own code, `Lines.proxy` in `parlord/native.py`, and then asks the core with `DIA addr` whether the address it came from is in `dialin.gateways`. A header from any other address, and a header that is not well formed, go to the core at once as a native call would. The core refuses them with `ERR PROTOCOL wrong protocol` and closes the line, as it does on 6501.
+- For 5 seconds from the connection the extension sends nothing and echoes nothing.
+- When the first bytes after the header are `PARLORNET/1` and a CR or LF within those 5 seconds, with at most 10 bytes of anything before them as on 6501, the call goes to the native protocol at once (`Lines.opening_within`, by the rules of `Lines.start`).
+- Anything else goes to telnet when the 5 seconds are up. That includes silence, keys typed, `PARLORNET/1` with no line ending after it, and more than 10 stray bytes before it. A call never switches back.
+- Until the decision, bytes that cannot start the opening do not end the wait, since the modems may still be settling and line noise may come. When the call goes to telnet, the bytes of those 5 seconds are dropped. Nothing that comes after the decision is dropped.
+
+A call to the native protocol is handed to the core with `DIA NATIVE addr` on a connection of the extension channel. After the core's `OK`, the extension passes on every byte the caller sent, the header first, and then relays both ways. From then on the core treats the connection as one of the public port's, from the gateway at that address. It reads the header and the opening again and puts a call in the dial-in class. The public port's rules apply, such as its line endings, paging and the refusal of `SES`.
+
+A call to telnet runs the telnet extension's session (`main_session` in `adapters/telnet.py`, with `telnet=False`) on the caller's line. Before that, the extension tells the core what the call is on the connection the session then uses for the sign-in. It sends `DIA addr prior`, then `SRC` with the header's source address and `DIA` with the call's text. So the session is in the dial-in class with the same limits as a native call, and the seconds of the window count toward the call.
+
+- A modem line speaks no telnet. The session sends no telnet commands (`PlainWriter`), asks no terminal type and draws in `plain` mode. Every byte the caller sends is a key, with its 8th bit cleared, so a terminal set to 7 bits and parity works.
+- The extension echoes what the caller types, since a terminal program on a modem leaves the echo to the far end, and it shows a star for each key of a password.
+- Like telnet with a terminal that names no type, it draws for 80 columns, opens with the title page until Enter, and shows the message of the day before the login.
+- The plain lobby's header shows the time left, from `TIM`, as on telnet. Every 2 seconds the extension asks the core for `TIM` between the session's own requests. The notices at 5 minutes and at 1 minute left come with its reply, and the extension writes each on a line of its own. When the core closes the call with `ERR LIMIT`, the extension writes its reason as a sentence, such as "This call has had its 75 minutes.", and hangs up.
+
+A connection without a header is in the default class, whichever way it goes. The extension takes at most 60 calls at once, and it logs nothing about a call.
 
 ## Admin console (operator extension)
 

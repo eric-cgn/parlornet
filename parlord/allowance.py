@@ -14,7 +14,8 @@ from the admin store or the settings file, else from the environment as PARLOR_ 
 _ for the dot (dialin.call_mins is PARLOR_DIALIN_CALL_MINS), else the default here. Without dialin.gateways no
 connection is in the dial-in class. A connection is metered when its class has a limit at the moment it
 connects. The values are read again each time, so a change takes effect at once. Connections on the extension
-channel are never metered.
+channel are not metered, except one that the dial-in extension says carries a call (DIA, parlord/core.py), which
+is in the dial-in class.
 
 The minutes used are kept by month, class and player in the table allowance, with the empty name for the
 pool, and in memory while the server runs. A connection's time is charged when it signs in or out, when it

@@ -15,7 +15,7 @@ Opt-in, needing extra capabilities: started as root (--user 0) with SETUID,
 SETGID and KILL, this script keeps root only to start, watch and stop the
 others: parlord runs as parlord and each server extension as its own user
 pn-<name> (web, telnet, ios, fibs, outland, doom, gamemaster, netsprocket, play, batnav, awale,
-networdz, netluff, icds, worthy, rscards, admin, bot), which can read its own
+networdz, netluff, icds, worthy, rscards, dialin, admin, bot), which can read its own
 key (group pn-<name>, mode 640) and nothing else of /data. Started as root
 without those capabilities, it cannot switch users and says so. Either way a
 first step run as parlord (--prepare) sets the modes and enrolls missing keys.
@@ -62,9 +62,10 @@ Environment (all optional):
                        https: address that ParlorNet Play gives push services; push notifications are off
                        without it (docs/play-notifications.md)
     PARLOR_DIALIN_GATEWAYS  dialin.gateways until the admin menus or the settings file set it: the addresses
-                       of dial-in gateways, which may send a PROXY header on the native port (6501). The
-                       core reads it, with PARLOR_DIALIN_CALL_MINS and the other limits of the time
-                       allowance (parlord/allowance.py), from the environment it inherits
+                       of dial-in gateways, which carry modem calls to the dial-in extension (6521) and
+                       may start each with a PROXY header. The core reads it, with PARLOR_DIALIN_CALL_MINS
+                       and the other limits of the time allowance (parlord/allowance.py), from the
+                       environment it inherits, and the dial-in extension asks the core
     PARLOR_DB          the SQLite database (/data/parlord.db)
     PARLOR_KEYS        the frontend key directory (frontends/ beside the database)
 """

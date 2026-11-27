@@ -68,7 +68,8 @@ networdz 10061 adapters.networdz 6516 6516 -
 netluff 10058 adapters.netluff 6517 6517,1744 1744
 icds 10059 adapters.icds 6518 6518 -
 worthy 10060 adapters.worthy 6519 6519 -
-rscards 10062 adapters.rscards 6520 6520 -"
+rscards 10062 adapters.rscards 6520 6520 -
+dialin 10063 adapters.dialin 6521 6521 -"
 
 for n in "$@"; do
 	case $n in *[!a-z0-9-]* | "") n= ;; esac
