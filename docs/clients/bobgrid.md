@@ -31,4 +31,6 @@ The download is the author's page as the Internet Archive kept it. The author of
 
 ## Screenshots
 
-None yet.
+![BobGrid's plain board with words such as VALISE, RAVIOLI, ABACUS and IMPRINT, at half its size](../../static/img/bobgrid-board.gif "After five turns each, wren and the bot have filled the middle of the board in a game of Grid Words.")
+![An arrow on k9 and the word ROAM laid out across row 9, next to the NO, SC and OK buttons](../../static/img/bobgrid-pick-and-click.gif "With Pick-and-Click, wren clicks the start square and then the rack letters, and SC asks the server for the score.")
+![Two lists of plays, wren's above and the bot's below, each with its square, its word, its points and the running score](../../static/img/bobgrid-plays.gif "The log windows list each player's plays with their points.")
