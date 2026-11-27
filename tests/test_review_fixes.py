@@ -913,11 +913,11 @@ class F09WebBehindAProxy(WebStack):
 
     def test_pages_name_their_address_under_the_public_url(self):
         for path, want in (("/", "https://games.example.org/"), ("/welcome.htm", "https://games.example.org/"),
-                           ("/games.htm", "https://games.example.org/games.htm")):
+                           ("/credits.htm", "https://games.example.org/credits.htm")):
             h = self.head(path)
             self.assertTrue(h.startswith("HTTP/1.0 200 "), (path, h[:40]))
             self.assertIn('\r\nLink: <%s>; rel="canonical"' % want, h, path)
-        self.assertNotIn("canonical", self.head("/games.htm?g=reversi"))        # a query: none
+        self.assertNotIn("canonical", self.head("/credits.htm?g=reversi"))      # a query: none
         self.assertNotIn("canonical", self.head("/img/parlor.gif"))             # not a page
 
     def test_the_proxys_scheme_carries_into_redirects(self):

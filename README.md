@@ -10,7 +10,7 @@ ParlorNet is free software under the MIT license. Its source is at https://githu
 
 ## Games
 
-A parlor plays ten games: Reversi, Backgammon, Grid Words, Cannon Fire, Dots and Boxes, Five in a Row, Mancala, Checkers, Naval Combat and Rummy Tile Classic. Each one is ParlorNet's own implementation of public rules, under a generic or original name. The games were built in this order, and menus and the lobby list them the same way. Every parlor's web site describes them on its Games page, `/games.htm`.
+A parlor plays ten games: Reversi, Backgammon, Grid Words, Cannon Fire, Dots and Boxes, Five in a Row, Mancala, Checkers, Naval Combat and Rummy Tile Classic. Each one is ParlorNet's own implementation of public rules, under a generic or original name. The games were built in this order, and menus and the lobby list them the same way. Every parlor's web site lists them in the Games section of its welcome page, `/welcome.htm#games`.
 
 ## How ParlorNet is built
 

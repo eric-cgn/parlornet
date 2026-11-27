@@ -8,7 +8,7 @@ A game is four new files and nothing else. None of them is shared with another g
 |---|---|
 | `plugins/<game>/plugin.py` | The rules: a game plugin as in [plugins.md](plugins.md). The core finds it and lists the game in `GAM`. |
 | `docs/types/<game>-1.md` | The type spec: view lines, move tokens, events, sizes. |
-| `adapters/games/<game>.py` | The frontend module: the view parser, the event texts, the web board and images, the telnet screens and the Games page text. The registry finds it. |
+| `adapters/games/<game>.py` | The frontend module: the view parser, the event texts, the web board and images, the telnet screens and the text for the Games section and the game's page. The registry finds it. |
 | `tests/test_<game>.py` | The plugin's tests and the frontend's tests. |
 
 `<game>` is the type word: `reversi`, `gridwords`, `cannonfire`. The plugin's `INFO` type, the spec's file name, the module's file name and the start of its `KEY` all use it.
@@ -45,7 +45,7 @@ The module imports what it needs from `adapters.telnet` (the screen framework), 
 | `NAME` | `"Reversi"` | The display name. For a planned game, exactly the name in `web.GAMES` (`"Grid Words"`), so the Games table keeps it in its place. |
 | `ORDER` | `1` | The place in the build order (README.md): Reversi 1, Backgammon 2, Grid Words 3, Cannon Fire 4, Dots and Boxes 5, Five in a Row 6, Mancala 7, Checkers 8, Naval Combat 9, Rummy Tile Classic 10. Menus, the lobby and the tables list games in this order. |
 | `PLAYERS` | `"2"` | Players as text: `"2"` or `"2-4"` (the Games table uses the core's numbers when it hosts the game). |
-| `ABOUT` | `(about, [rules])` | For `/games.htm`. `about`: two or three sentences in ParlorNet's own words on what the game is. `rules`: one plain sentence or two per ruleset and option this server supports, from the type spec. Plain ASCII text, generic names only: never a trademark (Othello, Scrabble, Battleship, Rummikub, Kalah, Scorched Earth...); the games page test checks some of these. |
+| `ABOUT` | `(about, [rules])` | For the welcome page's Games section and the game's own page. `about`: two or three sentences in ParlorNet's own words on what the game is. `rules`: one plain sentence or two per ruleset and option this server supports, from the type spec. Plain ASCII text, generic names only: never a trademark (Othello, Scrabble, Battleship, Rummikub, Kalah, Scorched Earth...); the games page test checks some of these. |
 | `RULE_NAMES` | (none: one ruleset) | Optional. `{ruleset: display name}` for a game with several rulesets (Mancala: `{"kalah": "store rules", "oware": "Oware rules"}`). When the plugin lists more than one ruleset, the web lobby's form has a rules select and the telnet lobby asks with a picker, both showing these names (the ruleset word with a capital when a name is missing), and the first ruleset in the plugin's list is the default. A game whose plugin takes more than two players gets a players select and picker the same way, sent as `players=n` on `NEW`. |
 
 ### The view and the events

@@ -36,16 +36,19 @@ ALLOWED = {
     "select": {"name", "size"}, "option": {"value", "selected"}, "textarea": {"name", "rows", "cols"},
 }
 FACES = {"Geneva,Helvetica,Arial", "Chicago,Charcoal,Arial Black"}
-# The navigation bar, exactly: these entries in this order, and Sign out last only while a player is signed in.
-PUBLIC_NAV = ["Welcome", "Lobby", "Games", "Docs"]
-SIGNED_NAV = PUBLIC_NAV + ["Sign out"]
+# The navigation bar, exactly: these entries in this order, with Sign In last, or Sign Out while a player is
+# signed in.
+PUBLIC_NAV = ["Welcome", "Lobby", "Docs", "Sign In"]
+# The icon after a link to the docs site, which leaves the site.
+EXTERNAL_IMG = '<img src="/img/external.gif" width="9" height="9" alt="(external)">'
+SIGNED_NAV = ["Welcome", "Lobby", "Docs", "Sign Out"]
 
 # Byte budgets: the target modems run at 2400 to 14,400 bit/s. (page, most bytes of HTML)
 # welcome: the forms and the guide by machine, with each machine's picture; credits: the pictures' sources
-BUDGETS = {"/welcome.htm": 16 * 1024, "/games.htm": 9 * 1024, "/credits.htm": 6 * 1024}
+BUDGETS = {"/welcome.htm": 24 * 1024, "/credits.htm": 6 * 1024}
 GAME_PAGE_BUDGET = 8 * 1024         # a game's page
 SMALL_BUDGET = 3 * 1024             # sign-in steps, notices, the resign question
-LOBBY_BUDGET = (12 * 1024, 600)     # the lobby: bytes, plus this for each table it lists
+LOBBY_BUDGET = (18 * 1024, 600)     # the lobby, with a form for each game: bytes, plus this for each table it lists
 TABLE_FRAME_BUDGET = 3 * 1024       # a table page less the game's own parts
 PAGE_BUDGETS = {"/activity.htm": 9 * 1024, "/player.htm": 6 * 1024}     # the activity, a profile
 
@@ -56,7 +59,7 @@ MOTD = ("Welcome to the <test> parlor: Ann & Bob's \"club\".\n"
 
 # Every address the site has published; each must answer 200 or a redirect. The documentation's (MOVED)
 # redirect to the docs site, where the page and its anchors are (tests/test_docs_site.py).
-OLD_URLS = ["/", "/index.htm", "/index.html", "/welcome.htm", "/games.htm", "/login.htm", "/lobby.htm",
+OLD_URLS = ["/", "/index.htm", "/index.html", "/welcome.htm", "/login.htm", "/lobby.htm",
             "/table.htm?t=1", "/welcome.htm#clients"]
 MOVED = ["/docs/index.htm", "/eclipse-68k-fix.htm", "/download/eclipse-68k-fix.hqx",
          "/download/eclipse-68k-fix.bin", "/download/eclipse-68k-fix.dsk", "/download/eclipse-68k-fix-readme.txt",
@@ -140,7 +143,7 @@ class Site(Stack):
 
     def public_pages(self):
         from adapters import web as W
-        paths = ["/welcome.htm", "/games.htm", "/credits.htm"] + ["/games/%s.htm" % r["type"] for r in W.game_rows()]
+        paths = ["/welcome.htm", "/credits.htm"] + ["/games/%s.htm" % r["type"] for r in W.game_rows()]
         out = {}
         for path in paths:
             st, _, ct, body = self.get(path)
@@ -201,20 +204,24 @@ class Site(Stack):
         return re.findall(r">([^<>|]+)</(?:a|b)>", nav)
 
     def test_nav_on_every_page(self):
-        """Exactly Welcome, Lobby, Games and Docs on every page, Docs leading to the docs site; Sign out last
-        while a player is signed in, on the signed-in pages and on the public ones alike."""
+        """Exactly Welcome, Lobby, Docs and Sign In on every page, Docs leading to the docs site and Sign In to the
+        welcome page's Sign-In section; Sign Out in its place while a player is signed in, on the signed-in pages
+        and on the public ones alike."""
         from parlord import DOCS_URL
         for name, page in {**self.public_pages(), **self.other_pages()}.items():
             self.assertEqual(self.nav_labels(page), PUBLIC_NAV, name)
-            self.assertIn('<a href="%s">Docs</a>' % DOCS_URL, page[:page.index("</table>")], name)
+            self.assertIn('<a href="%s">Docs</a>&nbsp;%s' % (DOCS_URL, EXTERNAL_IMG), page[:page.index("</table>")],
+                          name)                                     # Docs leaves the site: the icon after it
+            self.assertIn('<a href="/welcome.htm#signin">Sign In</a></font></td></tr>', page[:page.index("</table>")
+                                                                                              + 200], name)
         for name, page in self.signed_in_pages().items():
             if name in ("error", "out of date", "/password.htm"):    # notices and sign-in steps: the public bar
                 continue
             self.assertEqual(self.nav_labels(page), SIGNED_NAV, name)
             nav = plain(page)[:plain(page).index("</table>")]
             self.assertIn('href="/lobby.htm?x=', nav)                # the signed-in links carry the action check
-            self.assertRegex(nav, r'href="/out\.htm\?x=[0-9a-f]+[^"]*">Sign out</a></td></tr>$')
-        for path in ("/welcome.htm", "/games.htm", "/games/reversi.htm"):     # public pages, signed in
+            self.assertRegex(nav, r'href="/out\.htm\?x=[0-9a-f]+[^"]*">Sign Out</a></td></tr>$')
+        for path in ("/welcome.htm", "/credits.htm", "/games/reversi.htm"):     # public pages, signed in
             page = self.ann.get(path)[3]
             self.assertEqual(self.nav_labels(page), SIGNED_NAV, path)
             self.assertEqual(self.nav_labels(self.get(path)[3]), PUBLIC_NAV, path)   # nobody signed in
@@ -230,7 +237,7 @@ class Site(Stack):
             bottom = page.rindex("<br>\n<table")
             masthead, content, footer = text(page[page.index("<body"):top]), text(page[top:bottom]), text(page[bottom:])
             self.assertTrue(masthead.startswith("ParlorNet"), name)
-            self.assertTrue(masthead.endswith(("Docs", "Sign out")), (name, masthead))
+            self.assertTrue(masthead.endswith(("Sign In", "Sign Out")), (name, masthead))
             h1 = text(re.search(r"<h1>(.*?)</h1>", page, re.S).group(1))
             self.assertTrue(content.startswith(h1), (name, content[:80]))
             at = len(h1)
@@ -261,7 +268,7 @@ class Site(Stack):
 
     def test_old_urls_answer(self):
         from adapters import web as W
-        urls = OLD_URLS + ["/games.htm#%s" % r["type"] for r in W.game_rows()] + list(W.IMAGES)[:5]
+        urls = OLD_URLS + list(W.IMAGES)[:5]
         for u in urls:
             st, loc, _, _ = self.get(u.split("#")[0])
             self.assertIn(st, (200, 302), u)
@@ -271,13 +278,14 @@ class Site(Stack):
             self.assertEqual(st, 301, u)
             self.assertEqual(loc, DOCS_URL + W.moved_to(u.split("#")[0]), u)
             self.assertEqual(check(body).problems, [], u)
-        games_page = self.get("/games.htm")[3]
-        for r in W.game_rows():                       # old links to a game's section land on its row
-            self.assertIn('<a name="%s"></a>' % r["type"], games_page)
         welcome = self.get("/welcome.htm")[3]
-        for anchor in ("games", "play", "frontends", "clients", "protocols", "ways-in", "motd", "machines",
-                       "signin", "new"):
+        for r in W.game_rows():                       # a link to a game's row in the Games section lands on it
+            self.assertIn('<a name="%s"></a>' % r["type"], welcome)
+        for anchor in ("welcome", "games", "play", "frontends", "clients", "protocols", "ways-in", "motd",
+                       "machines", "signin", "new"):
             self.assertIn('<a name="%s">' % anchor, welcome)
+        self.assertNotIn("<h1>Games</h1>", plain(self.get("/games.htm")[3]))      # the old Games page is gone
+        self.assertNotIn("/games.htm", welcome)
 
     def test_game_pages_link_the_docs(self):
         """A game's page links to its type spec, its protocol guide chapter and its programs on the docs site
@@ -287,7 +295,10 @@ class Site(Stack):
         for r in W.game_rows():
             page = plain(self.get("/games/%s.htm" % r["type"])[3])
             part = page[page.index('<a name="frontends">'):]
-            self.assertIn('<a href="%sindex.html#%s">Clients page</a>' % (DOCS_URL, r["type"]), part)
+            self.assertIn('<a href="%sindex.html#%s">Clients page</a>&nbsp;%s' % (DOCS_URL, r["type"], EXTERNAL_IMG),
+                          part)
+            facts = page[page.index("<b>For programmers:</b>"):]
+            self.assertEqual(facts[:facts.index("</p>")].count(EXTERNAL_IMG), 2)    # type spec, protocol guide
             self.assertNotIn("protocols.htm", page)
 
     def test_welcome_is_the_motd_then_the_two_ways_in(self):
@@ -308,9 +319,16 @@ class Site(Stack):
         self.assertLess(body.index("<h1>Welcome</h1>"), body.index("<pre>"))
         self.assertLess(body.index("</pre>"), body.index('<a name="signin">'))
         self.assertNotIn("ParlorNet is a game server for turn-based games", page)     # no prose of its own
-        signin, new = body.index('<a name="signin">Sign in</a></h2>'), body.index('<a name="new">New account</a></h2>')
+        signin, new = body.index('<a name="signin">Sign-In</a></h2>'), body.index('<a name="new">New account</a></h3>')
         self.assertLess(signin, new)
-        self.assertLess(new, body.index('<a name="machines">Play from your computer</a></h2>'))   # then by machine
+        games = body.index('<a name="games">Games</a></h2>')
+        self.assertLess(new, games)                                                       # then the games
+        self.assertLess(games, body.index('<a name="machines">Play from your Computer</a></h2>'))   # then by machine
+        # the contents line under the heading links each section
+        self.assertIn('<h1>Welcome</h1>\n<p><a href="#welcome">Welcome</a> | <a href="#signin">Sign-In</a> | '
+                      '<a href="#games">Games</a> | <a href="#machines">Play from your Computer</a></p>', body)
+        self.assertTrue(body[body.index("<body"):].split("</table>\n", 1)[1].startswith(
+            '<a name="welcome"></a><h1>Welcome</h1>'))
         forms = re.findall(r'<form action="([^"]+)" method="post">(.*?)</form>', page, re.S)
         self.assertEqual([f for f, _ in forms], ["/login.htm", "/signup.htm"])
         self.assertIn('value="Sign in"', forms[0][1])
@@ -354,6 +372,10 @@ class Site(Stack):
         self.assertIn('<a href="%sbrowsers.html">' % DOCS_URL, cells["any-old"])
         self.assertIn('<a href="%sdocs/serial.html">' % DOCS_URL, cells["any-old"])
         self.assertIn('<a href="%stelnet.html">' % DOCS_URL, cells["any-new"])
+        # dozens of links to the docs site: the line above them says so once, with the icon, and they have none
+        self.assertIn('The links in it go to <a href="%sindex.html">ParlorNet Docs</a>&nbsp;%s, where each '
+                      'program&#39;s page says how to get it and set it up.' % (DOCS_URL, EXTERNAL_IMG), sec)
+        self.assertNotIn(EXTERNAL_IMG, "".join(cells.values()))
         # nothing technical: no ports, no protocol keys, no list of protocols
         for word in ("port", "protocol", "PARLORNET/1", "HTTP", "protocols.htm", str(self.tel_port),
                      str(self.web_port), str(self.core)):
@@ -361,8 +383,8 @@ class Site(Stack):
         self.assertNotIn("protocols.htm", page)
 
     def test_sign_out_from_the_bar(self):
-        """Sign out, last in the bar while signed in, ends this session and lands on Welcome, whose bar then
-        has no Sign out; the welcome page of a signed-in player has the lobby's link in place of the forms."""
+        """Sign Out, last in the bar while signed in, ends this session and lands on Welcome, whose bar then
+        has Sign In; the welcome page of a signed-in player has the lobby's link in place of the forms."""
         b = Browser(self.web_port)
         b.login("cyd", "cyd-Pass-word")
         page = b.get("/welcome.htm")[3]
@@ -429,10 +451,27 @@ class Site(Stack):
         welcome = self.get("/welcome.htm")[3]
         self.assertEqual(welcome.count('<img src="/img/parlor.gif" width="33" height="33" alt="">'), 1)
         for src in set(re.findall(r'<img src="([^"]+)"', welcome)) - {"/img/parlor.gif"}:    # the rating marks
-            self.assertRegex(src, r"^/img/(medal-(gold|silver|bronze)|m/[a-z0-9-]+)\.gif$")    # and the machines
+            self.assertRegex(src, r"^/img/(medal-(gold|silver|bronze)|[mg]/[a-z0-9-]+|external)\.gif$")   # and the rest
             st, _, ct, body = self.get(src)
             self.assertEqual((st, ct), (200, "image/gif"), src)
             self.assertTrue(body.startswith("GIF89a"), src)
+
+    def test_external_icon(self):
+        """The icon after a link to the docs site: ParlorNet's own 9-pixel GIF, drawn from webstyle.EXTERNAL_ROWS
+        in the link color on a transparent background, with (external) as its ALT text for text browsers."""
+        from adapters import board, webstyle as S
+        st, _, ct, body = self.get(S.EXTERNAL)
+        self.assertEqual((st, ct), (200, "image/gif"))
+        data = body.encode("latin-1")
+        self.assertEqual(data, S.external_gif())
+        self.assertTrue(data.startswith(b"GIF89a"))
+        self.assertEqual((data[6], data[8]), (S.EXTERNAL_SIZE, S.EXTERNAL_SIZE))
+        self.assertIn(b"\x21\xf9\x04\x01", data)                              # index 0 is transparent
+        self.assertEqual(data[13:19], bytes([255, 255, 255, 0x00, 0x33, 0x99]))  # white behind, the navy link color
+        img = board.decode_gif(data)
+        self.assertEqual("".join("#" if v else "." for v in img.pixels), "".join(S.EXTERNAL_ROWS))
+        self.assertEqual([len(r) for r in S.EXTERNAL_ROWS], [S.EXTERNAL_SIZE] * S.EXTERNAL_SIZE)
+        self.assertEqual(S.external_img(), EXTERNAL_IMG)
 
     def test_pictures(self):
         """Every machine's row on the welcome page and every game on the Games page, its own page and the lobby's
@@ -450,10 +489,11 @@ class Site(Stack):
             return [f[0] for f in found]
         welcome = self.get("/welcome.htm")[3]
         anchors = [m[0] for m in C.PLAY_MACHINES] + [W.ANY_OLD[0], W.ANY_NEW[0]]
-        self.assertEqual(imgs(welcome), [PIC.MACHINE_URL % m for m in anchors])
+        self.assertEqual(imgs(welcome), [PIC.GAME_URL % r["type"] for r in W.game_rows()] +
+                         [PIC.MACHINE_URL % m for m in anchors])
         self.assertIn('<a href="/credits.htm">picture credits</a>', welcome)
-        games = self.get("/games.htm")[3]
         rows = W.game_rows()
+        games = welcome[welcome.index('<a name="games">'):welcome.index('<a name="machines">')]
         self.assertEqual(imgs(games), [PIC.GAME_URL % r["type"] for r in rows])
         for r in rows:
             self.assertEqual(imgs(self.get("/games/%s.htm" % r["type"])[3]), [PIC.GAME_URL % r["type"]])
@@ -482,18 +522,54 @@ class Site(Stack):
         self.assertIn("Milo&#353; Juri&#353;i&#263;", page)         # beyond ASCII: a character reference
 
 
+class MotdGap(unittest.TestCase):
+    """The welcome page leaves a line between the message of the day's box and what follows it in the Welcome
+    section: a note, or the Sign-In section with the signed-in callout. Without a message of the day the page has
+    no extra line."""
+
+    def welcome(self, motd=(), message=""):
+        from adapters import web as W
+        req = {"headers": {"host": "parlornet.org:6500"}, "path": "/welcome.htm", "query": {}}
+        raw = W.welcome(req, message, motd=motd, nav="", lobby="/lobby.htm")
+        return raw.decode("latin-1").split("\r\n\r\n", 1)[1]
+
+    def test_gap(self):
+        box_end = "</pre></td></tr>\n</table>\n</td></tr></table>\n"
+        callout = '<table width="100%" border="0" cellpadding="1" cellspacing="0">'
+        page = self.welcome(["Hello."])
+        self.assertIn(box_end + "<br>\n<h2>", page)                     # then Sign-In
+        self.assertIn("You are signed in.", page[page.index('<a name="signin">'):])
+        page = self.welcome(["Hello."], "Signed in as ann.")
+        self.assertIn(box_end + "<br>\n" + callout, page)                # then the note's box
+        self.assertLess(page.index("Signed in as ann."), page.index('<a name="signin">'))
+        page = self.welcome()
+        self.assertNotIn('<a name="motd">', page)
+        self.assertNotIn("<br>\n<h2>", page[:page.index('<a name="signin">') + 30])   # no message of the day: no extra line
+
+
 class Palette(unittest.TestCase):
     """The frame's colors are web-safe, and no text in a colored cell is light (Netscape 2 and IE 2 show
-    font colors but not cell colors, so light text there would be white on white)."""
+    font colors but not cell colors, so light text there would be white on white). The docs site's palette is
+    greyscale, so a reader can tell the two sites apart."""
 
     def test_colours(self):
         from adapters import webstyle as S
-        for c in (S.PAPER, S.INK, S.FELT, S.DEEP, S.SAGE, S.IVORY, S.LINK, S.VLINK, S.ALINK):
-            self.assertRegex(c, r"^#(?:[0369CF]{2}){3}$")
-            self.assertTrue(all(int(c[i:i + 2], 16) % 0x33 == 0 for i in (1, 3, 5)), c)
-        page = S.frame("T", S.callout(S.p("x")) + S.data_table(["a"], [["b"], ["c"]]), current="/games.htm")
-        for colour in re.findall(r'<font[^>]*color="(#[0-9A-F]{6})"', page):
-            r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
-            self.assertLess(0.2126 * r + 0.7152 * g + 0.0722 * b, 96, colour)   # dark: reads on white too
-        for colour in re.findall(r'<td[^>]*bgcolor="(#[0-9A-F]{6})"[^>]*>[^<&]*<font', page):
-            self.assertNotEqual(colour, S.FELT)       # no text on the dark felt
+        for palette in (S.GREEN, S.GREY):
+            for c in palette:
+                self.assertRegex(c, r"^#(?:[0369CF]{2}){3}$")
+                self.assertTrue(all(int(c[i:i + 2], 16) % 0x33 == 0 for i in (1, 3, 5)), c)
+            with S.using(palette):
+                page = S.frame("T", S.h1("H") + S.callout(S.p("x")) + S.data_table(["a"], [["b"], ["c"]]),
+                               current="/welcome.htm")
+            self.assertIn('<body bgcolor="%s" text="%s" link="%s" vlink="%s" alink="%s">' % (
+                palette.paper, palette.ink, palette.link, palette.vlink, palette.alink), page)
+            for colour in re.findall(r'<font[^>]*color="(#[0-9A-F]{6})"', page):
+                r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
+                self.assertLess(0.2126 * r + 0.7152 * g + 0.0722 * b, 96, colour)   # dark: reads on white too
+            for colour in re.findall(r'<td[^>]*bgcolor="(#[0-9A-F]{6})"[^>]*>[^<&]*<font', page):
+                self.assertNotEqual(colour, palette.edge)       # no text on the edge color
+            self.assertEqual(set(re.findall(r'(?:bgcolor|color)="(#[0-9A-F]{6})"', page)) - set(palette), set())
+        self.assertTrue(all(c[1:3] == c[3:5] == c[5:7] for c in S.GREY))     # every grey is a grey
+        self.assertIs(S.colors(), S.GREEN)                                    # using() puts it back
+        self.assertEqual(S.emblem_gif(__import__("adapters.web", fromlist=["make_gif"]).make_gif)[13:16],
+                         bytes([0x00, 0x66, 0x33]))                           # the game server's emblem is green

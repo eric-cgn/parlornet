@@ -9,4 +9,4 @@ The docs site's [Clients page](http://docs.parlornet.org/) lists the frontends g
 - [design.md](design.md) says how a frontend should look and work. It gives the design principles, such as `/` for the command line, the program flow from connecting to signing out, and the names, sentences and keys every frontend shares.
 - [protocols.md](protocols.md) describes the protocols and their server extensions, how to connect and sign in with each, and their history. The web site is under [HTTP and HTML 3.2](protocols.md#web-site), telnet is under [telnet](protocols.md#telnet), and a program of your own speaks the [native protocol](protocols.md#native-protocol).
 - [clients.md](clients.md) says where each program comes from, with its license and the evidence that it meets the site's needs. It also lists the games that no native client reaches yet.
-- The web site's [Games page](http://parlornet.org/games.htm) describes each game and the rules played here.
+- The Games section of the web site's [welcome page](http://parlornet.org/welcome.htm#games) lists each game, and each game's own page has the rules played here.
