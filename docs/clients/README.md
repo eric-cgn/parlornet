@@ -18,7 +18,7 @@ Write plain sentences, as you would explain the program to a friend.
 
 A page has three or four screenshots, or none. Each is a GIF in `static/img/`, named after the client, such as `eclipse-game.gif`. It is under 200 pixels wide and no more than 21 KB, so that pages load quickly on a slow modem. Crop it to the window that matters, or reduce it by a whole number such as a half, and never stretch it. Keep anything personal out of it, such as your own user name or address. Screenshots of a program's own windows are fine to publish.
 
-Telnet programs and web browsers show the same screens, so their pages share a set. Every telnet program's page shows `telnet-title.gif`, `telnet-lobby.gif` and `telnet-backgammon.gif`, and may add one picture of its own that shows something only that program does. The period browsers share the 1997 pages in `web-1997-*.gif`, and the current browsers share ParlorNet Play in `play-*.gif`.
+Telnet programs and web browsers show the same screens, so their pages share a set. Every telnet program's page shows `telnet-title.gif`, `telnet-lobby.gif`, `telnet-backgammon.gif` and `telnet-gridwords.gif`. A page with a picture of its own, one that shows something only that program does, leaves out `telnet-backgammon.gif` to keep to four. The period browsers share the 1997 pages in `web-1997-*.gif`, and the current browsers share ParlorNet Play in `play-*.gif`.
 
 ## Adding a client
 
