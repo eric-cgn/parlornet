@@ -9,17 +9,17 @@
      "sha256": "b448d494471ea92924b9c62d01563d20bbbdca5496df63c5e1f4fc21d3f6d407"},
     {"repo": "eric-cgn/parlornet-eclipse-fix", "tag": "v1.0", "file": "eclipse-68k-fix-readme.txt",
      "sha256": "46ecdcf8e6e5a8ae325c2a3fb57f9b2ebaca70c62712605244aea9eb492a689d"},
-    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.5", "file": "parlornet-rulebooks-installer.hqx",
-     "sha256": "b49f0ab527cf4a919ae1a33b7acfa5944d9fe623e37ea265924c936bf629636f"},
-    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.5", "file": "parlornet-rulebooks-installer.bin",
-     "sha256": "b8807ce9dcef325383f0909791fac1b0a4a67035897cc3b08ff71e621fbca2ba"},
-    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.5", "file": "parlornet-rulebooks-installer.dsk",
-     "sha256": "cbbc6102c2a16b78a6940cad2bf23183c86178f5774d2646af894c72d600807f"},
-    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.5", "file": "parlornet-rulebook-readme.txt",
+    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.6", "file": "parlornet-rulebooks-installer.hqx",
+     "sha256": "aba67c6e214431dad4287b679b97022a1108448b8141dbf54a77ca8d3f78cb72"},
+    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.6", "file": "parlornet-rulebooks-installer.bin",
+     "sha256": "a10737ee335c2bb558d47b46c1190f11a15ff96663017eec5fbfd61f5696db20"},
+    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.6", "file": "parlornet-rulebooks-installer.dsk",
+     "sha256": "7db922e3a3a0a7a111f43cf1a0dbe55d4d8c9df7592b33d84b5681d6d8bfb666"},
+    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.6", "file": "parlornet-rulebook-readme.txt",
      "path": "release/parlornet-rulebook-readme.txt",
-     "sha256": "dae589b84a5423097460c01a05471097f30a5dc60b4715982112a56cb308f12a"},
-    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.5", "file": "gamemaster-rulebooks-readme.txt",
+     "sha256": "d432b9dda67b8e4da5db8f2198f000bc8907790a85e4e3f9f74ae307c316d8dc"},
+    {"repo": "eric-cgn/parlornet-gamemaster", "tag": "v1.6", "file": "gamemaster-rulebooks-readme.txt",
      "path": "release/gamemaster-rulebooks-readme.txt",
-     "sha256": "67d9a2b6fdf537bfcb3b1e8db51cb0a07d987cd456b64c03a2c87cb71e969bfe"}
+     "sha256": "e65041c6d49015640036ba24ab951fbbc44facc5fc52d2460edcfdf20c622ae7"}
   ]
 }
