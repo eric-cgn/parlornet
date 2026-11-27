@@ -1,0 +1,107 @@
+# This file runs a parlor in one container with Docker Compose. deploy/setup.sh installs it in /opt/parlornet,
+# together with a systemd unit that starts it at boot. deploy/README.md describes both.
+#
+# The settings are in a file named .env next to this one. env.example lists each setting with its default.
+# Run docker compose in this directory, for example "docker compose up -d" or "docker compose logs".
+#
+# The container has the same limits that deploy/install.sh gives it. It runs as the image's own user, uid
+# 10042, with every capability dropped, no new privileges and a read-only root file system. It has a Docker
+# network of its own, 172.30.4.0/24. A proxy on the host reaches the container from that network's gateway,
+# 172.30.4.1.
+#
+# The image is a release's image from GitHub's container registry. To run an image you built yourself, run
+# "docker build -t parlornet:local ." in the top directory of the source, and set PARLOR_IMAGE=parlornet:local
+# in .env.
+name: parlornet
+
+services:
+  parlornet:
+    image: ${PARLOR_IMAGE:-ghcr.io/eric-cgn/parlornet:0.3.18}
+    container_name: parlornet
+    restart: unless-stopped
+    user: "10042:10042"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    pids_limit: 64
+    mem_limit: ${PARLOR_MEMORY:-448m}
+    memswap_limit: ${PARLOR_MEMORY_SWAP:-0}
+    networks: [parlor]
+    # The players' ports are on every address of the host, or on PARLOR_PUBLISH_IP when .env sets it. The
+    # host's firewall decides who can reach them. README.md lists them under "Ports".
+    ports:
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6500:6500"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6501:6501"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6502:6502"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6503:6503"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6505:6505"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6507:6507"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6508:6508"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6512:6512"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6514:6514"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6515:6515"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6516:6516"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6517:6517"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6518:6518"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6519:6519"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6520:6520"
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6521:6521"
+      # The Outland Gateway connects to 6506, and the container listens on 4000.
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}6506:4000"
+      # NetLuff always connects to port 1744.
+      - "${PARLOR_PUBLISH_IP:+${PARLOR_PUBLISH_IP}:}1744:6517"
+      # ParlorNet Play is on the host's loopback address, for an HTTPS proxy on the host, unless
+      # PARLOR_PLAY_PUBLISH names another address.
+      - "${PARLOR_PLAY_PUBLISH-127.0.0.1}:6513:6513"
+      # The admin menus are only ever on the host's loopback address.
+      - "127.0.0.1:6510:6510"
+    # Each of these settings reaches the container only when .env sets it.
+    environment:
+      - PARLOR_MOTD_FILE=/app/deploy/motd.txt
+      - PARLOR_NAME
+      - PARLOR_AUTH
+      - PARLOR_SIGNUP
+      - PARLOR_ADAPTERS
+      - PARLOR_WEB_HOSTS
+      - PARLOR_WEB_URL
+      - PARLOR_WEB_PROXIES
+      - PARLOR_PLAY_URL
+      - PARLOR_PLAY_PROXIES
+      - PARLOR_PLAY_PUSH_CONTACT
+      - PARLOR_DIALIN_GATEWAYS
+      - PARLOR_DIALIN_CALL_MINS
+      - PARLOR_DIALIN_USER_MONTH_MINS
+      - PARLOR_DIALIN_POOL_MONTH_MINS
+      - PARLOR_DEFAULT_CALL_MINS
+      - PARLOR_DEFAULT_USER_MONTH_MINS
+      - PARLOR_DEFAULT_POOL_MONTH_MINS
+      - PARLOR_CONTRIBUTE_URL
+      - PARLOR_DOCS_URL
+    # The data directory belongs to uid 10042. The settings file is readable only by that uid, and the site
+    # directory is readable by everyone. All three must exist, and setup.sh makes them.
+    volumes:
+      - type: bind
+        source: ${PARLOR_DATA_DIR:-/srv/parlornet}
+        target: /data
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${PARLOR_SETTINGS_FILE:-/etc/parlornet/settings.conf}
+        target: /run/parlornet/settings.conf
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${PARLOR_SITE_DIR:-/srv/parlornet-site}
+        target: /run/parlornet/site
+        read_only: true
+        bind: {create_host_path: false}
+
+networks:
+  parlor:
+    name: parlor
+    driver_opts:
+      com.docker.network.bridge.name: br-parlor
+    ipam:
+      config:
+        - subnet: 172.30.4.0/24

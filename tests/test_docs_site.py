@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 BUDGETS = {"index.html": 60 * 1024, "browsers.html": 20 * 1024, "telnet.html": 18 * 1024,
            "protocols.html": 22 * 1024, "docs.html": 16 * 1024, "eclipse-68k-fix.html": 11 * 1024,
            "parlornet-rulebook.html": 9 * 1024, "gamemaster-rulebooks.html": 22 * 1024,
-           "running.html": 37 * 1024}
+           "running.html": 43 * 1024}
 CLIENT_BUDGET = 12 * 1024 + 512    # a client's page with its ratings (its screenshots come on top), an old setup address
 GAME_GROWTH = 768                   # more for each game a client plays beyond four: its links and its ratings' lines
 DOC_GROWTH = (1.5, 2048)        # a rendered doc: at most its Markdown times this, plus this

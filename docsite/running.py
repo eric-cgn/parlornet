@@ -1,8 +1,9 @@
 """running.html: running a ParlorNet server of your own, made from the repository's own instructions.
 
 The page joins two files of the source, read as they are, so the docs site and the repository always say the
-same thing: the "Run your own parlor" section of README.md (the quick start, one docker run) and deploy/README.md
-(installing on a Docker host for a server that stays up, ParlorNet Play over HTTPS, administration). Nothing else
+same thing: the "Run your own parlor" section of README.md (the three steps with deploy/setup.sh, and one docker run
+to try it) and deploy/README.md (what setup.sh installs, ParlorNet Play over HTTPS, administration, the install
+scripts). Nothing else
 outside docs/ is read: not the README's other sections, and nothing else in deploy/.
 
 A link in either file to a heading of the other one, or of itself, goes to that heading on this page; any other
@@ -83,12 +84,12 @@ def body(link_fixer):
         html.append(to_html(md, fix, clientpages.figure))
     return (h1(TITLE) +
             p("Anyone can run a ParlorNet server for a club, an event or the open internet. A ParlorNet server is "
-              "called a parlor, and it runs in one Docker container that you build from the source. ParlorNet is "
+              "called a parlor, and it runs in one Docker container. ParlorNet is "
               "free software under the MIT license, and its source is at %s."
               % a(PROJECT_URL, "github.com/eric-cgn/parlornet")) +
-            p("This page has two parts, both taken from the instructions in the source. The first part, %s, starts "
-              "a parlor with one <tt>docker run</tt>. The second part, %s, installs a parlor that stays up. It "
-              "also covers %s and %s."
+            p("This page has two parts, both taken from the instructions in the source. The first part, %s, installs "
+              "a parlor in three steps. The second part, %s, describes what the install script sets up and the "
+              "other ways to install a parlor. It also covers %s and %s."
               % (a("#" + first[README], README_SECTION), a("#" + first[DEPLOY], "Installing on a Docker host"),
                  a("#parlornet-play-over-https", "ParlorNet Play over HTTPS"), a("#administration", "administration"))) +
             "\n".join(html) +
