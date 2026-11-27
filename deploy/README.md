@@ -9,7 +9,7 @@ docker build --platform linux/amd64 -t parlornet:1 .
 sudo PARLOR_NAME=games.example.org PARLOR_AUTH=password PARLOR_SIGNUP=email sh deploy/install.sh parlornet:1
 ```
 
-`install.sh` runs one container named `parlornet`. The container runs as uid 10042 with every capability dropped, no new privileges, a read-only root file system, a 448 MB memory limit and a Docker network of its own. The script publishes the players' ports, which are 6500 to 6508, 6512 and 6514 to 6520, and it publishes 6517 as 1744 as well. It puts the admin menus (6510) and ParlorNet Play (6513) on the host's loopback address only.
+`install.sh` runs one container named `parlornet`. The container runs as uid 10042 with every capability dropped, no new privileges, a read-only root file system, a 448 MB memory limit and a Docker network of its own. The script publishes the players' ports, which are 6500 to 6508, 6512 and 6514 to 6520, and the dial-in gateways' port, 6521. It publishes 6517 as 1744 as well. It puts the admin menus (6510) and ParlorNet Play (6513) on the host's loopback address only.
 
 Players, tables and settings live in `/srv/parlornet` on the host, so a restart or an upgrade keeps them. If you run the script again with a newer image, it replaces the container and keeps the data.
 
@@ -93,13 +93,13 @@ Do not add `Strict-Transport-Security` on this name. Browsers would apply it to 
 
 ## Dial-in gateways and their time limits
 
-A dial-in gateway answers modem calls and carries each one to the native port, 6501. It may start the connection with a PROXY protocol header that says the connection is a call. The parlor believes that header only from the addresses you list, as the container sees them. A gateway on the host itself comes from 172.30.4.1:
+A dial-in gateway answers modem calls and carries each one to the dial-in extension on port 6521, so point the gateway at that port. A ParlorNet client sends `PARLORNET/1` within 5 seconds of the modems connecting and gets the native protocol. A terminal program gets the telnet service in plain text. The extension is called `dialin`. If you saved a list in the admin menus' Adapters screen, turn it on there. The gateway may start each connection with a PROXY protocol header that says the connection is a call. The parlor believes that header only from the addresses you list, as the container sees them. A gateway on the host itself comes from 172.30.4.1:
 
 ```sh
 sudo PARLOR_DIALIN_GATEWAYS=172.30.4.1 sh deploy/install.sh parlornet:1
 ```
 
-Without `PARLOR_DIALIN_GATEWAYS` (`dialin.gateways` in the settings file), the parlor trusts no gateway, and a PROXY header from anywhere is refused. Calls have three limits in minutes. `PARLOR_DIALIN_CALL_MINS` limits one call (75 by default), `PARLOR_DIALIN_USER_MONTH_MINS` one player's calls in a calendar month (60), and `PARLOR_DIALIN_POOL_MONTH_MINS` all calls together in a month (150). 0 means no limit. docs/accounts.md lists these settings with the same limits for other connections, and docs/protocol.md describes the header and what callers are told.
+Without `PARLOR_DIALIN_GATEWAYS` (`dialin.gateways` in the settings file), the parlor trusts no gateway, and a PROXY header from anywhere is refused. Calls have three limits in minutes, whether they go to the native protocol or to telnet. `PARLOR_DIALIN_CALL_MINS` limits one call (75 by default), `PARLOR_DIALIN_USER_MONTH_MINS` one player's calls in a calendar month (60), and `PARLOR_DIALIN_POOL_MONTH_MINS` all calls together in a month (150). 0 means no limit. docs/accounts.md lists these settings with the same limits for other connections, and docs/protocol.md describes the header and what callers are told.
 
 ## Administration
 

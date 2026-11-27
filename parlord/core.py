@@ -26,7 +26,11 @@ PREF_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\Z")   # and at most Limits.pref_key_l
 NATIVE_NS = ":native"     # the public port's namespace for PRF: never an extension's key name (no colon there)
 PREF_SHARED = {"play": "web"}  # extensions whose PRF data is kept under another's name (pref_ns)
 SIGNIN_VERBS = ("HELO", "USER", "REG", "AUT", "SES", "CAN", "SRC", "BYE", "MOTD", "GAM",  # before signing in
-                "PRO", "PRD", "PRL", "NFY", "CLI", "TOP", "TIM", "PAG", "CNT")
+                "PRO", "PRD", "PRL", "NFY", "CLI", "TOP", "TIM", "PAG", "CNT", "DIA")
+# The dial-in extension (adapters/dialin.py): the key name of the one server extension that may say what a call
+# is with DIA (docs/protocol.md, Dial-in gateways), and the call's text fields that DIA takes from it.
+DIALIN_EXTENSION = "dialin"
+DIAL_TEXT = ("caller", "dialed", "modulation", "rate")
 # What a client says it is (CLI; docs/protocol.md, Clients and machines): the program and the machine. The
 # words of CLI and of the TRX lines of a turn (TRN, FEED), and the words of the profile (PFL).
 CLAIM_FIELDS = ("PROG", "MACH")
@@ -465,6 +469,9 @@ class Session:
         self.told = set()
         self.grace = None
         self.notes = []
+        # The dial-in extension's DIA NATIVE: the gateway's address, and the connection is the public port's
+        # from here on (Server.serve_public).
+        self.handoff = None
 
     def allow(self):
         now = time.time()
@@ -1088,6 +1095,8 @@ class Server:
         self.frontend_count[name] = self.frontend_count.get(name, 0) + 1
         try:
             await self.serve_conn(reader, writer, sess)
+            if sess.handoff is not None:        # a call the dial-in extension hands over (DIA NATIVE)
+                await self.serve_public(reader, writer, sess.handoff)
         finally:
             self.frontend_conns.discard(sess)
             self.frontend_count[name] -= 1
@@ -1097,21 +1106,27 @@ class Server:
     async def handle(self, reader, writer):
         """The public port: plain text for 8-bit clients. The client sends PARLORNET/1 first, whose line
         ending sets the connection's (parlord/native.py); then the greeting."""
+        peer = writer.get_extra_info("peername")
+        await self.serve_public(reader, writer, peer[0] if peer else None)
+
+    async def serve_public(self, reader, writer, addr):
+        """A connection of the public port from addr: one to 6501 itself, or a call the dial-in extension
+        hands over with DIA NATIVE, from the gateway at addr. Both are read the same way, the PROXY header
+        that a listed gateway may send first, then the opening."""
         if self.conns >= Limits.max_conns:
             writer.write(b"ERR BUSY server is full\r\n")
             writer.close()
             return
         self.conns += 1
         try:
-            peer = writer.get_extra_info("peername")
             lines = native.Lines(reader, MAXLINE)
             loop = asyncio.get_running_loop()
             until = loop.time() + Limits.first_line_secs
             head = None
             try:
                 # a dial-in gateway's PROXY header first, then the opening, in the same 20 seconds
-                head = await lines.proxy(Limits.first_line_secs,
-                                         self.allowance.trusted(as_ip(peer[0]) if peer else None))
+                gateway = self.allowance.trusted(as_ip(addr) if addr else None)
+                head = await lines.proxy(Limits.first_line_secs, gateway)
                 eol = await lines.start(until - loop.time(), Limits.ending_secs)
             except asyncio.TimeoutError:
                 eol = None
@@ -1123,7 +1138,7 @@ class Server:
                 writer.close()
                 return
             call = head if head is not None and not head.local else None      # a call the gateway carries
-            source = call.src if call and call.src else peer[0] if peer else None
+            source = call.src if call and call.src else addr
             sess = Session(writer, source=source_key(source), eol=eol)
             if call:
                 sess.cls, sess.call = allowance.DIALIN, call.call
@@ -1148,17 +1163,17 @@ class Server:
                 good = True
                 timed = None            # the time allowance's next check, when it comes before the idle limits
                 try:
+                    wait = Limits.idle_secs
+                    if lines is not None and not sess.player:     # nobody sits at the sign-in for long
+                        wait = min(wait, max(0.0, sess.signed_out + Limits.signin_secs - time.monotonic()))
+                    due = self.time_due(sess) if sess.meter is not None else None
+                    if due is not None and due < wait:
+                        wait = timed = due
                     if lines is not None:
-                        wait = Limits.idle_secs
-                        if not sess.player:     # nobody sits at the sign-in for long
-                            wait = min(wait, max(0.0, sess.signed_out + Limits.signin_secs - time.monotonic()))
-                        due = self.time_due(sess) if sess.meter is not None else None
-                        if due is not None and due < wait:
-                            wait = timed = due
                         got = await lines.line(wait)
                         raw, good = got if got is not None else (b"", True)     # b"": the end of input
                     else:
-                        raw = await asyncio.wait_for(reader.readline(), Limits.idle_secs)
+                        raw = await asyncio.wait_for(reader.readline(), wait)
                 except asyncio.TimeoutError:
                     if timed is not None:
                         continue
@@ -1202,8 +1217,14 @@ class Server:
                     out = [err("INTERNAL", "")]
                 if sess.meter is not None:
                     self.time_signed(sess)
-                await self.reply(sess, ["INF " + n for n in sess.notes] + out)
-                sess.notes = []
+                # The time allowance's notices go in front of the next reply. On the extension channel they wait
+                # for the next TIM, so that a server extension knows them from the lines of other replies.
+                notes = sess.notes if lines is not None or line.split()[0].upper() == "TIM" else []
+                await self.reply(sess, ["INF " + n for n in notes] + out)
+                if notes:
+                    sess.notes = []
+                if sess.handoff is not None:
+                    break
         except (ConnectionError, OSError):
             pass
         finally:
@@ -1217,7 +1238,8 @@ class Server:
                 self.save_player(sess.player)
             self.accounts.connection_closed(sess)
             try:
-                writer.close()
+                if sess.handoff is None:        # a handed-over call goes on as the public port's
+                    writer.close()
             except Exception:
                 pass
 
@@ -1371,6 +1393,53 @@ class Server:
         if len(args) != 1 or not SRC_RE.match(args[0]) or source_key(args[0]) is None:
             return [err("SYNTAX", "SRC address")]
         sess.source = source_key(args[0])
+        return [ok()]
+
+    async def cmd_dia(self, sess, args, line):
+        """DIA (the dial-in extension only, before signing in; docs/protocol.md, Dial-in gateways): what a call
+        that a dial-in gateway carries to the extension is. The gateway's address is the one the extension's
+        connection came from, and the core believes it only when it is in dialin.gateways.
+            DIA addr              OK when addr is a listed gateway, else ERR GATEWAY
+            DIA addr prior        this connection carries a call from the gateway at addr, up for prior
+                                  seconds: the dial-in class, metered. The per-address limits count addr,
+                                  or the source the header named, which SRC gives after it
+            DIA field text        the call's caller, dialed, modulation or rate, after the call
+            DIA NATIVE addr       after the OK, the connection is the public port's, from the gateway at
+                                  addr: the extension passes on the caller's bytes, the PROXY header first"""
+        if sess.frontend != DIALIN_EXTENSION:
+            return [err("NOTFRONTEND", "DIA is only for the dial-in extension")]
+        if sess.player or sess.pending:
+            return [err("STATE", "DIA comes before HELO")]
+        word = args[0].lower() if args else ""
+        if word in DIAL_TEXT:
+            if sess.cls != allowance.DIALIN:
+                return [err("STATE", "DIA addr prior comes first")]
+            parts = line.strip().split(None, 2)
+            text = parts[2] if len(parts) > 2 else ""
+            sess.call[word] = "".join(c for c in text if " " <= c <= "~")[:native.TLV_TEXT]
+            return [ok()]
+        if word == "native":
+            if len(args) != 2 or as_ip(args[1]) is None:
+                return [err("SYNTAX", "DIA NATIVE addr")]
+            if sess.cls != allowance.DEFAULT or sess.meter is not None:
+                return [err("STATE", "this connection carries a call already")]
+            sess.handoff = args[1]
+            return [ok()]
+        ip = as_ip(args[0]) if args else None
+        if ip is None or len(args) not in (1, 2):
+            return [err("SYNTAX", "DIA addr [prior], DIA field text or DIA NATIVE addr")]
+        if not self.allowance.trusted(ip):
+            return [err("GATEWAY", "not a dial-in gateway")]
+        if len(args) == 1:
+            return [ok()]
+        prior = args[1]
+        if not prior.isdigit():
+            return [err("SYNTAX", "DIA addr prior")]
+        if sess.cls != allowance.DEFAULT or sess.meter is not None:
+            return [err("STATE", "this connection carries a call already")]
+        sess.cls, sess.call = allowance.DIALIN, {}
+        sess.source = source_key(args[0])
+        sess.meter = self.allowance.open(allowance.DIALIN, int(prior[:9]))
         return [ok()]
 
     async def cmd_ses(self, sess, args, line):

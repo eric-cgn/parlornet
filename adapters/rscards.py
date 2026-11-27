@@ -659,7 +659,7 @@ class Session:
         log(self.sid, "to the text games (%s)" % ("telnet" if self.link.telnet else "plain"))
         self.link.stop()
         await asyncio.gather(*self.link.tasks, return_exceptions=True)     # the line's reader lets go first
-        io = T.TelnetIO(self.link.r, self.w if self.link.telnet else PlainWriter(self.w))
+        io = T.TelnetIO(self.link.r, self.w if self.link.telnet else T.PlainWriter(self.w))
         io.write("\nParlorNet's text games.\n")
         try:
             await T.main_session(io, self.svc.args, self.ticket, title_first=False)   # a 40-column line: no title
@@ -823,40 +823,6 @@ class Session:
             return False
         except EOFError:
             return False
-
-
-class PlainWriter:
-    """A writer for a line that does not speak telnet (a serial terminal behind a modem): the telnet commands the
-    text games send are left out (IAC IAC, a data byte 255, goes through as one byte)."""
-
-    def __init__(self, w):
-        self.w, self.state = w, 0
-
-    def write(self, data):
-        out = bytearray()
-        for x in data:
-            if self.state == 0:
-                if x == IAC:
-                    self.state = 1
-                else:
-                    out.append(x)
-            elif self.state == 1:
-                if x == IAC:
-                    out.append(x)
-                    self.state = 0
-                else:
-                    self.state = {WILL: 2, WONT: 2, DO: 2, DONT: 2, SB: 3}.get(x, 0)
-            elif self.state == 2:
-                self.state = 0
-            elif self.state == 3:
-                if x == IAC:
-                    self.state = 4
-            else:
-                self.state = 0 if x == SE else 3
-        self.w.write(bytes(out))
-
-    def __getattr__(self, name):
-        return getattr(self.w, name)
 
 
 class Service:

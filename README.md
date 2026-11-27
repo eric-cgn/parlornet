@@ -71,6 +71,8 @@ Players connect to these ports:
 
 NetLuff always connects to port 1744, so publish 6517 as 1744 too, as the command above does.
 
+Dial-in gateways, which answer calls from modems, connect to 6521 ([deploy/README.md](deploy/README.md#dial-in-gateways-and-their-time-limits)).
+
 ParlorNet Play, the client for current browsers and phones, is not in the command above. To try it, add `-p 6513:6513` and open `http://` your host `:6513/play/`. For a server that stays up, put it behind an HTTPS proxy as [deploy/README.md](deploy/README.md#parlornet-play-over-https) shows.
 
 ### Data and containment

@@ -35,11 +35,11 @@ On the public port (6501) the client speaks first. Its first line is the protoco
 - No other bytes are treated specially: telnet negotiation (IAC) is not understood on this port (the telnet extension has its own, 6502).
 - A server that is full sends `ERR BUSY server is full` (ending CR LF) at once on connecting and closes the connection.
 - The extension channel does not use these rules: there the server sends the greeting as soon as the TLS handshake is done, and lines end with CR LF.
-- A dial-in gateway may put a PROXY header before the opening (Dial-in gateways, below).
+- A dial-in gateway may put a PROXY header before the opening (Dial-in gateways, below). A call that comes through the dial-in extension on 6521 starts the same way, within that extension's window of 5 seconds.
 
 ## Dial-in gateways (PROXY)
 
-A dial-in gateway answers calls from modems and carries each call to the public port as a TCP connection. The operator lists the gateways' addresses or networks in the setting `dialin.gateways` (`PARLOR_DIALIN_GATEWAYS`), separated by commas, the same way the web's proxies are listed in `web.proxies`. Without the setting, no connection comes from a gateway.
+A dial-in gateway answers calls from modems and carries each call as a TCP connection to the dial-in extension, on port 6521 (adapters.md, Dial-in extension). Dial-in access supports both telnet and the machine-specific ParlorNet clients, such as the Commodore 64 and the Apple IIe. The operator lists the gateways' addresses or networks in the setting `dialin.gateways` (`PARLOR_DIALIN_GATEWAYS`), separated by commas, the same way the web's proxies are listed in `web.proxies`. Without the setting, no connection comes from a gateway.
 
 A gateway may send a header of the PROXY protocol, version 2, before anything else on the connection. This is the binary header that the HAProxy project describes in its `proxy-protocol.txt`. It has a 12-byte signature, a byte with the version and the command, a byte with the address family, a 16-bit length, the addresses and then TLVs. The server reads these TLVs and passes over any others:
 
@@ -51,9 +51,34 @@ A gateway may send a header of the PROXY protocol, version 2, before anything el
 | `0xE3` | the rate |
 | `0xE4` | the seconds the call had already been up when the gateway connected, as a 32-bit big-endian number |
 
-The header counts toward the 20 seconds the client has for its opening, and the client's opening comes after it as usual. With the PROXY command, the connection carries a call and is in the dial-in class (Time allowance, below). When the header names a source address, the per-address limits count that address. Otherwise they count the gateway's. With the LOCAL command the connection is the gateway's own, a health check for example, and it is in the default class. The server keeps the text TLVs with the connection in memory only. It never stores or logs them.
+The client's opening comes after the header as usual. With the PROXY command, the connection carries a call and is in the dial-in class (Time allowance, below). When the header names a source address, the per-address limits count that address. Otherwise they count the gateway's. With the LOCAL command the connection is the gateway's own, a health check for example, and it is in the default class. The server keeps the text TLVs with the connection in memory only. It never stores or logs them.
 
 A PROXY header from an address that is not listed is a protocol error. So is a header from a listed gateway that is cut short, has more than 512 bytes after its first 16, or is not well formed. Either way the server sends `ERR PROTOCOL wrong protocol`, as for any other bad opening, and closes the connection. A listed gateway may also connect without a header, and then the connection is in the default class.
+
+A gateway may also connect to the public port, 6501, and send the header there. Then the header counts toward the 20 seconds the client has for its opening, and only ParlorNet clients work.
+
+### The window on the dial-in port
+
+On the dial-in port the program that called decides where the call goes, since the gateway knows nothing of ParlorNet:
+
+- The window is 5 seconds, counted from when the gateway connects. During it the server sends nothing and echoes nothing.
+- The PROXY header comes first, at once. A header from an address that is not listed, or one that is not well formed, is refused as soon as it has come, with the line above.
+- When the bytes after the header are `PARLORNET/1` and a CR or LF within the window, with at most 10 bytes of anything before them, the call goes to the native protocol at once. From then on it follows the rules of Connecting, above, and nothing the client sent is lost.
+- Anything else, including silence, goes to telnet when the window ends, and the call never switches back. Bytes that cannot start the opening do not end the window early, since the modems may still be settling. When the call goes to telnet, the bytes of the window are dropped, and every byte after it reaches telnet.
+- Telnet on the dial-in port sends plain text at 80 columns and no telnet commands, and it echoes what the caller types. It opens with the title page, then the message of the day and the login. It has the dial-in class's limits, and it shows the notices and the reason for `ERR LIMIT` on the screen before it hangs up.
+
+A ParlorNet client should send its opening the moment the modems connect. A client that waits for something from the server first will not get it, and the call goes to telnet.
+
+### `DIA`: the dial-in extension and the core
+
+The dial-in extension tells the core what each call is with `DIA` on the extension channel. The core takes `DIA` from the extension whose key is named `dialin` and from no other, before `HELO`. Any other connection gets `ERR NOTFRONTEND`. The address in each form is the gateway's, the address that the call's connection to the extension came from. The core checks it against `dialin.gateways` itself:
+
+- `DIA addr` answers `OK` when addr is a listed gateway, else `ERR GATEWAY not a dial-in gateway`. The extension asks it as soon as a header has come.
+- `DIA addr prior` says that this connection of the extension channel carries a call from the gateway at addr, and that the call has been up for prior seconds. The connection is then in the dial-in class with its limits. The per-address limits count addr, or the source address the header named when the extension sends it with `SRC` after this. A telnet call uses this.
+- `DIA caller text`, `DIA dialed text`, `DIA modulation text` and `DIA rate text` give the call's text after that. The core keeps them as it keeps the header's.
+- `DIA NATIVE addr` answers `OK`, and from then on the connection is a public-port connection from addr. The extension passes on every byte the caller sent, the PROXY header first, and the core reads them as it reads a connection to 6501 from that address.
+
+On the extension channel the time allowance's notices come in front of the reply to the next `TIM`, not in front of any reply, so that a server extension can tell them from the lines of other replies. The dial-in extension asks `TIM` every 2 seconds. `ERR LIMIT` comes as on the public port, by itself, and the connection closes.
 
 ## Greeting
 
@@ -101,6 +126,7 @@ A reply is any number of data lines (`GAM`, `TAB`, `V`, `EVT` ...) ending with e
 | `AUT field value` | The answer to an `ASK` during sign-in, sign-up, recovery or a password change (docs/accounts.md). At the password question of a sign-in, `AUT key key` answers with a sign-in key instead of the password (Staying signed in, below): `OK` as for the password, or `ERR NOKEY` when the key is refused. Before an `ASK` the reply may carry `INF text` lines to show the player (info). `ASK field label [secret] [yn] [cred] [new]`: `secret` means do not echo; `yn` means a yes/no question, answered `y` or `n`; `cred` means it asks for the account's credential (or a password being chosen at sign-up), the only question a password the client already supplied may answer; `new` means a new password is being chosen. After a right temporary password the server asks for a new password (`new`, not `cred`) before signing in; a client that declared with `CAN` that it cannot show that step gets `ERR NEWPASS Sign in on the web or by telnet first to choose your password.` |
 | `CAN kind[,kind...]` | Before `HELO`: the sign-in step kinds this client can show, of `text`, `secret`, `yn`, `info` (all four if never sent). A step needing another kind is refused with `ERR CANNOT`. `OK kinds`. |
 | `OK` after sign-in | Public port: `OK -`. Extension channel: `OK sid`, the session id: a handle for the server extension, never a credential, never shown to the player. |
+| `DIA ...` | The dial-in extension only, before `HELO`: what a call from a dial-in gateway is, or a call handed over to the native protocol (Dial-in gateways, `DIA`, above). `OK`, `ERR GATEWAY`, `ERR NOTFRONTEND` (the public port and every other server extension), `ERR STATE`, `ERR SYNTAX`. |
 | `SRC address` | Extension channel only, before `HELO`: the IPv4 or IPv6 address of the client this connection serves, for the per-address limits on sign-up and mail (docs/accounts.md). `OK`, `ERR NOTFRONTEND` (public port, where the connection's own address is used), `ERR SYNTAX`. |
 | `SES sid` | Extension channel only: resume a session this server extension was issued. `OK name`, or `ERR NOSESSION` (unknown, expired, ended, another server extension's, or issued under a key the server extension no longer holds), `ERR NOTFRONTEND` (public port), `ERR RATE` (three failures on this connection). |
 | `OUT [all]` | End this session (the connection is signed out and may sign in again), or with `all` every session of the player, live connections included. `OK n`, the number ended. A connection whose session was ended elsewhere gets `ERR SIGNEDOUT` once. |
@@ -545,13 +571,13 @@ Every type/ver has a spec (docs/types/) that defines: its view lines, event kind
 
 ## Time allowance (`TIM`, `ERR LIMIT`)
 
-Every connection on the public port is in a class. A connection that a dial-in gateway carries for a call is in the dial-in class, `dialin` (Dial-in gateways, above). Every other connection is in the default class, `default`. Each class can have three limits, and each limit is a setting in whole minutes (accounts.md, Admin panel), where 0 means no limit:
+Every connection on the public port is in a class. A connection that a dial-in gateway carries for a call is in the dial-in class, `dialin` (Dial-in gateways, above). So is the connection of the extension channel that serves a call the dial-in extension takes to telnet. Every other connection is in the default class, `default`. Each class can have three limits, and each limit is a setting in whole minutes (accounts.md, Admin panel), where 0 means no limit:
 
 - `CLASS.call_mins` limits one connection. For a call it counts from when the call came up, so the seconds the gateway gave in `0xE4` count too.
 - `CLASS.user_month_mins` limits one player in a calendar month, in UTC. It counts only the time the player is signed in on connections of the class.
 - `CLASS.pool_month_mins` limits the whole parlor in a calendar month. It counts every connection of the class from when it connects, signed in or not.
 
-The dial-in class has 75, 60 and 150 minutes by default. The default class has no limits unless the operator sets some. Connections of server extensions on the extension channel have no time allowance.
+The dial-in class has 75, 60 and 150 minutes by default. The default class has no limits unless the operator sets some. Connections of server extensions on the extension channel have no time allowance, except one that carries a call (`DIA`, above).
 
 A connection's time allowance is the smallest of the time its call has left, the time its player has left this month and the time the pool has left. `TIM` gives it as `left=` and the seconds, or as `left=unl` when none of the limits applies. It also gives the call's time left as `call=` and the player's month as `month=`, so a client can say each limit on its own. The pool has no field of its own. When the pool is the shortest, `left` is below both. Before signing in, only the call and the pool apply, and `month` is `unl`. Signing out ends the charge to the player, and the call goes on.
 

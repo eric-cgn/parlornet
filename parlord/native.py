@@ -25,7 +25,9 @@ tunnel (adapters/gamemaster.py) starts the same way.
 A dial-in gateway listed in the setting dialin.gateways may put a PROXY protocol version 2 header before the
 opening (docs/protocol.md, Dial-in gateways). Lines.proxy() reads it when the first bytes are its signature
 and returns it as a Proxy. From any other address, and when it is not well formed, it is BadOpening(*WRONG).
-It comes within the same 20 seconds as the opening.
+It comes within the same 20 seconds as the opening. The dial-in extension (adapters/dialin.py) reads a
+gateway's calls with the same Lines: proxy() for the header, then opening_within() for its window of 5
+seconds, which looks for the opening by the rules start() uses.
 
 A client may ask for paged replies with PAG bytes (docs/protocol.md, Paged replies). page() splits a reply's
 lines into the page sent now and the rest, which waits for the client's CNT. Only the public port pages. The
@@ -109,10 +111,12 @@ TLV_TEXT = 64               # the most of a call's text TLV that is kept
 class Proxy:
     """A PROXY v2 header: local (the gateway's own connection, a health check say, rather than a call it
     carries), src (the source address it names, or None for an unspecified or Unix one), call ({name: text}
-    from TLV_CALL, printable ASCII) and prior (TLV_PRIOR's seconds, 0 when it is not there)."""
+    from TLV_CALL, printable ASCII) and prior (TLV_PRIOR's seconds, 0 when it is not there). raw is the whole
+    header as it came, which Lines.proxy() sets. The dial-in extension passes it on to the core."""
 
     def __init__(self, local, src, call, prior):
         self.local, self.src, self.call, self.prior = local, src, call, prior
+        self.raw = b""
 
 
 def parse_proxy(data):
@@ -211,9 +215,35 @@ class Lines:
                     raise BadOpening(*WRONG)
                 return None
         size = 16 + int.from_bytes(self.buf[14:16], "big")
-        head = bytes(self.buf[12:size])
+        raw = bytes(self.buf[:size])
         del self.buf[:size]
-        return parse_proxy(head)
+        p = parse_proxy(raw[12:])
+        p.raw = raw
+        return p
+
+    async def opening_within(self, secs):
+        """The dial-in extension's window: wait up to secs for the opening, PARLORNET/1 and the first byte of its
+        line ending, by the rules start() uses, with at most JUNK bytes of anything before it. Bytes that cannot
+        become the opening do not end the wait. Once the bytes so far can never become it, what comes after
+        them is read and dropped until the time is up. -> True as soon as the opening has come (the bytes stay
+        in buf for start()), False when secs ran out first, None when the client closed first."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + secs
+        hopeless = False
+        while True:
+            if not hopeless:
+                try:
+                    if self._opening() is not None:
+                        return True
+                except BadOpening:
+                    hopeless = True
+            if hopeless:
+                self.buf.clear()
+            try:
+                if not await self._more(deadline - loop.time()):
+                    return None
+            except asyncio.TimeoutError:
+                return False
 
     async def start(self, secs, pair_secs):
         """Wait up to secs for the client's opening (PARLORNET/1 and the first byte of its ending) and

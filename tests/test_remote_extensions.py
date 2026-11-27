@@ -106,7 +106,7 @@ class Scripts(unittest.TestCase):
         args, _ = self.core(PARLOR_PUBLISH_IP="192.0.2.10")
         pub = self.published(args)
         players = [p for p in pub if not p.startswith("127.0.0.1:")]
-        self.assertEqual(len(players), 17)
+        self.assertEqual(len(players), 18)
         self.assertTrue(all(p.startswith("192.0.2.10:") for p in players), players)
         self.assertIn("192.0.2.10:6506:4000", pub)
         self.assertIn("127.0.0.1:6513:6513", pub)          # Play and the admin menus stay on loopback

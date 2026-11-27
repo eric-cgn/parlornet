@@ -6,8 +6,9 @@
 # 6506 (Outland, the container's port 4000), 6507 (DOoM), 6508 (GameMaster, through the ParlorNet
 # rulebook), 6512 (NetBoxes), 6514 (batnav), 6515 (Awale), 6516 (Networdz),
 # 6517 (NetLuff), which it also publishes as 1744, the port NetLuff always connects to, 6518 (ICDS,
-# for xcheckers), 6519 (Worthy Opponent, dialed by modem) and 6520 (GEnie's RSCARDS front ends, by
-# WiFi modem or serial bridge). The host's own firewall decides who can reach them.
+# for xcheckers), 6519 (Worthy Opponent, dialed by modem), 6520 (GEnie's RSCARDS front ends, by
+# WiFi modem or serial bridge) and 6521 (calls from dial-in gateways). The host's own firewall decides who
+# can reach them.
 # ParlorNet Play (6513, plain HTTP) is published on the host's loopback only, for a reverse proxy on the host
 # that terminates TLS (deploy/README.md); PARLOR_PLAY_OPEN=1 publishes it like the players' ports instead, for
 # a parlor without a proxy.
@@ -31,7 +32,7 @@
 #   PARLOR_PLAY_PUSH_CONTACT  your mailto: or https: address, which ParlorNet Play gives the browsers' push
 #                     services; Play's push notifications are off without it (and without PARLOR_PLAY_URL)
 #   PARLOR_DIALIN_GATEWAYS  the dial-in gateways' addresses as the container sees them, comma-separated; a
-#                     call they carry to 6501 has the dial-in time limits (deploy/README.md)
+#                     call they carry to 6521 has the dial-in time limits (deploy/README.md)
 #   PARLOR_DIALIN_CALL_MINS, PARLOR_DIALIN_USER_MONTH_MINS, PARLOR_DIALIN_POOL_MONTH_MINS  those limits in
 #                     minutes: one call, one player in a month, the whole parlor in a month (75, 60, 150)
 #   PARLOR_DEFAULT_CALL_MINS, PARLOR_DEFAULT_USER_MONTH_MINS, PARLOR_DEFAULT_POOL_MONTH_MINS  the same for
@@ -89,7 +90,7 @@ fi
 docker rm -f parlornet >/dev/null 2>&1 || true
 # shellcheck disable=SC2046
 docker run -d --name parlornet --restart unless-stopped --network parlor \
-	$(for p in 6500 6501 6502 6503 6505 6507 6508 6512 6514 6515 6516 6517 6518 6519 6520; do
+	$(for p in 6500 6501 6502 6503 6505 6507 6508 6512 6514 6515 6516 6517 6518 6519 6520 6521; do
 		echo "-p $IP$p:$p"; done) \
 	-p "${IP}6506:4000" -p "${IP}1744:6517" -p "${PLAY_IP}6513:6513" -p 127.0.0.1:6510:6510 \
 	$([ -n "${PARLOR_FRONTEND_PUBLISH:-}" ] && echo "-p $PARLOR_FRONTEND_PUBLISH:6590:6590 -e PARLOR_FRONTEND_HOST=0.0.0.0") \
