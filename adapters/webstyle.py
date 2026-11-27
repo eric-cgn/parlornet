@@ -252,12 +252,21 @@ def footer(html=None):
             % (c.edge, EMBLEM_SIZE, c.bar, font(html, 2)))
 
 
+def crumbs_html(steps):
+    """The breadcrumb line under the navigation bar, for finding the way back up: steps are (href, label), the
+    pages above this one and then this one, whose href is None. The labels are plain text."""
+    def label(text):
+        return "".join(c if ord(c) < 128 else "&#%d;" % ord(c) for c in esc(text))
+    return "<p>%s</p>\n" % font(" &gt; ".join(a(h, label(t)) if h else label(t) for h, t in steps), 2)
+
+
 def frame(title, body, current=None, nav=None, compact=False, refresh=None, foot=None, head_extra="",
-          name="ParlorNet"):
+          name="ParlorNet", crumbs=None):
     """A whole page: title, then the masthead, body and footer. current: the nav entry being shown;
     nav: the navigation bar's HTML (default: the public bar); refresh: (seconds, url) for a meta refresh;
     foot: the footer's own HTML (the docs site's); head_extra: more of the head (a script); name: the site's
-    name in the masthead (the docs site's is ParlorNet Docs)."""
+    name in the masthead (the docs site's is ParlorNet Docs); crumbs: the steps of the breadcrumb line under
+    the masthead (crumbs_html), None for none."""
     head = "<title>%s</title>%s" % (esc(title), head_extra)
     if refresh:
         head += '\n<meta http-equiv="refresh" content="%d;URL=%s">' % (refresh[0], esc(refresh[1]))
@@ -266,7 +275,8 @@ def frame(title, body, current=None, nav=None, compact=False, refresh=None, foot
     c = colors()
     return ('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">\n<html>\n<head>\n%s\n</head>\n'
             '<body bgcolor="%s" text="%s" link="%s" vlink="%s" alink="%s">\n%s%s%s</body>\n</html>\n'
-            % (head, c.paper, c.ink, c.link, c.vlink, c.alink, masthead(nav, compact, name), body, footer(foot)))
+            % (head, c.paper, c.ink, c.link, c.vlink, c.alink,
+               masthead(nav, compact, name) + (crumbs_html(crumbs) if crumbs else ""), body, footer(foot)))
 
 
 def emblem_gif(make_gif, palette=GREEN):

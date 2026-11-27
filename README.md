@@ -133,6 +133,8 @@ These environment variables give a parlor its first settings. Once the admin men
 
 `PARLOR_ADMIN=1` starts the admin menus even if they were turned off.
 
+A directory mounted read-only at `/run/parlornet/site` holds the site's own files: its message of the day, words for the welcome page and pages of its own. [A site of your own](deploy/README.md#a-site-of-your-own) in deploy/README.md describes them.
+
 If you forget the admin password, clear it with this command and restart the container. The log then shows a new setup password.
 
 ```sh

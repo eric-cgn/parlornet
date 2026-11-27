@@ -17,10 +17,10 @@ import re
 import socket
 import time
 import unittest
-from urllib.parse import parse_qs, urlsplit
 
 import procs
 from test_adapters import WebPlayers, spawn
+from test_adapters import query_of  # noqa: E402
 from test_backgammon import bg
 from test_core import adapter_args, free_port, make_keys, stack_args
 from speed import slow  # noqa: E402
@@ -512,7 +512,7 @@ class Stack(WebPlayers, unittest.TestCase):
             if links:
                 st = self.web_get(links[0])[0]
                 self.assertEqual(st, 302)
-                done.append(parse_qs(urlsplit(links[0]).query)["mv"][0])
+                done.append(query_of(links[0])["mv"][0])
                 continue
             e = re.search(r'href="(/end\.htm\?[^"]+)"', body)
             if e:
@@ -954,7 +954,7 @@ class FibsNoAuth(Stack):
         # a web player waits at a public table; the xfibs user joins it by name (seat 1: X)
         self.web_login("wren")
         _, loc, _ = self.web_get("/new.htm?g=backgammon%2F1&n=wren")
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         x.send("join wren")
         x.wait(lambda l: l.startswith("** You are now playing an unlimited match with wren"))
         x.wait(lambda l: l.startswith("board:"))

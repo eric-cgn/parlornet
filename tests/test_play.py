@@ -882,7 +882,7 @@ class Start(unittest.TestCase):
         self.assertNotIn("--push-contact", got["play"])
         alone = self.started({"PARLOR_ADAPTERS": "play"}, "play.push_contact=mailto:ops@example.org\n")["play"]
         self.assertEqual(alone[alone.index("--push-contact") + 1], "mailto:ops@example.org")
-        self.assertEqual(got["web"][-2:], ["--play-url", "https://games.example.org/play/"])
+        self.assertEqual(got["web"][got["web"].index("--play-url") + 1], "https://games.example.org/play/")
 
     def test_environment_and_each_alone(self):
         got = self.started({"PARLOR_ADAPTERS": "play", "PARLOR_PLAY_URL": "https://env.example/play/",

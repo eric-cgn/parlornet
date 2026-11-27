@@ -30,6 +30,10 @@
 #                     also takes PARLOR_PLAY_URL, for its links to Play.
 #   PARLOR_PLAY_OPEN=1  publish 6513 like the players' ports. Without it, Play is on the host's loopback
 #                     only, for a TLS proxy on this host.
+#   PARLOR_SITE_DIR   a directory on this host with the site's own files, mounted read-only into the web
+#                     extension's container: welcome.htm and pages/NAME.htm (deploy/README.md, "A site of your
+#                     own"). The message of the day, motd.txt, belongs on the core's host.
+#   PARLOR_CONTRIBUTE_URL  the address {contribute} stands for in those files (default: the project's home)
 #   PARLOR_MEMORY     each container's memory limit, Docker's --memory (default 96m)
 #   PARLOR_MEMORY_SWAP  each container's limit on memory and swap together, Docker's --memory-swap
 #                     (default: Docker's own)
@@ -46,6 +50,16 @@ IP=${PARLOR_PUBLISH_IP:+$PARLOR_PUBLISH_IP:}
 PLAY_IP=127.0.0.1:
 [ "${PARLOR_PLAY_OPEN:-}" = 1 ] && PLAY_IP=$IP
 MEMORY="--memory ${PARLOR_MEMORY:-96m}"
+SITE=
+if [ -n "${PARLOR_SITE_DIR:-}" ]; then
+	case $PARLOR_SITE_DIR in
+	/*[!A-Za-z0-9/._-]* | [!/]*)
+		echo "install-extensions.sh: PARLOR_SITE_DIR is an absolute path of letters, digits and / . _ -" >&2
+		exit 2 ;;
+	esac
+	[ -d "$PARLOR_SITE_DIR" ] || { echo "install-extensions.sh: PARLOR_SITE_DIR $PARLOR_SITE_DIR is not a directory" >&2; exit 2; }
+	SITE="-v $PARLOR_SITE_DIR:/run/parlornet/site:ro"
+fi
 if [ -n "${PARLOR_MEMORY_SWAP:-}" ]; then MEMORY="$MEMORY --memory-swap $PARLOR_MEMORY_SWAP"; fi
 NET=parlor-ext
 LABEL=org.parlornet.extension
@@ -109,7 +123,7 @@ EOF
 	extra=
 	if [ "$declare" != - ]; then extra="--public-port $declare"; fi
 	vars=
-	if [ "$name" = web ]; then vars="PARLOR_WEB_HOSTS PARLOR_WEB_URL PARLOR_WEB_PROXIES PARLOR_PLAY_URL"; fi
+	if [ "$name" = web ]; then vars="PARLOR_WEB_HOSTS PARLOR_WEB_URL PARLOR_WEB_PROXIES PARLOR_PLAY_URL PARLOR_CONTRIBUTE_URL"; fi
 	if [ "$name" = play ]; then vars="PARLOR_PLAY_URL PARLOR_PLAY_PROXIES PARLOR_PLAY_PUSH_CONTACT"; fi
 	env=
 	for v in $vars; do
@@ -117,6 +131,9 @@ EOF
 		if [ -n "$x" ]; then env="$env -e $v=$x"; fi
 	done
 	data=
+	if [ "$name" = web ] && [ -n "$SITE" ]; then      # the site's own files, read-only
+		data="$SITE -e PARLOR_SITE=/run/parlornet/site"
+	fi
 	if [ "$name" = play ]; then         # Play's own files: push subscriptions and its VAPID key
 		install -d -m 700 -o "$uid" -g "$uid" "$DATA/play"
 		data="-v $DATA/play:/data -e PARLOR_PLAY_DATA=/data"

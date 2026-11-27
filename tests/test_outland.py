@@ -18,10 +18,10 @@ import tempfile
 import time
 import unittest
 from collections import deque
-from urllib.parse import parse_qs, urlsplit
 
 import procs
 from test_adapters import WebPlayers, spawn
+from test_adapters import query_of  # noqa: E402
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
@@ -619,7 +619,7 @@ class LiveBase(WebPlayers, unittest.TestCase):
 
     def web_table(self, name):
         loc = self.web_get("/new.htm?g=backgammon%%2F1&turn=1h&n=%s" % name)[1]
-        return parse_qs(urlsplit(loc).query)["t"][0]
+        return query_of(loc)["t"][0]
 
     def native(self, name):
         s = socket.create_connection(("127.0.0.1", self.core), timeout=5)
@@ -1207,7 +1207,7 @@ class LiveReversi(WebPlayers, unittest.TestCase):
     def test_reversi_against_a_web_player(self):
         self.web_login("wes")
         loc = self.web_get("/new.htm?g=reversi%2F1&turn=1h&n=wes")[1]
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         req = self.native("wes")
         c = self.reversi("rex")
         ids = c.ids()
@@ -1329,7 +1329,7 @@ class LiveReversi(WebPlayers, unittest.TestCase):
         c = self.reversi("ivy")
         self.web_login("wyn")
         loc = self.web_get("/new.htm?g=reversi%2F1&turn=1h&vis=private&n=wyn")[1]
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         st, _, body = self.web_get("/invite.htm?t=%s&who=ivy&n=wyn" % tid)
         self.assertEqual(st, 302, body[-300:])
         c.wait(lambda: c.invites)
@@ -1343,7 +1343,7 @@ class LiveReversi(WebPlayers, unittest.TestCase):
         c.send(b"\x18")
         # declined: the web table's log says so
         loc = self.web_get("/new.htm?g=reversi%2F1&turn=1h&vis=private&n=wyn")[1]
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         self.web_get("/invite.htm?t=%s&who=ivy&n=wyn" % tid)
         c.wait(lambda: c.invites)
         pid, _ = c.invites.popleft()

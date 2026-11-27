@@ -8,10 +8,10 @@ import socket
 import tempfile
 import time
 import unittest
-from urllib.parse import parse_qs, urlsplit
 
 import procs
 from test_adapters import Browser, spawn
+from test_adapters import query_of  # noqa: E402
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 import json
 from speed import slow
@@ -341,7 +341,7 @@ class Ios(unittest.TestCase):
         b = Browser(self.web)
         b.login(name, name + "-Pass-word")
         loc = b.act("/new.htm?g=reversi%2F1")[1]
-        return b, parse_qs(urlsplit(loc).query)["t"][0]
+        return b, query_of(loc)["t"][0]
 
     def eclipse(self, name, password=""):
         c = Eclipse(self.ios)

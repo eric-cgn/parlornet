@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 import procs
 from test_adapters import Client, WebPlayers
+from test_adapters import query_of  # noqa: E402
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
@@ -1851,10 +1852,9 @@ class WithAServer(WebPlayers, unittest.TestCase):
 
     def web_othello_table(self, name, invite):
         """A web player's Othello table (they sit at seat 0), with the GameMaster player invited."""
-        from urllib.parse import parse_qs, urlsplit
         self.web_login(name)
         loc = self.web_get("/new.htm?g=reversi%%2F1&turn=1h&vis=private&n=%s" % name)[1]
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         st, _, body = self.web_get("/invite.htm?t=%s&who=%s&n=%s" % (tid, invite, name))
         self.assertEqual(st, 302, body[-300:])
         return tid

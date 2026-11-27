@@ -45,8 +45,8 @@ class MessageOfTheDay(unittest.TestCase):
 
     def test_the_shipped_file(self):
         """An ASCII box under 40 columns (a 40-column screen shows it whole, without the cursor wrapping onto
-        a blank line), then the contribute address below it, where any length of address leaves the box whole,
-        then where the text lives and when it last changed: plain text an operator deletes or rewrites."""
+        a blank line), then where the text lives and when it last changed: plain text an operator deletes or
+        rewrites. It names no address, so it fits any server."""
         with open(MOTD_FILE, encoding="ascii") as f:
             lines = f.read().rstrip("\n").split("\n")
         self.assertTrue(all(len(l) <= 39 and l == l.rstrip() for l in lines), [len(l) for l in lines])
@@ -58,10 +58,11 @@ class MessageOfTheDay(unittest.TestCase):
         bottom = lines.index(rule, 1)
         box = lines[1:bottom]
         self.assertTrue(all(len(l) == len(rule) and l.startswith("| ") and l.endswith(" |") for l in box))
-        self.assertEqual(lines[bottom + 1:bottom + 3], ["Run your own server or contribute:", pcore.MOTD_MARKER])
-        self.assertEqual(lines[bottom + 3], "Server setting: deploy/motd.txt,")
-        self.assertRegex(lines[bottom + 4], r"^last changed \d{4}-\d\d-\d\d\.$")
-        self.assertEqual(len(lines), bottom + 5)
+        self.assertEqual(lines[bottom + 1], "Server setting: deploy/motd.txt,")
+        self.assertRegex(lines[bottom + 2], r"^last changed \d{4}-\d\d-\d\d\.$")
+        self.assertEqual(len(lines), bottom + 3)
+        self.assertNotIn("{", "".join(lines))
+        self.assertNotIn("parlornet.org", "".join(lines))
         inner = [l[2:-2].strip() for l in box]
         text = " ".join(inner)
         self.assertTrue(text.startswith("ParlorNet: %s." % TAGLINE), text)
@@ -72,12 +73,11 @@ class MessageOfTheDay(unittest.TestCase):
                      "We email you a password."):
             self.assertIn(fact, text)
 
-    def test_as_served_the_project_home_by_default(self):
+    def test_as_served(self):
         with open(MOTD_FILE, encoding="ascii") as f:
             want = f.read().rstrip("\n").split("\n")
         got = motd(motd_server())
-        self.assertEqual(got, [l.replace("{contribute}", PROJECT_URL) for l in want])   # nothing rewrapped
-        self.assertEqual(got[-4:-2], ["Run your own server or contribute:", "https://github.com/eric-cgn/parlornet"])
+        self.assertEqual(got, want)         # nothing rewrapped
         self.assertTrue(all(len("MOTD " + l) + 2 <= pcore.MAXLINE for l in got))
         self.assertTrue(all(len(l) <= 39 for l in got))
 

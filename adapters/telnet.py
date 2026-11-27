@@ -3366,6 +3366,15 @@ class Session:
                 self.io.write(MOUSE_OFF)        # also on a dropped line or an idle timeout
 
 
+def say(io, text):
+    """A message before the player has a screen of their own, such as the login's, cut at spaces so that no
+    word is broken: to the terminal's width less one (NAWS), or 79 columns when it did not say."""
+    size = getattr(io, "size", None)
+    width = max(20, (size[0] if size else 80) - 1)
+    for line in textwrap.wrap(text, width, break_on_hyphens=False) or [""]:
+        io.write(line + "\n")
+
+
 async def answer_asks(io, core, ask, login=False):
     """Answer the server's sign-in questions (ASK lines) until it says OK; returns
     True, or None if the player gives up (an empty answer) or is refused. The
@@ -3374,21 +3383,21 @@ async def answer_asks(io, core, ask, login=False):
     giving up on the new password after a temporary one is explained."""
     while True:
         for line in ask.info:
-            io.write("%s\n" % line)
+            say(io, line)
         io.write("%s (or press Enter to stop): " % ask.label)
         await io.flush()
         value = await (io.read_secret() if ask.secret else io.readline())
         if not value:
             if login and ask.new and not ask.cred:
-                io.write("Your password is not chosen yet. Sign in again with the password from the email "
-                         "to choose it.\n")
+                say(io, "Your password is not chosen yet. Sign in again with the password from the email to "
+                        "choose it.")
             return None
         try:
             return await core.aut(ask.field, value)
         except NeedAuth as again:
             ask = again
         except CoreError as e:
-            io.write("%s.\n" % re.sub(r"^wait=\d+ ", "", str(e)).capitalize().rstrip("."))
+            say(io, "%s." % re.sub(r"^wait=\d+ ", "", str(e)).capitalize().rstrip("."))
             return None
 
 
@@ -3458,7 +3467,7 @@ async def sign_in(io, args, ticket=None, core=None):
                 return None
             new = name.lower() == NEW_WORD
             if new:
-                io.write("A new account. %s\n" % NEW_NAME_RULE)
+                say(io, "A new account. %s" % NEW_NAME_RULE)
                 name = await line("Name you want (or press Enter to stop): ")
                 if name is None:
                     return None
@@ -3487,12 +3496,11 @@ async def sign_in(io, args, ticket=None, core=None):
                     break
             except CoreError as e:
                 if e.code == "NOPLAYER":
-                    io.write('There is no account named %s here. To make one, type new at the Login prompt.\n'
-                             % name)
+                    say(io, "There is no account named %s here. To make one, type new at the Login prompt." % name)
                 elif new:
-                    io.write("Can't sign up: %s.\n" % re.sub(r"^wait=\d+ ", "", str(e)).rstrip("."))
+                    say(io, "Can't sign up: %s." % re.sub(r"^wait=\d+ ", "", str(e)).rstrip("."))
                 else:
-                    io.write("Can't sign in: %s\n" % re.sub(r"^wait=\d+ ", "", str(e)))
+                    say(io, "Can't sign in: %s" % re.sub(r"^wait=\d+ ", "", str(e)))
         if ticket is not None and not ticket.sign_in():
             io.write("Server is full, try again soon.\n")
             await io.flush()

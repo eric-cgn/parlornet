@@ -13,7 +13,7 @@ import secrets
 import sys
 import time
 
-from . import DOCS_URL, PROJECT_URL, allowance, bots, commands, frontends, native
+from . import DOCS_URL, PROJECT_URL, allowance, bots, commands, frontends, native, sitetext
 from .accounts import KEY_LABEL_LEN, STEP_KINDS, Accounts, Player, as_ip, source_key  # noqa: F401  (Player: for code that imports it from here)
 from .store import Store
 
@@ -216,7 +216,6 @@ def parse_duration(text):
 
 MOTD_WIDTH = MAXLINE - 2 - len("MOTD ")       # 73: "MOTD text" fits the 80-byte line with its CR LF
 MOTD_LINES = 20                               # a 24-line terminal shows the whole message with the login prompt
-MOTD_MARKER = "{contribute}"                  # replaced by site.contribute_url; its line is left out once cleared
 
 
 def wrap(lines, width=76):
@@ -570,14 +569,22 @@ class Server:
         url = url if url.endswith("/") else url + "/"
         return url if len("DOC " + url) <= MAXLINE - 2 else ""
 
+    def site_values(self):
+        """The placeholders' values for the operator's texts (parlord/sitetext.py): the server's name, the
+        ports the extensions declared, web.public_url and play.public_url (the settings, else PARLOR_WEB_URL and
+        PARLOR_PLAY_URL), the docs site and the contribute address."""
+        def url(key, var):
+            return self.settings.get(key) or os.environ.get(var, "")
+        return sitetext.values(self.name, [(k, port) for k, port, _, _ in self.protocol_list()],
+                               url("web.public_url", "PARLOR_WEB_URL"), url("play.public_url", "PARLOR_PLAY_URL"),
+                               self.docs_url(), self.contribute_url())
+
     def motd_lines(self):
-        """The message of the day as every frontend shows it: {contribute} replaced by the contribute URL,
-        or, when the operator cleared it, every line holding the marker left out; then cut to lines of at most
-        MOTD_WIDTH characters, at most MOTD_LINES of them, without trailing blank lines."""
-        url = self.contribute_url()
-        if any(c in url for c in " \t\r\n") or not all(" " < c <= "~" for c in url):
-            url = ""
-        lines = [l.replace(MOTD_MARKER, url) for l in self.motd().split("\n") if url or MOTD_MARKER not in l]
+        """The message of the day as every frontend shows it: its placeholders filled in (sitetext), and every
+        line that holds one with no value left out, such as {contribute} once the operator cleared it; then
+        cut to lines of at most MOTD_WIDTH characters, at most MOTD_LINES of them, without trailing blank
+        lines."""
+        lines = sitetext.expand_lines(self.motd().split("\n"), self.site_values(), "the message of the day")
         out = wrap(lines, MOTD_WIDTH)
         while out and not out[-1]:
             out.pop()

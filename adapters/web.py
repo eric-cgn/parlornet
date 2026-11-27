@@ -36,7 +36,7 @@ import re
 import sys
 from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urlsplit
 
-from parlord import DOCS_URL, PROJECT_URL
+from parlord import DOCS_URL, PROJECT_URL, sitetext
 from parlord.accounts import as_ip, proxy_list, trusted_proxy
 from parlord.auth import NEW_NAME_RULE
 from parlord.frontends import read_key
@@ -54,6 +54,7 @@ from . import games
 from . import botflag
 from . import clients as C
 from . import declare
+from . import sitefiles
 from .medals import ICONS as MEDAL_ICONS
 from . import palette as PAL
 from . import siteimages as PIC
@@ -299,7 +300,8 @@ def game_page(gtype, hosted=None, nav=None):
             (_fibs_note_html() if gtype == "backgammon" else "") +
             h2("frontends", "Programs that play it") + programs +
             p("%s | %s" % (a("/welcome.htm#%s" % gtype, "All games"), a("/lobby.htm", "Play")), 2))
-    return respond(200, page("ParlorNet: %s" % r["name"], body, nav=nav))
+    return respond(200, page("ParlorNet: %s" % r["name"], body, nav=nav,
+                             crumbs=[WELCOME_STEP, (GAMES_SECTION, "Games"), (None, r["name"])]))
 
 
 def credits_page(nav=None):
@@ -322,7 +324,9 @@ def credits_page(nav=None):
               "for this site, and come under ParlorNet&#39;s license." % PIC.MACHINE_BOX, 2) +
             p("%s | %s" % (a("/welcome.htm#%s" % MACHINES_ANCHOR, MACHINES_HEAD),
                            a(GAMES_SECTION, "Games")), 2))
-    return respond(200, page("ParlorNet: picture credits", body, nav=nav))
+    return respond(200, page("ParlorNet: picture credits", body, nav=nav,
+                             crumbs=[WELCOME_STEP, ("/welcome.htm#%s" % MACHINES_ANCHOR, MACHINES_HEAD),
+                                     (None, "Picture credits")]))
 
 
 def html_text(s):
@@ -555,7 +559,7 @@ BOARD_TEXT_MAX = 40         # up to this many areas are also listed as text link
 def _drop(href, keys):
     """A link without some of its query fields."""
     u = urlsplit(href)
-    q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if k not in keys]
+    q = [(k, v) for k, v in parse_qsl(u.query.replace(";", "&"), keep_blank_values=True) if k not in keys]
     return url(u.path, **dict(q))
 
 
@@ -596,10 +600,21 @@ def board_html(draw, v, tid, link, seat, sel, alt, text=True):
 
 # esc() and a() come from webstyle (game modules import esc from here).
 
-def page(title, body, refresh=None, current=None, nav=None, compact=False):
-    """A whole page in the site's frame (webstyle.frame): the masthead and navigation bar, the body, the
-    footer. current: the public nav entry this page is; nav, compact: the signed-in pages' bar."""
-    return S.frame(title, body, current=current, nav=nav, compact=compact, refresh=refresh)
+def page(title, body, refresh=None, current=None, nav=None, compact=False, crumbs=None):
+    """A whole page in the site's frame (webstyle.frame): the masthead and navigation bar, the breadcrumb line,
+    the body, the footer. current: the public nav entry this page is; nav, compact: the signed-in pages' bar;
+    crumbs: the breadcrumb line's steps, the pages above this one and then its own name (every page has one
+    but the welcome page)."""
+    return S.frame(title, body, current=current, nav=nav, compact=compact, refresh=refresh, crumbs=crumbs)
+
+
+WELCOME_STEP = ("/welcome.htm", "Welcome")
+
+
+def lobby_steps(link, *more):
+    """The breadcrumb line of a signed-in page: the lobby (through link, so it keeps the session of a browser
+    without cookies), then more steps, (href, label), the last with href None."""
+    return [(link("/lobby.htm"), "Lobby")] + list(more)
 
 
 def bare_page(title, body):
@@ -609,8 +624,16 @@ def bare_page(title, body):
 
 
 def url(path, **q):
+    """A link to one of the site's pages, its fields separated by ; and not &. A browser that sends &amp; in a
+    link as it is written, such as Mosaic 2.0.1, then sends what the link says, and parse_query takes both."""
     q = {k: v for k, v in q.items() if v is not None and v != ""}
-    return path + ("?" + urlencode(q, quote_via=quote) if q else "")
+    return path + ("?" + urlencode(q, quote_via=quote).replace("&", ";") if q else "")
+
+
+def parse_query(query):
+    """A query -> {field: [values]}, its fields separated by & or ; (HTML 4 asks servers to take both). A ; in a
+    value comes percent-encoded, so it is never taken for a separator."""
+    return parse_qs(query.replace(";", "&"), max_num_fields=MAX_FIELDS)
 
 
 S.DOCS[0] = DOCS_URL    # the docs site, until the core's PRL says (site.docs_url)
@@ -620,6 +643,8 @@ PROTOCOL = ("HTTP", "HTTP and HTML 3.2", "HTML 3.2 pages for any browser with ta
 HOSTS = []      # web.hosts: the names this site answers to ("name" or "name:port"); empty: any well-formed one
 PROXIES = []    # web.proxies: the reverse proxies (ip_networks) whose X-Forwarded-For and -Proto are believed
 PUBLIC_URL = [""]   # web.public_url: the site's own address (https://games.example.org/), for canonical links
+CONTRIBUTE_URL = [PROJECT_URL]      # site.contribute_url as it was when this extension started ("" when cleared)
+SITE = [sitefiles.Site()]           # the operator's welcome.htm and pages (--site; adapters/sitefiles.py)
 
 
 def allowed_host(h):
@@ -634,10 +659,21 @@ def allowed_host(h):
     return HOSTS[0]
 
 
+def site_host():
+    """The host name this site goes by in its configuration: the first of web.hosts, else the host in
+    web.public_url, else the server's name. It stands in for the Host header of a browser that sends none,
+    such as Mosaic."""
+    for h in HOSTS[:1] + [sitetext.host_of_url(PUBLIC_URL[0]), S.LABEL[0]]:
+        h = h.split(":")[0] if not h.startswith("[") else h
+        if re.match(r"^[A-Za-z0-9.-]+\Z", h or ""):
+            return h
+    return "localhost"
+
+
 def host_of(req):
     h = allowed_host(req["headers"].get("host", ""))
     h = h.split(":")[0] if not h.startswith("[") else h
-    return h if re.match(r"^[A-Za-z0-9.-]+\Z", h or "") else "parlornet.org"
+    return h if re.match(r"^[A-Za-z0-9.-]+\Z", h or "") else site_host()
 
 
 HOST_RE = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62})(?:\.[A-Za-z0-9-]{1,63})*\.?|\[[0-9A-Fa-f:.]{2,45}\])"
@@ -736,7 +772,7 @@ def cookie_sid(req):
 def hidden_fields(href):
     """The query of a link as hidden form fields (session and display choices for GET forms)."""
     return "".join('<input type="hidden" name="%s" value="%s">' % (esc(k), esc(v[0]))
-                   for k, v in parse_qs(urlsplit(href).query).items())
+                   for k, v in parse_query(urlsplit(href).query).items())
 
 
 def err_reason(text):
@@ -809,7 +845,8 @@ def signin_page(auth, message="", name="", raw=False):
     body = (h1("Sign in") + note_html(message, raw) +
             callout(signin_form(auth, name)) +
             p("%sNo account yet? %s. %s" % (forgot, a(SIGNUP_PAGE, "New account"), esc(NAMES_RULE)), 2))
-    return respond(200, page("ParlorNet: sign in", body, current=SIGNIN_PAGE))
+    return respond(200, page("ParlorNet: sign in", body, current=SIGNIN_PAGE,
+                             crumbs=[WELCOME_STEP, (None, "Sign in")]))
 
 
 def signup_page(auth, message="", name="", raw=False):
@@ -817,7 +854,8 @@ def signup_page(auth, message="", name="", raw=False):
     body = (h1("New account") + note_html(message, raw) + p(esc(signup_steps(auth))) +
             callout(signup_form(name)) +
             p("%s Already have an account? %s." % (esc(NEW_NAME_RULE), a(SIGNIN_PAGE, "Sign in")), 2))
-    return respond(200, page("ParlorNet: new account", body, current=SIGNUP_PAGE))
+    return respond(200, page("ParlorNet: new account", body, current=SIGNUP_PAGE,
+                             crumbs=[WELCOME_STEP, (None, "New account")]))
 
 
 URL_RE = re.compile(r"(https?://[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+[A-Za-z0-9/_~=#-])")
@@ -848,14 +886,15 @@ WELCOME_SECTIONS = [("welcome", "Welcome"), ("signin", "Sign-In"), ("games", "Ga
 
 
 def welcome(req, message="", auth=("password", "Password", "password"), motd=(), protocols=None, nav=None,
-            lobby=None, hosted=None, scores=False):
+            lobby=None, hosted=None, scores=False, site=""):
     """The welcome page: its heading and a contents line, then four sections. Welcome holds the message of
     the day (all of the welcome text is there, so the operator writes it) and any note. Sign-In holds the two
     ways to start, Sign in and New account, each its own form. Games lists every game (games_html), and Play
     from your Computer the ways to play from each machine (machines_html). protocols: the core's PRL, for
     ParlorNet Play's address. nav and lobby: for a signed-in player, the navigation bar (site_nav) and the
     lobby's link, which stands in for the two forms. hosted and scores: the core's games and whether it shows
-    its leaderboard, for Games."""
+    its leaderboard, for Games. site: the operator's welcome.htm with its placeholders filled in, which goes
+    right after the message of the day."""
     if lobby:
         start = callout(p("You are signed in. The %s has your tables and invitations." % a(lobby, "<b>Lobby</b>")))
     else:
@@ -864,7 +903,7 @@ def welcome(req, message="", auth=("password", "Password", "password"), motd=(),
                  p("%s %s" % (esc(signup_steps(auth)), esc(NEW_NAME_RULE)), 2) +
                  callout(signup_form()))
     contents = p(" | ".join(a("#" + anchor, esc(head)) for anchor, head in WELCOME_SECTIONS), 2)
-    body = ('<a name="welcome"></a>' + h1("Welcome") + contents + (motd_html(motd) if motd else "") +
+    body = ('<a name="welcome"></a>' + h1("Welcome") + contents + (motd_html(motd) if motd else "") + site +
             note_html(message) + h2("signin", "Sign-In") + start + games_html(hosted, scores) +
             machines_html(play_link(host_of(req), protocols)))
     return respond(200, page("ParlorNet", body, current="/welcome.htm", nav=nav))
@@ -893,7 +932,8 @@ def ask_page(lid, ask, message="", kind="signin"):
         kind, (SIGNIN_PAGE, "Start over"))
     body = (h1(heading) + (p("<b>%s</b>" % esc(message)) if message else "") + info + callout(form) +
             p(a(*start), 2))
-    return respond(200, page(heading, body))
+    above = ("/lobby.htm", "Lobby") if kind == "change" else WELCOME_STEP
+    return respond(200, page(heading, body, crumbs=[above, (None, heading)]))
 
 
 def site_nav(link=None, current=None):
@@ -1010,7 +1050,8 @@ def lobby_page(me, link, games, tables, note="", auth="password", invites=(), bo
             new +
             h2("account", "Your account") +
             p(" | ".join(account), 2))
-    return respond(200, page("ParlorNet lobby", body, nav=signed_in_nav(link), compact=True))
+    return respond(200, page("ParlorNet lobby", body, nav=signed_in_nav(link), compact=True,
+                             crumbs=[(getattr(link, "plain", link)("/welcome.htm"), "Welcome"), (None, "Lobby")]))
 
 
 COLOURS_PAGE = "/colours.htm"
@@ -1070,6 +1111,7 @@ def colours_page(link, value, note="", tid=""):
                   '(<img src="%s" width="145" height="25" align="middle" alt="Your colors now">):'
                   % (" checked" if cur == "custom" else "", esc(swatch_url(value))))
     back = link("/table.htm", t=tid) if tid else link("/lobby.htm")
+    steps = lobby_steps(link, *([(back, "Table %s" % tid)] if tid else []), (None, "Grid Words colors"))
     body = (h1("Grid Words colors") +
             (p("<b>%s</b>" % esc(note)) if note else "") +
             p("Choose the colors of your Grid Words board; other players don&#39;t see them. Premium squares "
@@ -1080,7 +1122,7 @@ def colours_page(link, value, note="", tid=""):
             % (COLOURS_PAGE, hidden_fields(link(COLOURS_PAGE, t=tid or None)), font("<br>\n".join(radios))) +
             '<table border="0" cellpadding="2">\n%s</table>\n<input type="submit" value="Save"></form>\n'
             % fields + p(a(back, "Back to the table" if tid else "Back to the lobby")))
-    return respond(200, page("Grid Words colors", body, nav=signed_in_nav(link), compact=True))
+    return respond(200, page("Grid Words colors", body, nav=signed_in_nav(link), compact=True, crumbs=steps))
 
 
 def bghome_page(link, value, note=""):
@@ -1099,7 +1141,8 @@ def bghome_page(link, value, note=""):
             '<form action="%s" method="get">\n%s%s\n<br><input type="submit" value="Save"></form>\n'
             % (BG_HOME_PAGE, hidden_fields(link(BG_HOME_PAGE)), font(radios)) +
             p(a(link("/lobby.htm"), "Back to the lobby")))
-    return respond(200, page("Backgammon board", body, nav=signed_in_nav(link), compact=True))
+    return respond(200, page("Backgammon board", body, nav=signed_in_nav(link), compact=True,
+                             crumbs=lobby_steps(link, (None, "Backgammon board"))))
 
 
 # ---- who is playing with what (CLI, TRN, FEED, PFL; docs/protocol.md) ----------------------------------------
@@ -1219,7 +1262,8 @@ def activity_page(link, turns, gam):
               "they played with, as their program says. Turns at private tables are never shown here.", 2) +
             ("<ul>\n%s</ul>\n" % items if items else p("No turns yet.")) +
             p(a(link(ACTIVITY_PAGE), "Refresh") + " | " + a(link(PLAYER_PAGE), "Your profile")))
-    return respond(200, page("ParlorNet activity", body, nav=signed_in_nav(link), compact=True))
+    return respond(200, page("ParlorNet activity", body, nav=signed_in_nav(link), compact=True,
+                             crumbs=lobby_steps(link, (None, "Activity"))))
 
 
 STAY_NOTES = {"forgot": "That computer will sign in with the password next time.",
@@ -1271,7 +1315,8 @@ def player_page(me, link, prof, turns, gam, keys=None, note=""):
             p("The games and what they were played with are counted from public tables only." +
               (" The score counts every game." if sc else ""), 1) +
             (keys_html(link, keys) if mine and keys is not None else ""))
-    return respond(200, page("ParlorNet: %s" % name, body, nav=signed_in_nav(link), compact=True))
+    return respond(200, page("ParlorNet: %s" % name, body, nav=signed_in_nav(link), compact=True,
+                             crumbs=lobby_steps(link, (None, "Your profile" if mine else name))))
 
 
 def profile_page(link, pref, note=""):
@@ -1284,7 +1329,9 @@ def profile_page(link, pref, note=""):
             '%s <input name="m" size="40" maxlength="40" value="%s">\n<input type="submit" value="Save"></form>\n'
             % (PROFILE_PAGE, hidden_fields(link(PROFILE_PAGE)), font("Machine:"), esc(pref)) +
             p(a(link(PLAYER_PAGE), "Your profile") + " | " + a(link("/lobby.htm"), "Back to the lobby")))
-    return respond(200, page("Your preferred machine", body, nav=signed_in_nav(link), compact=True))
+    return respond(200, page("Your preferred machine", body, nav=signed_in_nav(link), compact=True,
+                             crumbs=lobby_steps(link, (getattr(link, "plain", link)(PLAYER_PAGE), "Your profile"),
+                                                (None, "Your preferred machine"))))
 
 
 LEADERBOARD_PAGE = "/leaderboard.htm"    # the scores (TOP), for everyone, signed in or not
@@ -1316,7 +1363,10 @@ def leaderboard_page(rows, total, gam, gtype=None, nav=None):
             p(a(url(LEADERBOARD_PAGE, g=gtype) if gtype else LEADERBOARD_PAGE, "Refresh") + " | " +
               a("/lobby.htm", "Lobby")))
     here = url(LEADERBOARD_PAGE, g=gtype) if gtype else LEADERBOARD_PAGE
-    return respond(200, page("ParlorNet leaderboard", body, refresh=(LEADERBOARD_REFRESH, here), nav=nav))
+    steps = [WELCOME_STEP] + ([(LEADERBOARD_PAGE, "Leaderboard"), (None, name)] if gtype else
+                              [(None, "Leaderboard")])
+    return respond(200, page("ParlorNet leaderboard", body, refresh=(LEADERBOARD_REFRESH, here), nav=nav,
+                             crumbs=steps))
 
 
 JS_POLL = """<script language="JavaScript"><!--
@@ -1330,7 +1380,7 @@ if (!pnJs && pnXhr()) {
     x.onreadystatechange = function () {
       if (x.readyState == 4 && x.status == 200 && parseInt(x.responseText, 10) != pnSeq) location.replace(pnJsUrl);
     };
-    x.open("GET", pnSeqUrl + "&_=" + new Date().getTime(), true);
+    x.open("GET", pnSeqUrl + ";_=" + new Date().getTime(), true);
     x.send(null);
   }, 2000);
 }
@@ -1373,6 +1423,17 @@ def event_log(events, seqs, names, key):
             if f[0] == "JOIN" and len(f) >= 3 and f[1].isdigit():
                 join = (log[-1], int(f[1]))
     return log
+
+
+def end_words(events, names, key):
+    """How a finished game ended, in words, from its END event as the log says it ("Game over: ann wins
+    33-31"), for the status line in place of the game's own result code ("Game over: win 0 33-31"). None
+    without an END event."""
+    end = next((e for e in reversed(events) if e.split(" ", 1)[0] == "END"), None)
+    said = describe(end, names, key) if end else None
+    if not said:
+        return None
+    return said if said.startswith("Game over") else "Game over: " + said
 
 
 def invite_html(tid, link, private, invited, bot=None):
@@ -1463,6 +1524,7 @@ def table_page(me, tid, names, v, seat, log, watching, rate, js, link, key="reve
     # the page's own reloads (meta refresh, the script) carry a=1: they are not the player's activity
     refresh = None if (my_turn or over or js or rate == 0 or still) else (rate, link("/table.htm", t=tid, w=w, a=1))
     return respond(200, page("%s - table %s" % (title, tid), body, refresh=refresh, nav=signed_in_nav(link),
+                             crumbs=lobby_steps(link, (None, "Table %s" % tid)),
                              compact=True))
 
 
@@ -1496,16 +1558,17 @@ def move_from_fields(module, q, v=None):
     return mv if isinstance(mv, str) and module.MOVE_RE.match(mv) else None
 
 
-def notice(title, heading, text="", links=(), status=200):
-    """A short page in the frame: a heading that says what happened, a line on it, and where to go."""
+def notice(title, heading, text="", links=(), status=200, crumb=None):
+    """A short page in the frame: a heading that says what happened, a line on it, and where to go. Its
+    breadcrumb line is Welcome, then crumb (by default the title)."""
     body = h1(esc(heading)) + (p(text) if text else "") + (p(" | ".join(a(h, esc(t)) for h, t in links))
                                                           if links else "")
-    return respond(status, page(title, body))
+    return respond(status, page(title, body, crumbs=[WELCOME_STEP, (None, crumb or title)]))
 
 
 def error_page(msg, back=None):
     """Something asked for could not be done: the reason as the heading, and the way back."""
-    return notice("ParlorNet: not done", msg, links=[(back or "/welcome.htm", "Back")])
+    return notice("ParlorNet: not done", msg, links=[(back or "/welcome.htm", "Back")], crumb="Not done")
 
 
 BUSY = ("Busy", "Busy, try again in a minute.", "Too many sign-ins are waiting for an answer.")
@@ -1575,10 +1638,32 @@ class Web:
 
     async def welcome(self, req, message="", extra=""):
         link = self.visitor(req)
-        r = welcome(req, message, await self.auth_info(), await self.motd(), await self.protocols(),
+        protocols = await self.protocols()
+        site = self.site_html(SITE[0].welcome, sitefiles.WELCOME) if SITE[0].welcome else ""
+        r = welcome(req, message, await self.auth_info(), await self.motd(), protocols,
                     site_nav(link, "/welcome.htm") if link else None, link("/lobby.htm") if link else None,
-                    self.games_seen, self.scores_seen)
+                    self.games_seen, self.scores_seen, site)
         return self.with_header(r, extra)
+
+    def site_values(self):
+        """The placeholders' values (parlord/sitetext.py): the server's name from its greeting, the ports the
+        core lists in PRL, web.public_url, play.public_url, the docs site and the contribute address."""
+        return sitetext.values(S.LABEL[0], [(k, port) for k, port, _, _ in self.protocols_seen or ()],
+                               PUBLIC_URL[0], PLAY_URL[0], S.DOCS[0], CONTRIBUTE_URL[0])
+
+    def site_html(self, html, where):
+        """One of the operator's HTML fragments with its placeholders filled in, each value HTML-escaped."""
+        return sitetext.expand(html, self.site_values(), where, esc)
+
+    async def site_page(self, req, path):
+        """One of the operator's pages (pages/<name>.htm in the site directory): its title as the heading,
+        then its body, in the frame with the breadcrumb line Welcome > its title."""
+        await self.protocols()
+        title, body = SITE[0].pages[path]
+        where = sitefiles.PAGES + path
+        title = sitetext.expand(title, self.site_values(), where)
+        return respond(200, page("ParlorNet: %s" % title, h1(html_text(title)) + self.site_html(body, where),
+                                 nav=self.visitor_nav(req, None), crumbs=[WELCOME_STEP, (None, title)]))
 
     def visitor(self, req):
         """A public page's view of its visitor: the signed-in link maker (linker) when the request carries a
@@ -1773,6 +1858,8 @@ class Web:
             return await self.leaderboard(req, (q.get("g") or [""])[0])
         if path == PIC.CREDITS_PAGE:
             return credits_page(self.visitor_nav(req, None))
+        if path in SITE[0].pages:
+            return await self.site_page(req, path)
         if moved_to(path) is not None:          # the documentation's old addresses: the docs site
             await self.refresh_info()
             return moved_page(req, path, q)
@@ -1855,7 +1942,7 @@ class Web:
             extra = await self.stay_signed_in(req, core, name) if entry.stay and not done else ""
             core.close()
             if done:
-                return redirect(req, done + ("&" if "?" in done else "?") + "note=password")
+                return redirect(req, done + (";" if "?" in done else "?") + "note=password")
             return self.signed_in(req, sid, extra)
         name = (q.get("n") or [""])[0].strip()
         cred = (q.get("k") or [""])[0].strip() or None      # answers the credential question only, if asked
@@ -2146,7 +2233,9 @@ class Web:
                 body = (h1("Resign table %s?" % esc(tid)) + p("Resigning ends the game and your opponent wins.") +
                         callout(p("<b>%s</b> | %s" % (a(link("/resign.htm", t=tid, sure=1), "Yes, resign"),
                                                       a(link("/table.htm", t=tid), "No, back to the game")))))
-                return respond(200, page("Resign?", body, nav=signed_in_nav(link), compact=True))
+                return respond(200, page("Resign?", body, nav=signed_in_nav(link), compact=True,
+                                         crumbs=lobby_steps(link, (link("/table.htm", t=tid), "Table %s" % tid),
+                                                            (None, "Resign"))))
             await core.req("RES %s" % tid)
             return redirect(req, link("/table.htm", t=tid))
         if path in ("/und.htm", "/end.htm"):
@@ -2227,6 +2316,8 @@ class Web:
             return error_page(t, lobby)
         tab, key, v, names, seat, events, seqs, uses = t
         log = event_log(events, seqs, names, key)
+        if "Game over" in (v.get("status") or ""):
+            v["status"] = end_words(events, names, key) or v["status"]
         tdata, tfinal = await core.req("TRN %s" % tid)
         log = [d for _, d in with_clients(log, parse_turns(tdata) if tfinal.startswith("OK") else [])]
         want = check[0] if check else arg("sel")
@@ -2363,7 +2454,7 @@ class Web:
                 path = None
             if path in CLICK_TARGETS:
                 link = self.linker(sid, cookieless, rate, js)
-                nq = parse_qs(urlsplit(link(path, t=arg("t"), **params)).query)
+                nq = parse_query(urlsplit(link(path, t=arg("t"), **params)).query)
                 return await self.authed(req, path, nq, core, me, sid, cookieless)
         return await self.show_table(core, me, sid, cookieless, arg("t"), arg, rate, js)
 
@@ -2459,7 +2550,7 @@ class Web:
             query, ismap = query[:m.start()], (int(m.group(1)), int(m.group(2)))
         peer = writer.get_extra_info("peername")
         client, proto = forwarded_client(peer[0] if peer else "?", headers, PROXIES)
-        req = {"path": u.path or "/", "query": parse_qs(query, max_num_fields=MAX_FIELDS),
+        req = {"path": u.path or "/", "query": parse_query(query),
                "headers": headers, "method": parts[0], "form": form, "proto": proto,
                "peer": client, "src": addr_key(client), "ismap": ismap}
         try:
@@ -2480,7 +2571,15 @@ class Web:
         return head + b"\r\n\r\n" + body, keep
 
 
+def builtin_pages():
+    """The addresses of the site's own pages and actions, which no page of the operator's may take."""
+    return ({"/", "/index.htm", "/welcome.htm", "/games.htm", SIGNIN_PAGE, SIGNUP_PAGE, "/lobby.htm", "/table.htm",
+             "/seq.htm", LEADERBOARD_PAGE, PIC.CREDITS_PAGE, PLAYER_PAGE, PROFILE_PAGE, ACTIVITY_PAGE, COLOURS_PAGE,
+             BG_HOME_PAGE} | set(ACTIONS) | set(CLAIM_PATHS) | set(MOVED))
+
+
 async def serve(args):
+    SITE[0] = sitefiles.load(args.site, builtin_pages())
     w = Web(args.core_host, args.core_port, args.key)
     server = await asyncio.start_server(w.handle, args.host, args.port, limit=8192)
     declare.start(args, PROTOCOL, w.key_file)
@@ -2508,9 +2607,15 @@ def parse_args(argv=None):
                     help="web.public_url: the site's own address, such as https://games.example.org/; "
                          "pages name their address under it as canonical (a Link header)")
     ap.add_argument("--play-url", default=os.environ.get("PARLOR_PLAY_URL", ""),
-                    help="play.public_url: where ParlorNet Play is (https://parlornet.org/play/); /play and "
+                    help="play.public_url: where ParlorNet Play is (https://games.example.org/play/); /play and "
                          "/play/ answer 301 there, and the welcome page links it while Play runs")
+    ap.add_argument("--contribute-url", default=os.environ.get("PARLOR_CONTRIBUTE_URL", PROJECT_URL),
+                    help="site.contribute_url: the address {contribute} stands for in the site directory's files")
+    ap.add_argument("--site", default=os.environ.get("PARLOR_SITE", ""),
+                    help="the operator's site directory: welcome.htm, shown on the welcome page, and "
+                         "pages/<name>.htm, served at /<name>.htm (deploy/README.md, A site of your own)")
     a_ = ap.parse_args(argv)
+    CONTRIBUTE_URL[0] = a_.contribute_url.strip()
     if a_.key:
         CoreClient.key_file = a_.key
     HOSTS[:] = [h.strip() for h in a_.hosts.split(",") if h.strip()]

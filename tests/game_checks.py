@@ -287,7 +287,8 @@ def web_page(tc, module, lines, seat=0, names=(LONG, "bob"), sel="", check=None,
         tc.assertRegex(area, r'^<area shape="(rect|circle|poly)" coords="[0-9,-]+" href="[^"]+" alt="[^"]*">$')
     for href in re.findall(r'href="([^"]+)"', html):
         tc.assertTrue(href.startswith("/") and ".htm" in href, href)
-        tc.assertIn("s=%s&amp;x=%s" % (SID, CSRF), href)
+        tc.assertIn("s=%s;x=%s" % (SID, CSRF), href)       # ; between fields, never &amp; (web.url)
+        tc.assertNotIn("&", href)
     for form in re.findall(r"<form .*?</form>", html, re.S):     # GET forms carry them as hidden fields
         for name, value in (("s", SID), ("x", CSRF)):
             tc.assertIn('<input type="hidden" name="%s" value="%s">' % (name, value), form)

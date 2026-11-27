@@ -837,6 +837,7 @@ class F08Containment(unittest.TestCase):
             r = subprocess.run([sys.executable, os.path.join(ROOT, "deploy", "start.py"), "--prepare"],
                                env=dict(os.environ, **env), capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(r.stdout.strip().splitlines()[-1]), {"names": ["web", "telnet"], "settings": None,
+                                                                          "contribute_url": None,
                                                                           "web_hosts": "", "web_url": "",
                                                                           "web_proxies": "", "play_url": "",
                                                                           "play_proxies": "", "play_push_contact": "",
@@ -893,7 +894,7 @@ class F09Web(WebStack):
         self.assertNotIn("Set-Cookie: pn=AAAA", r)
         cookie = "Cookie: pn=AAAAAAAAAAAAAAAAAAAAAA\r\n"    # the sign-in page sends a cookie's holder on
         r = raw_http(self.port, "GET /login.htm HTTP/1.0\r\nHost: <script>\r\n%s\r\n" % cookie)
-        self.assertIn("Location: http://parlornet.org/lobby.htm", r)
+        self.assertIn("Location: http://parlornet/lobby.htm", r)        # the server's name, as configured
         r = raw_http(self.port, "GET /login.htm HTTP/1.0\r\nHost: play.example:6500\r\n%s\r\n" % cookie)
         self.assertIn("Location: http://play.example:6500/lobby.htm", r)
         # without web.proxies nobody's X-Forwarded-Proto is believed, and no page names a canonical address
