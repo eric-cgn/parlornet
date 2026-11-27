@@ -1,6 +1,6 @@
 # Every push to dev: the fast tests and the Docker image, on the commit dev now has (the slow tests run
-# nightly on dev, slow.yml). There is no dev pre-release: the server ships as its source, and each parlor builds its own image from it, so the dev
-# branch is the dev build.
+# nightly on dev, slow.yml). There is no dev pre-release and no dev image, so the dev branch is the dev build.
+# Only a release publishes an image (release.yml).
 name: Dev build
 
 on:
