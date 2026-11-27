@@ -38,7 +38,8 @@ import secrets
 import sys
 import time
 
-from . import auth
+from . import allowance, auth
+from .accounts import proxy_list
 from .core import SCORE_MOST, SCORE_SETTINGS, SETTING_LIMITS
 
 ADMIN_PORT = 6599           # the core's admin socket, loopback only
@@ -195,6 +196,23 @@ def _points(v):
     return str(int(v))
 
 
+def _gateways(v):
+    """dialin.gateways: the dial-in gateways' addresses or networks, separated by commas. Empty clears it."""
+    items = [x.strip() for x in v.split(",") if x.strip()]
+    proxy_list(",".join(items), allowance.GATEWAYS)
+    return ",".join(items)
+
+
+def _mins(v):
+    """A class's time limit (dialin.call_mins and the rest): whole minutes from 0, which means no limit, to a
+    month's. Empty clears it, so the default applies."""
+    v = v.strip()
+    if v and allowance.minutes(v) is None:
+        raise ValueError("a whole number of minutes from 0 to %d (0: no limit; empty: the default)"
+                         % allowance.MOST_MINS)
+    return str(int(v)) if v else ""
+
+
 SETTINGS = {
     "presence.idle": _idle,
     "scores.show": _choice("on", "off"),
@@ -221,6 +239,7 @@ SETTINGS.update({k: _count(k) for k in SETTING_LIMITS})
 SETTINGS.update({k: _points for k in SCORE_SETTINGS})
 SETTINGS.update({"email.limit." + k: _limit(k) for k in auth.EMAIL_LIMITS})
 SETTINGS.update({k: _signup_limit(k) for k in auth.SIGNUP_LIMITS})
+SETTINGS.update({k: _gateways if k == allowance.GATEWAYS else _mins for k in allowance.setting_keys()})
 SECRET = ("email.smtp_password",)
 
 

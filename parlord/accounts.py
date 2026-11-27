@@ -99,6 +99,32 @@ def source_key(addr):
     return str(ip)
 
 
+def proxy_list(text, key="proxies"):
+    """A proxies setting (comma-separated addresses or networks) -> [ip_network]. ValueError if one is not."""
+    out = []
+    for x in (text or "").split(","):
+        if x.strip():
+            try:
+                out.append(ipaddress.ip_network(x.strip(), strict=False))
+            except ValueError:
+                raise ValueError("%s is a comma-separated list of addresses or networks: %r" % (key, x.strip()))
+    return out
+
+
+def as_ip(text):
+    """An address as an ip_address (an IPv4-mapped IPv6 one as IPv4), or None."""
+    try:
+        ip = ipaddress.ip_address(text.strip())
+    except ValueError:
+        return None
+    return ip.ipv4_mapped if ip.version == 6 and ip.ipv4_mapped else ip
+
+
+def trusted_proxy(ip, proxies):
+    """True when ip (an ip_address, or None) is in one of the networks of proxies (proxy_list)."""
+    return ip is not None and any(ip.version == n.version and ip in n for n in proxies)
+
+
 def sid_hash(sid):
     return hashlib.sha256(sid.encode("ascii")).hexdigest()
 

@@ -30,6 +30,12 @@
 #   PARLOR_PLAY_OPEN=1  publish 6513 on every address, not just the host's loopback
 #   PARLOR_PLAY_PUSH_CONTACT  your mailto: or https: address, which ParlorNet Play gives the browsers' push
 #                     services; Play's push notifications are off without it (and without PARLOR_PLAY_URL)
+#   PARLOR_DIALIN_GATEWAYS  the dial-in gateways' addresses as the container sees them, comma-separated; a
+#                     call they carry to 6501 has the dial-in time limits (deploy/README.md)
+#   PARLOR_DIALIN_CALL_MINS, PARLOR_DIALIN_USER_MONTH_MINS, PARLOR_DIALIN_POOL_MONTH_MINS  those limits in
+#                     minutes: one call, one player in a month, the whole parlor in a month (75, 60, 150)
+#   PARLOR_DEFAULT_CALL_MINS, PARLOR_DEFAULT_USER_MONTH_MINS, PARLOR_DEFAULT_POOL_MONTH_MINS  the same for
+#                     every other connection to 6501 (none by default)
 # The admin menus and /etc/parlornet/settings.conf can set them too, and take precedence.
 set -eu
 IMAGE=${1:?usage: install.sh IMAGE}
@@ -57,7 +63,9 @@ docker run -d --name parlornet --restart unless-stopped \
 	-e PARLOR_MOTD_FILE=/app/deploy/motd.txt \
 	$(for v in PARLOR_NAME PARLOR_AUTH PARLOR_SIGNUP PARLOR_WEB_HOSTS PARLOR_WEB_URL PARLOR_WEB_PROXIES \
 		PARLOR_PLAY_URL PARLOR_PLAY_PROXIES \
-		PARLOR_PLAY_PUSH_CONTACT; do
+		PARLOR_PLAY_PUSH_CONTACT PARLOR_DIALIN_GATEWAYS PARLOR_DIALIN_CALL_MINS PARLOR_DIALIN_USER_MONTH_MINS \
+		PARLOR_DIALIN_POOL_MONTH_MINS PARLOR_DEFAULT_CALL_MINS PARLOR_DEFAULT_USER_MONTH_MINS \
+		PARLOR_DEFAULT_POOL_MONTH_MINS; do
 		eval "x=\${$v:-}"; [ -n "$x" ] && echo "-e $v=$x"; done) \
 	-v /srv/parlornet:/data \
 	$([ -f /etc/parlornet/settings.conf ] && echo "-v /etc/parlornet/settings.conf:/run/parlornet/settings.conf:ro") \

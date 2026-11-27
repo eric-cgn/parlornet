@@ -457,9 +457,11 @@ C< OK 0
 
 `TIM` is for frontends on machines with no clock. It answers one line, then `OK`:
 
-    TIM secs now
+    TIM secs now left=rem call=rem month=rem
 
-`secs` is how long the player has been connected, in whole seconds, and `now` is the server's time in UTC, such as `TIM 754 2026-11-24T21:05:33Z`. On the public port `secs` counts from when the connection opened. On the extension channel it counts from the sign-in that started the session, whichever connection asks; before signing in, from when the connection opened. `TIM` is allowed before signing in and is not activity, so a frontend can send it with its regular lobby poll and count the seconds between polls itself.
+`secs` is how long the player has been signed in, in whole seconds, and `now` is the server's time in UTC, such as `TIM 754 2026-11-24T21:05:33Z left=unl call=unl month=unl`. On the public port `secs` counts from this connection's sign-in. On the extension channel it counts from the sign-in that started the session, whichever connection asks. Before signing in it is 0. Each `rem` is whole seconds, or `unl` for no limit. `left` is the time this connection has left, the smallest of its limits. `call` is the time the call has left, and `month` is the time the player has left this month. A call through a dial-in gateway has these limits (protocol.md, Time allowance). `TIM` is allowed before signing in and is not activity, so a frontend can send it with its regular lobby poll and count the seconds between polls itself.
+
+A frontend that shows the time signed in shows the time left after it, as "12m onl 63m rem", or "12m onl unl rem" when there is no limit (design.md, Time). On a connection with a limit, a reply may start with an `INF` line that belongs to no request. That is the server's notice at 5 minutes and at 1 minute left, such as `INF This call ends in 5 minutes.`, and the frontend shows it. When the time runs out, `ERR LIMIT` comes without a request and the server closes the connection.
 
 `GAM` lists the games this server hosts, one line per ruleset:
 
@@ -1115,7 +1117,7 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `IDLE` | Nothing was sent for 15 minutes; the connection is closed. |
 | `ILLEGAL` | A move or check the game refuses; the text is the game's reason. |
 | `INTERNAL` | Something went wrong on the server; the request was not done. |
-| `LIMIT` | `NEW` or `JON` by a player playing as many games as the server allows, or waiting at as many open tables of that game (Tables, above), a table has twice as many invitations out as free seats, or 20 notes, `PRF SET` would pass 16 keys or 1024 bytes, `TDS` 16 keys, a connection would declare more than 4 protocols with `PRO`, or `KEY NEW` for a player with 20 sign-in keys. |
+| `LIMIT` | `NEW` or `JON` by a player playing as many games as the server allows, or waiting at as many open tables of that game (Tables, above), a table has twice as many invitations out as free seats, or 20 notes, `PRF SET` would pass 16 keys or 1024 bytes, `TDS` 16 keys, a connection would declare more than 4 protocols with `PRO`, or `KEY NEW` for a player with 20 sign-in keys. Sent unasked, it means the connection's time ran out (protocol.md, Time allowance), and the connection is closed. |
 | `LOCKED` | The name is locked after wrong answers, or the address has used up its wrong answers (with `wait=`). |
 | `NAMEINUSE` | `REG` for a name that has an account, or the name was taken by someone else while this sign-up ran (a pending account holds its name). |
 | `NAMERULE` | `REG` (or `HELO` for a free name) with a name outside the rule for new names: it has at least one letter, so it cannot read as a table number, and `-` and `_` go only between letters or digits. Names from before the rule still sign in. |
@@ -1140,7 +1142,7 @@ An `ERR` line is `ERR CODE text`. A frontend acts on the code and shows the text
 | `PAUSED` | The operator paused email sign-up, or new sign-ups by mail are held. |
 | `PLUGIN` | The game failed to answer; try again. |
 | `PRIVATE` | `JON` or `SEE` at a private table without an invitation, or `NOTE` or `TRN` there by someone who may not see it. |
-| `PROTOCOL` | The connection did not start with `PARLORNET/1` within 20 seconds; the connection is closed. |
+| `PROTOCOL` | The connection did not start with `PARLORNET/1` within 20 seconds, or it started with a PROXY header from an address that is not a dial-in gateway; the connection is closed. |
 | `RATE` | Too many requests too fast (the request was not done), or three failed `SES` on one connection. |
 | `RESERVED` | `REG` (or `HELO` for a free name) with a reserved word: `new` or `guest`, or a name that would pass for the server or its staff (`parlornet`, the server's own name, `admin`, `administrator`, `sysop`, `system`, `server`, `operator`, `moderator`, `staff`, `root`); `USER`, `HELO` or `REG` with a bot's name (`bot`, `bot1` to `bot3`). |
 | `SIGNEDOUT` | This connection's session was ended elsewhere; sign in again. |

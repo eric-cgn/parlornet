@@ -91,6 +91,16 @@ sudo PARLOR_WEB_URL=https://games.example.org/ PARLOR_WEB_PROXIES=172.30.4.1 sh 
 
 Do not add `Strict-Transport-Security` on this name. Browsers would apply it to every port, including the 1997-style pages on 6500, which stay plain HTTP for the old computers they serve. Certbot renews the certificate on its own timer.
 
+## Dial-in gateways and their time limits
+
+A dial-in gateway answers modem calls and carries each one to the native port, 6501. It may start the connection with a PROXY protocol header that says the connection is a call. The parlor believes that header only from the addresses you list, as the container sees them. A gateway on the host itself comes from 172.30.4.1:
+
+```sh
+sudo PARLOR_DIALIN_GATEWAYS=172.30.4.1 sh deploy/install.sh parlornet:1
+```
+
+Without `PARLOR_DIALIN_GATEWAYS` (`dialin.gateways` in the settings file), the parlor trusts no gateway, and a PROXY header from anywhere is refused. Calls have three limits in minutes. `PARLOR_DIALIN_CALL_MINS` limits one call (75 by default), `PARLOR_DIALIN_USER_MONTH_MINS` one player's calls in a calendar month (60), and `PARLOR_DIALIN_POOL_MONTH_MINS` all calls together in a month (150). 0 means no limit. docs/accounts.md lists these settings with the same limits for other connections, and docs/protocol.md describes the header and what callers are told.
+
 ## Administration
 
 The admin menus listen on port 6510 on the host's loopback address. From another machine, open an SSH tunnel to the host and connect through it:
