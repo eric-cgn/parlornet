@@ -708,7 +708,7 @@ class Pickers(unittest.TestCase):
         from adapters.common import parse_games
         from game_checks import page_link
         out = W.lobby_page("ann", page_link, parse_games(self.GAM), []).decode("ascii")
-        form = [f for f in out.split("<li><form")[1:] if "Start a game of Dots and Boxes" in f][0]
+        form = [f for f in out.split('<form action="/new.htm"')[1:] if "Start a game of Dots and Boxes" in f][0]
         self.assertIn('<select name="np"><option value="2" selected>2<option value="3">3<option value="4">4'
                       '</select>', form)
         self.assertNotIn('<select name="ru"', form)

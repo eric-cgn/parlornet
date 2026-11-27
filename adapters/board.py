@@ -38,6 +38,15 @@ def encode_gif(w, h, palette, pixels):
     return bytes(out)
 
 
+def transparent_gif(w, h, palette, pixels):
+    """encode_gif's file with palette index 0 transparent, by a graphic control extension."""
+    data = encode_gif(w, h, palette, pixels)
+    at = 13 + 3 * (1 << ((data[10] & 7) + 1))             # after the header and the color table
+    assert data[at:at + 1] == b","
+    gce = b"\x21\xf9\x04\x01\x00\x00\x00\x00"                 # transparent color: index 0
+    return data[:at] + gce + data[at:]
+
+
 def _lzw(pixels, min_size):
     clear, eoi = 1 << min_size, (1 << min_size) + 1
     data = bytearray()

@@ -350,7 +350,7 @@ class WebAndTelnet(Stack):
 
     def test_links_and_the_profile(self):
         self.assertIn('href="/leaderboard.htm"', self.bob.get("/lobby.htm")[3])
-        self.assertIn('href="/leaderboard.htm"', self.get("/games.htm")[3])      # the Games page, for everyone
+        self.assertIn('href="/leaderboard.htm"', self.get("/welcome.htm")[3])    # the Games section, for everyone
         page = self.bob.get("/player.htm?who=ann")[3]
         self.assertIn("Score: <b>4 points: 1 win, 0 draws, 0 losses, 0 resigned</b>, number 1 on the leaderboard",
                       page)
@@ -402,7 +402,7 @@ class ScoresOff(Stack):
     def test_nothing_shows(self):
         self.assertEqual(self.get("/leaderboard.htm")[0], 404)
         self.assertNotIn("/leaderboard.htm", self.ann.get("/lobby.htm")[3])
-        self.assertNotIn("/leaderboard.htm", self.get("/games.htm")[3])
+        self.assertNotIn("/leaderboard.htm", self.get("/welcome.htm")[3])
         self.assertNotIn("Score:", self.ann.get("/player.htm")[3])
         s = telnet_session(self)
         s.sendall(b"top\r\n")

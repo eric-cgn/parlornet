@@ -617,7 +617,7 @@ class WebFE:
 
     def open_table(self, p, g, n, typed_form):
         body = self.lobby(p)
-        form = next(f for f in body.split("<li><form")[1:] if 'name="g" value="%s"' % g["key"] in f)
+        form = next(f for f in body.split('<form action="/new.htm"')[1:] if 'name="g" value="%s"' % g["key"] in f)
         q = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', form))
         if len(g["rulesets"]) > 1:
             q["ru"] = re.search(r'<select name="ru"><option value="([^"]+)" selected', form).group(1)

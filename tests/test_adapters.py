@@ -271,8 +271,8 @@ class Web(Stack):
         for bad in ("<script", "<style", "style=", "javascript:", "&#x"):
             self.assertNotIn(bad, low)
         b = plain(body)
-        self.assertNotIn('<a href="/games/', b)
-        self.assertIn('<a href="/games.htm">Games</a>', b[:b.index("</table>")])
+        self.assertIn('<a href="#games">Games</a>', b)                 # the contents line: the Games section
+        self.assertNotIn("/games.htm", b)
 
     def test_games_table_follows_gam(self):
         from adapters import games, web as W
@@ -280,7 +280,7 @@ class Web(Stack):
         built = games.by_type()         # games with a frontend module count as built until the core says not
 
         def statuses(gam):
-            html = plain(W.games_page(parse_games(gam) if gam is not None else None).decode("ascii"))
+            html = plain(W.games_html(parse_games(gam) if gam is not None else None))
             return dict(re.findall(r"<b>([^<]+)</b>(?:</a>)?</td><td[^>]*>[^<]*</td><td>([^<]*)</td>", html))
         self.assertEqual(statuses(None)["Reversi"], "playable")      # core not reached yet: static list
         for name, gtype, _, _ in W.GAMES[2:]:
@@ -291,18 +291,19 @@ class Web(Stack):
         self.assertEqual(s["Backgammon"], "not on this server")
         for name, gtype, _, _ in W.GAMES[3:]:
             self.assertEqual(s[name], "not on this server" if gtype in built else "planned")
-        page = plain(W.games_page(parse_games(["GAM gridwords/1 english Grid_Words 2 4 nomoves"])).decode("ascii"))
+        page = plain(W.games_html(parse_games(["GAM gridwords/1 english Grid_Words 2 4 nomoves"])))
         self.assertIn('<td align="center">2-4</td><td>playable</td>', page)
 
     def test_games_page(self):
-        """/games.htm: a row per game in build order with an anchor each (old links to a game's section land
-        on its row), linking to the game's own page; status as on the welcome page. Each game's page: players,
+        """The welcome page's Games section: a row per game in build order with an anchor each (a link to a
+        game's row lands on it), linking to the game's own page. Each game's page: players,
         status, frontends, the rules; Backgammon's says where FIBS is and that ParlorNet is not FIBS. HTML 3.2
         only, and generic names only."""
         from adapters import siteimages as PIC, web as W
         from parlord import DOCS_URL
-        st, _, ct, page = self.get("/games.htm")
+        st, _, ct, page = self.get("/welcome.htm")
         self.assertEqual((st, ct), (200, "text/html"))
+        page = page[page.index('<a name="games">'):page.index('<a name="machines">')]
         order = ["Reversi", "Backgammon", "Grid Words", "Cannon Fire", "Dots and Boxes", "Five in a Row",
                  "Mancala", "Checkers", "Naval Combat", "Rummy Tile Classic"]
         rows = re.findall(r'<a name="([a-z0-9]+)"></a><a href="/games/\1\.htm"><b>([^<]+)</b></a></td>'
@@ -321,7 +322,7 @@ class Web(Stack):
             self.assertIn("<b>Players:</b> %s<br>" % players, part)
             self.assertIn('<a href="%sindex.html#%s">Clients page</a>' % (DOCS_URL, anchor), part)
             self.assertNotIn("protocols.htm", part)
-            self.assertIn('<a href="/games.htm#%s">' % anchor, part)
+            self.assertIn('<a href="/welcome.htm#%s">All games</a>' % anchor, part)     # its row in Games
         self.assertEqual(self.get("/games/nosuch.htm")[0], 200)        # not a game: the welcome page
         self.assertNotIn("<b>Players:</b>", self.get("/games/nosuch.htm")[3])
         bg = pages["backgammon"]
@@ -496,9 +497,10 @@ class Web(Stack):
         self.assertIn("Your session has ended", b.get(lobby)[3])
 
     def test_welcome_sections_and_protocols_page(self):
-        """The welcome page's sections come in order, each anchored, Sign in, New account, then Play from your
-        computer, which keeps the old section names as anchors; the old Protocols page has moved to the docs
-        site's protocols reference; no page has CSS, scripts, hex character references or a port."""
+        """The welcome page's sections come in order, each anchored: Welcome, Sign-In (with New account), Games,
+        then Play from your Computer, which keeps the old section names as anchors; the old Protocols page has
+        moved to the docs site's protocols reference; no page has CSS, scripts, hex character references or a
+        port."""
         from adapters import catalog
         from adapters import web as W
         from parlord import DOCS_URL
@@ -509,12 +511,13 @@ class Web(Stack):
         for anchor in re.findall(r'<a href="#([^"]+)">', body):   # every in-page link on the page
             self.assertIn(anchor, names)
         b = plain(body)
-        self.assertEqual(re.findall(r'<a name="([a-z]+)">[^<]+</a></h2>', b), ["signin", "new", "machines"])
+        self.assertEqual(re.findall(r'<a name="([a-z]+)">[^<]+</a></h[23]>', b), ["signin", "new", "games", "machines"])
+        self.assertEqual([a for a, _ in W.WELCOME_SECTIONS], ["welcome", "signin", "games", "machines"])
         self.assertLess(b.index("<h1>Welcome</h1>"), b.index('<a name="signin">'))
-        if '<a name="motd">' in b:                                     # the message of the day before Sign in
+        if '<a name="motd">' in b:                                     # the message of the day before Sign-In
             self.assertLess(b.index('<a name="motd">'), b.index('<a name="signin">'))
-        # old section names land on Play from your computer
-        self.assertIn("<h2>%s<a name=\"machines\">Play from your computer</a></h2>"
+        # old section names land on Play from your Computer
+        self.assertIn("<h2>%s<a name=\"machines\">Play from your Computer</a></h2>"
                       % "".join('<a name="%s"></a>' % n for n in W.OLD_ANCHORS), b)
         st, loc, _, page = self.get("/protocols.htm")
         self.assertEqual((st, loc), (301, DOCS_URL + "protocols.html"))
@@ -562,7 +565,8 @@ class Web(Stack):
             for who in ("bea", "bob"):
                 body = br[who].get("/table.htm?t=%s&r=0" % tid)[3]
                 self.assertIn('<img src="/board.gif?', body)               # the board: one image
-                self.assertEqual(len(set(re.findall(r'<img src="([^"]+)"', body))), 1)
+                srcs = set(re.findall(r'<img src="([^"]+)"', body)) - {"/img/external.gif"}   # the bar's Docs icon
+                self.assertEqual(len(srcs), 1)
                 self.assertNotIn("&#x", body)
                 m = re.search(r'href="(/move\.htm\?[^"]+)"', body)
                 if m:
@@ -641,7 +645,7 @@ class NewTableWeb(Stack):
         for name in ("Mancala", "Five in a Row", "Naval Combat", "Reversi", "Rummy Tile Classic"):
             self.assertEqual(body.count('value="Start a game of %s"' % name), 1, name)
         forms = {re.search(r'value="Start a game of ([^"]+)"', f).group(1): f
-                 for f in body.split("<li><form")[1:]}
+                 for f in body.split('<form action="/new.htm"')[1:]}
         self.assertIn('<select name="ru"><option value="kalah" selected>Store rules<option value="oware">'
                       'Oware rules</select>', forms["Mancala"])
         self.assertIn('<option value="standard">Standard: exactly five wins', forms["Five in a Row"])
@@ -654,6 +658,25 @@ class NewTableWeb(Stack):
             self.assertNotIn("<select name=\"np\"", forms[simple])
         for f in forms.values():                            # each form carries the action check, x=
             self.assertIn('<input type="hidden" name="x" value="', f)
+        # each game's form holds a small table: its icon in its own cell, its name on top, then a row for each
+        # choice with its label in the first column, so the choices read down a column
+        from adapters import siteimages as PIC
+        section = body[body.index(">Start a table<"):body.index('<a name="account">')]
+        self.assertNotIn("<ul>", section)
+        self.assertNotIn("<li>", section)
+        labels = re.compile(r'<tr><td align="right"(?: valign="top")? nowrap><font [^>]*>([^<]+)</font></td><td>')
+        for name, f in forms.items():
+            f = f[:f.index("</form>")]
+            self.assertEqual(f.count("<table"), 1, name)
+            gtype = re.search(r'name="g" value="([a-z]+)/', f).group(1)
+            rows = f.count("<tr")
+            self.assertIn('<tr valign="top"><td rowspan="%d">%s</td><td colspan="2">' % (rows, PIC.game_img(gtype)), f)
+            self.assertIn("<b>%s</b>" % name, f)
+            want = (["Rules:"] if 'name="ru"' in f else []) + (["Players:"] if 'name="np"' in f else []) + [
+                "Time per turn:", "Table:"]
+            self.assertEqual(labels.findall(f), want, name)
+            self.assertLess(f.index('name="bot"'), f.index('type="submit"'))
+            self.assertTrue(f.rstrip().endswith('value="Start a game of %s"></td></tr>\n</table>' % name), name)
         st, loc, _, _ = nia.act("/new.htm?g=mancala%2F1&ru=oware&turn=1h")
         self.assertEqual(st, 302)
         tid = parse_qs(urlsplit(loc).query)["t"][0]
