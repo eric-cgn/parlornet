@@ -643,7 +643,8 @@ class Service(Stack):
     def mv_gridwords(self, f, n, tid, seat, view):
         from bot.games import gridwords as B
         from bot.play import View
-        best = B.plays(B.state(View(view), seat), seat, 2.0, best=1)
+        v = View(view)
+        best = B.plays(B.state(v, seat), seat, 2.0, B.ruleset(v), best=1)
         if not best:
             f.type_line("pass")
             return
