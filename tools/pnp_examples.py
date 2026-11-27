@@ -36,7 +36,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOC = os.path.join(ROOT, "docs", "pnp.md")
-TERMINATORS = ("OK", "ERR", "ASK")
+TERMINATORS = ("OK", "ERR", "ASK", "CNT")     # CNT ends a page of a paged reply (PAG)
 OPENING = "PARLORNET/1"         # what a public-port connection sends first
 PLACEHOLDER_RE = re.compile(r"<([a-z][a-z0-9]*)>")
 FENCE_RE = re.compile(r"^```pnp ([a-z0-9-]+)\s*$")
@@ -586,6 +586,19 @@ async def _sample(r):
     await r.say("B", "RES 1", note="bob resigns: the game ends.")
     await r.say("A", "SIN 1")
     await r.say("A", "BYE")
+
+
+@scenario("paging", args=NONE)
+async def _paging(r):
+    await r.say("A", "HELO ann")
+    await r.say("A", "PAG 512", note="Pages of at most 512 bytes, each line counted with its CR LF.")
+    await r.say("A", "GAM", note="The list of games is longer than a page: whole lines, then CNT.")
+    await r.say("A", "CNT", note="CNT brings the next page. The last page ends with the reply's own final line.")
+    await r.say("A", "GAM")
+    await r.say("A", "LST", note="Any other request drops the rest of the list and is answered as usual.")
+    await r.say("A", "CNT", note="Nothing waits for CNT now.")
+    await r.say("A", "PAG 300", note="A page holds at least 512 bytes.")
+    await r.say("A", "PAG 0", note="PAG 0 turns paging off.")
 
 
 @scenario("errors", args=NONE)

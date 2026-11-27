@@ -90,7 +90,7 @@ S< OK
 
 ## Client requests
 
-A reply is any number of data lines (`GAM`, `TAB`, `V`, `EVT` ...) ending with exactly one line starting `OK`, `ERR code text` or, during sign-in, `ASK field label [secret]`. A client reads until it sees one of them. An `ERR` text may start with `wait=N`, the seconds to wait before trying again (for example after a wrong password).
+A reply is any number of data lines (`GAM`, `TAB`, `V`, `EVT` ...) ending with exactly one line starting `OK`, `ERR code text` or, during sign-in, `ASK field label [secret]`. A client reads until it sees one of them. An `ERR` text may start with `wait=N`, the seconds to wait before trying again (for example after a wrong password). On a public-port connection that asked for pages with `PAG`, a long reply comes in pages, and every page but the last ends with the line `CNT` (Paged replies, below).
 
 | Request | Meaning |
 |---|---|
@@ -147,6 +147,8 @@ A reply is any number of data lines (`GAM`, `TAB`, `V`, `EVT` ...) ending with e
 | `KEY NEW [label]` | Staying signed in: a sign-in key for this computer, asked for right after signing in with the password, once, on the same connection (below). `OK key`. The label names the computer in the player's list. It is up to 32 printable ASCII characters, and the server cleans it. Without one, the server uses what the connection said with `CLI MACH`, then `CLI PROG`. `ERR STATE` (not right after a sign-in with the password: after `SES`, after a sign-in with a key, or a second time), `ERR LIMIT` (the player has 20 keys), `ERR NOAUTH` (sign-in `none`, or a bot). |
 | `KEY LST` | The player's sign-in keys: `KEY n made used here label` lines, by number, where `made` and `used` are days (`YYYY-MM-DD`, UTC) and `here` marks the key this session signed in with or was given (`-` for the others); then `OK count`. |
 | `KEY DEL`, `KEY DEL n`, `KEY DEL all` | Forget this session's key (the connection stays signed in), the key numbered `n`, or every key of the player. Every other session that signed in with a forgotten key, or was given it, ends. `OK count`, or `ERR NOKEY` (no such key). |
+| `PAG bytes` | Public port only: send every reply on this connection in pages of at most `bytes` bytes, each line counted with its line ending (Paged replies, below). `bytes` is from 512 to 65535, and `PAG 0` turns paging off, as it is when the connection opens. `OK`, `ERR SYNTAX` for any other number, `ERR NOTPUBLIC` on the extension channel. Allowed before signing in. |
+| `CNT` | The next page of a reply that waits for it (Paged replies, below). `ERR STATE` when no reply is waiting. Allowed before signing in. |
 | `BYE` | Close. |
 
 ## Commands (`CMD`)
@@ -195,6 +197,35 @@ OK
 CMD 1 YES /resign
 INF You resigned table 1.
 OK
+```
+
+## Paged replies (`PAG`, `CNT`)
+
+A client with little memory may ask for long replies in pages, so that it never has to hold more than one page at a time. Lines are already at most 80 bytes, and a page limits a whole reply the same way. Paging is a matter of the public port. The extension channel refuses `PAG`, because the server extensions read whole replies. Play, telnet, the web and GameMaster never send it, so their replies come whole.
+
+- **Asking for pages.** `PAG bytes` sets the most bytes the server sends in one page of any reply on this connection. Each line counts with its line ending, so a CR LF line of 78 characters is 80 bytes. The number is from 512 to 65535. `PAG 0` turns paging off, and paging is off until the client sends `PAG`. The setting lasts until the connection closes or the client sends `PAG` again, and signing in or out leaves it alone.
+- **Pages.** A reply that fits in one page, its final line included, comes whole, exactly as without `PAG`. When a reply would be longer, the server sends as many whole lines as fit, then a line `CNT`, and waits. The `CNT` line counts toward the page too. A line is never split, and no data line starts with `CNT`, so a client reads a page until a line that starts with `OK`, `ERR`, `ASK` or `CNT`.
+- **The next page.** The client sends the request `CNT` for the next page. Each page follows the same rule, and the last page ends with the reply's own final line. That is `OK` or `ERR`, or `ASK` during sign-in. `CNT` with no reply waiting is `ERR STATE no reply is waiting for CNT`.
+- **Dropping the rest.** Any other request while a reply waits drops the rest of that reply, and the new request is answered as usual. `PAG` is a request like any other here. A line the server refuses without running it, with `ERR RATE` or `ERR NEWLINE`, leaves the rest waiting. `CNT` counts against the rate limit like any other request.
+- **Events.** The events of a reply count as read when the reply is made, whether every page of it is sent or not. Each `EVT` line carries its number, so a client that drops the rest of a `SIN` or `WAT` reply asks again with `SIN table n` from the last event it read.
+- **The server's own lines.** The time allowance's notices go in front of the next reply, or in front of the next page when the client sends `CNT`, and they count toward that page (Time allowance, below). `ERR IDLE` and `ERR LIMIT` close the connection when they are due, also while a reply waits for `CNT`, and the rest of the reply goes with the connection. Waiting for `CNT` is idle time like any other.
+- **Requests that change something.** The reply to a request that changes something always fits in one page, so a client never has to choose between the rest of such a reply and its next request. At 512 bytes, the least a client may ask for, this covers signing in and signing up with all their questions, `OUT`, `PWD`, `KEY NEW` and `KEY DEL`, `NEW`, `JON`, `LVE`, `INV`, `UNV`, `SEE`, `CHT`, `NOTE` with a text, `PRF SET` and `PRF DEL`, `PFL SET`, `CLI`, `CAN`, `ACT`, `PAG` and every command of `CMD` that changes something, with the two longest notices of the time allowance in front. The longest of them, the question for the password from a sign-up mail, is about 420 bytes with the notices. The reply to a move fits as well, as the next point says.
+- **Events after a move.** The reply to `MOV`, `UND`, `END` and `RES` carries the table's events since the connection last read them (Events, below), and those have no bound of their own. A Cannon Fire shot at a table of eight can come near 512 bytes by itself, and chat from others may have piled up before it. So on a connection that pages, these replies carry only the oldest of those events that fit in one page, together with the notices in front and the reply's own final line. The connection's event cursor stays after the last event sent, and the next `SIN` without a number brings the rest, in order. A client that pages reads `SIN` after a move, to get any events that did not fit. `SIN table n` from the last event it read works as well. Without `PAG` these replies carry every event.
+- **Replies that only show.** Every other reply may come in pages. The long ones are `LST`, above all with `clients`, `VUE` with `M`, `GAM`, `WHO`, `MOTD`, `TRN`, `FEED`, `TOP`, `PFL`, `KEY LST`, `NOTE`, `SIN` and `WAT`, and `CMD` with a command that only shows something, such as `/help` or `/list`.
+
+```
+C> PAG 512
+S< OK
+C> GAM
+S< GAM backgammon/1 standard Backgammon 2 2 staged
+   (eight more GAM lines)
+S< GAM mancala/1 kalah Mancala 2 2
+S< CNT
+C> CNT
+S< GAM mancala/1 oware Mancala 2 2
+   (four more GAM lines)
+S< GAM rummytile/1 standard Rummy_Tile_Classic 2 4 staged,nomoves,drop
+S< OK
 ```
 
 ## Data kept per extension and player (`PRF`)
@@ -457,7 +488,7 @@ Events are numbered per table: `EVT table seq kind ...`.
 
 - Common kinds: `JOIN seat name`, `CLIENT seat [text]` (what the seat's player plays with, right after `JOIN` and when it changes; Clients and machines, above), `LEAVE seat` (a player stood up from an open table), `START`, `TURN seat`, `END result`, `CHT seat text` (`seat` is `-` for a watcher), `INVITE seat name`, `UNINVITE seat name why`. In the invitation events, `seat` is the seat held for the player, or `-` when no seat is held. `why` says how the invitation ended. It is `declined` when the player declined it, and `withdrawn` when a seated player withdrew it or the operator deleted the account. It is `expired` when the hour ran out, `started` when the game began without the player, and `left` when the player who made the invitation stood up. Servers older than this send no reason, so a client should treat the word as optional. `END abandoned` means the operator ended the table. `GONE seat resign|timeout` means one seat left a game flagged `drop` and the others play on. `INT false text` comes once, when the table is marked `integrity=false` (Tables marked integrity=false, above).
 - Type-defined kinds say exactly what changed (a checker moved, tiles placed, terrain changed, a die rolled). They are the deltas: a client can keep its model by applying them without knowing the rules, or refetch with `VUE` at any time.
-- A `MOV` reply carries, before its `OK`, every event the client has not yet seen for that table (its own move, and the opponent's reply if it has already come).
+- A `MOV` reply carries, before its `OK`, every event the client has not yet seen for that table (its own move, and the opponent's reply if it has already come). On a connection that pages, it carries as many as fit in one page (Paged replies, above).
 - `SIN` and `WAT` end with `OK seq`, the sequence number to ask from next time.
 
 ## Views
