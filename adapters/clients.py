@@ -45,6 +45,7 @@ HOST = "<i>host</i>"                     # the server's name, in every setup ste
 INFO_MAC = "http://ftp.funet.fi/pub/mac/info-mac/"   # funet's mirror: plain HTTP with no redirect, so period browsers can follow it
 DISCMASTER = "https://discmaster.textfiles.com/"
 MILL = "http://mill.1in1e6.com/"
+FTP = "ftp://ftp.parlornet.org/"         # ParlorNet's own FTP site, which serves the files a player needs
 
 # The Clients page's finder (and the summary grid's links): (value in the address, label). Every platform and processor a player may
 # ask about is listed, whether or not a client runs there yet: an empty answer shows a gap.
@@ -61,7 +62,8 @@ ARCHIVE = "archive"
 BUILT_IN = "built into the operating system"
 BUNDLE = "vendor or OS bundle"
 OTHER = "other"
-KINDS = (AUTHOR, ARCHIVE, BUILT_IN, BUNDLE, OTHER)
+PARLORNET_FTP = "ParlorNet's FTP site"
+KINDS = (AUTHOR, ARCHIVE, BUILT_IN, BUNDLE, PARLORNET_FTP, OTHER)
 
 class Original:
     """An original server of a protocol that is still running, mentioned wherever its protocol and clients
@@ -424,7 +426,8 @@ BROWSERS = [
 
 TELNETS = [
     Client("ncsa-telnet", "NCSA Telnet", "telnet", "1986",
-           "NCSA Telnet came out for the Mac and MS-DOS in 1986; 2.7b4 (1996) is the last Mac version.",
+           "NCSA Telnet came out for the Mac and MS-DOS in 1986. 2.7b4, whose files are dated June 1995, is the "
+           "last Mac version.",
            "Mac System 6-9 (68000+, PowerPC)", (("mac", ("68000", "68020", "ppc")),),
            ((ARCHIVE, "Info-Mac", INFO_MAC + "comm/inet/ncsa-telnet-27b4.hqx",
              "`ncsa-telnet-27b4.hqx`."),),
@@ -437,7 +440,9 @@ TELNETS = [
            ((AUTHOR, "Rolf Braun", "https://www.club.cc.cmu.edu/~rbraun/files/bettertelnet-2.0fc1.sit.bin",
              "`bettertelnet-2.0fc1.sit.bin`."),
             (ARCHIVE, "Info-Mac", INFO_MAC + "comm/inet/better-telnet-122-fat.hqx",
-             "`better-telnet-122-fat.hqx`, version 1.2.2.")),
+             "`better-telnet-122-fat.hqx`, version 1.2.2."),
+            (PARLORNET_FTP, "ftp.parlornet.org", FTP + "clients/apple/macintosh_68k/bettertelnet/",
+             "`bettertelnet-2.0fc1.sit.bin`, the same 2.0fc1, with its source beside it.")),
            version="2.0fc1", has=dict(arrows="yes", colour="yes", glyphs="not CP437; pick the ansi display")),
     Client("nifty-telnet", "NiftyTelnet", "telnet", "1996",
            "Chris Newman's NiftyTelnet 1.1 is from 1996.",
@@ -514,7 +519,10 @@ PERIOD = [
            "earlier versions were not found.",
            "Mac OS 7-9 (68020+, PowerPC)", (("mac", ("68020", "ppc")),),
            ((ARCHIVE, "Info-Mac", INFO_MAC + "game/reversi-the-eclipse-12.hqx",
-             "`reversi-the-eclipse-12.hqx`, 2,609,150 bytes."),),
+             "`reversi-the-eclipse-12.hqx`, 2,609,150 bytes."),
+            (PARLORNET_FTP, "ftp.parlornet.org", FTP + "patches/apple/macintosh_68k/",
+             "[Eclipse 68k Fix](/eclipse-68k-fix.html), the patcher a 68k Mac needs, as `eclipse-68k-fix.bin`, "
+             "`.hqx` or `.dsk`.")),
            version="1.2", games=("reversi",), port=6503, protocol="ios", style="ios",
            status_note="Reversi The Eclipse 1.2 has been played on a PowerBook 165 with System 7.6.",
            ratings=(
@@ -632,72 +640,71 @@ PERIOD = [
                       "signing up from BobGrid froze it until the server was fixed and has not been tried again "
                       "since.", "2026-11-23", short="2.3, Linux (x86)"),)),
     Client("gamemaster", "GameMaster", "period", "1991",
-           "GameMaster 1.0.0 and its User Kit rulebooks are dated December 1991.",
+           "GameMaster 1.0.0 and its User Kit rulebooks are dated December 1991. ParlorNet's rulebooks for it came "
+           "out in 2026.",
            "Mac Plus or later, System 6 or 7, with MacTCP", (("mac", ("68000", "68020")),),
-           ((ARCHIVE, "Discmaster (BBS in a Box Trilogy II CD)", DISCMASTER + "browse/27148/"
+           ((PARLORNET_FTP, "ftp.parlornet.org", FTP + "clients/apple/macintosh_68k/gamemaster/",
+             "`gamemaster1.0.cpt.hqx`, GameMaster 1.0.0 with its own rulebooks, in a Compact Pro archive. "
+             "Povertyware that its author asks you to share around."),
+            (ARCHIVE, "Discmaster (BBS in a Box Trilogy II CD)", DISCMASTER + "browse/27148/"
              "BBS%20in%20a%20box%20-%20Trilogy%20II.iso/Files/Game/F-G/GameMaster",
-             "The folder with `GameMaster` and its rulebooks. Put `GameMaster`, `Dots&Boxes`, `Othello` and "
-             "`BattleShips` in one folder, with ParlorNet's rulebooks. Povertyware."),
+             "The folder with `GameMaster` and its rulebooks."),
             (ARCHIVE, "Macintosh Repository", "https://www.macintoshrepository.org/9523-gamemaster",
              "The same program and rulebooks.")),
-           version="1.0.0", games=("dotsandboxes", "reversi", "navalcombat"), port=6508, protocol="gamemaster",
-           style="gamemaster",
-           status_note="Its Othello, Dots&Boxes and BattleShips have played against the bot on an emulated Mac with "
-                       "System 7.6.1, through ParlorNet's rulebook.",
+           version="1.0.0", games=("dotsandboxes", "reversi", "navalcombat", "checkers", "mancala", "fiveinarow",
+                                   "gridwords", "rummytile", "cannonfire", "backgammon"),
+           port=6508, protocol="gamemaster", style="gamemaster",
+           status_note="Its Othello, Dots&Boxes and BattleShips and ParlorNet's seven rulebooks have played against "
+                       "the bot on emulated Macs, through ParlorNet's rulebook.",
            ratings=(
                Rating(GOLD, "mac", ("68020",), "1.0.0",
                       "GameMaster 1.0.0 has played a whole game each of Othello, Dots&Boxes and BattleShips "
                       "against the bot on an emulated Mac with System 7.6.1. On the same Mac, ParlorNet's rulebook "
                       "signed in and started Othello and BattleShips, and Othello and Dots&Boxes moves went both "
-                      "ways through it.",
-                      "2026-11-22"),
+                      "ways through it. ParlorNet's rulebooks are not a patch, so the rating stays Gold. GameMaster "
+                      "was made to take new games as rulebooks, and adding ParlorNet's leaves GameMaster itself "
+                      "unchanged. Its own games play correctly as they are.",
+                      "2026-11-22", games=("dotsandboxes", "reversi", "navalcombat")),
                Rating(GOLD, "mac", ("68000",), "1.0.0",
                       "On an emulated Mac Plus (Mini vMac) on LocalTalk through a MacIP gateway, GameMaster 1.0.0 with "
                       "ParlorNet's rulebook played a whole game each of Othello, Dots&Boxes and BattleShips against "
                       "the bot under System 6.0.8 with 4 MB, Othello again with 1 MB at a real Plus's speed, and "
                       "Othello under System 7.5.5.",
-                      "2026-11-24"))),
-    Client("parlornet-rulebooks", "ParlorNet rulebooks for GameMaster", "period", "2026",
-           "ParlorNet's Checkers, Mancala, Five in a Row, Grid Words, Rummy Tile and Cannon Fire rulebooks for "
-           "GameMaster 1.0.0 came out in 2026, and its Backgammon rulebook later that year.",
-           "Mac Plus or later, MacTCP, GameMaster 1.0.0", (("mac", ("68000", "68020")),),
-           ((OTHER, "ParlorNet's docs site", None,
-             "[Install ParlorNet Rulebooks](/gamemaster-rulebooks.html), which also installs ParlorNet's own "
-             "rulebook, and each rulebook on its own. MIT license."),),
-           version="1.1.1", games=("checkers", "mancala", "fiveinarow", "gridwords", "rummytile", "cannonfire",
-                                   "backgammon"),
-           port=6508, protocol="gamemaster", style="gamemaster",
-           status_note="All seven have played against the bot on an emulated Mac with System 7.6.1, and they run "
-                       "on an emulated Mac Plus.",
-           ratings=(
-               Rating(GOLD, "mac", ("68020",), "1.1.1",
+                      "2026-11-24", games=("dotsandboxes", "reversi", "navalcombat")),
+               Rating(GOLD, "mac", ("68020",), "1.0.0 with ParlorNet's rulebooks 1.1.1",
                       "Checkers, Mancala and Five in a Row have each been played to the end against the bot on an "
                       "emulated Mac with System 7.6.1 and GameMaster 1.0.0, with an invitation accepted, a swap of "
                       "players, a resignation and a draw offer.", "2026-11-22",
-                      games=("checkers", "mancala", "fiveinarow")),
-               Rating(NOT_RATED, "mac", ("68020",), "1.1.1",
+                      games=("checkers", "mancala", "fiveinarow"),
+                      short="rulebooks 1.1.1, Mac OS (68020+)"),
+               Rating(NOT_RATED, "mac", ("68020",), "1.0.0 with ParlorNet's rulebooks 1.1.1",
                       "Grid Words, Rummy Tile and Cannon Fire have played turns against the bot on the same emulated "
                       "Mac, a word scored and an exchange, tiles laid and drawn, and a shot each way, but no whole "
-                      "game yet. " + A_REAL_TEST, games=("gridwords", "rummytile", "cannonfire")),
-               Rating(GOLD, "mac", ("68000",), "1.1.1",
+                      "game yet. " + A_REAL_TEST, games=("gridwords", "rummytile", "cannonfire"),
+                      short="rulebooks 1.1.1, Mac OS (68020+)"),
+               Rating(GOLD, "mac", ("68000",), "1.0.0 with ParlorNet's rulebooks 1.1.1",
                       "On an emulated Mac Plus (Mini vMac) with System 6.0.8 on LocalTalk through a MacIP gateway, "
                       "Checkers, Mancala, Five in a Row, Rummy Tile and Cannon Fire have each been played to the end "
                       "against the bot with 4 MB, and Checkers again with 1 MB at a real Plus's speed.",
-                      "2026-11-24", games=("checkers", "mancala", "fiveinarow", "rummytile", "cannonfire")),
-               Rating(NOT_RATED, "mac", ("68000",), "1.1.1",
+                      "2026-11-24", games=("checkers", "mancala", "fiveinarow", "rummytile", "cannonfire"),
+                      short="rulebooks 1.1.1, Mac OS (68000)"),
+               Rating(NOT_RATED, "mac", ("68000",), "1.0.0 with ParlorNet's rulebooks 1.1.1",
                       "On the same emulated Mac Plus, Grid Words scored a word and the bot replied, but no whole "
-                      "game has been played yet. " + A_REAL_TEST, games=("gridwords",)),
-               Rating(GOLD, "mac", ("68020",), "1.1.1",
+                      "game has been played yet. " + A_REAL_TEST, games=("gridwords",),
+                      short="rulebooks 1.1.1, Mac OS (68000)"),
+               Rating(GOLD, "mac", ("68020",), "1.0.0 with ParlorNet's rulebooks 1.1.1",
                       "Backgammon has been played to the end three times on an emulated Mac with System 7.6.1 and "
                       "GameMaster 1.0.0, started from the ParlorNet rulebook 0.5: twice against the bot, which took "
                       "the Mac's double, and once against a player who took the Mac's double and redoubled, which "
                       "the Mac took. Undo, the mirrored board and bearing off were used along the way.",
-                      "2026-11-24", games=("backgammon",)),
-               Rating(GOLD, "mac", ("68000",), "1.1.1",
+                      "2026-11-24", games=("backgammon",),
+                      short="rulebooks 1.1.1, Mac OS (68020+)"),
+               Rating(GOLD, "mac", ("68000",), "1.0.0 with ParlorNet's rulebooks 1.1.1",
                       "On an emulated Mac Plus (Mini vMac) with System 6.0.8 and 4 MB on LocalTalk through a MacIP "
                       "gateway, Backgammon has been played to the end twice: against the bot, which took the Mac's "
                       "double, and against a player who doubled, which the Mac took.", "2026-11-24",
-                      games=("backgammon",)))),
+                      games=("backgammon",),
+                      short="rulebooks 1.1.1, Mac OS (68000)"))),
     Client("netboxes", "NetBoxes 1.1", "period", "2000",
            "Will Helling's NetBoxes 1.1 (Brainfreeze Entertainment) is dated 22 March 2000.",
            "Mac OS 8 and 9 (PowerPC), with NetSprocket", (("mac", ("ppc",)),),
@@ -811,7 +818,9 @@ PERIOD = [
              "networdz.zip",
              "`networdz.zip`, the program, its help file and dictionaries. US$12 shareware."),
             (OTHER, "ParlorNet Link", "https://github.com/eric-cgn/parlornet-networdz-link/releases",
-             "`PNLINK.ZIP`, ParlorNet's own program that connects Networdz to the parlor. MIT license.")),
+             "`PNLINK.ZIP`, ParlorNet's own program that connects Networdz to the parlor. MIT license."),
+            (PARLORNET_FTP, "ftp.parlornet.org", FTP + "patches/pc/windows/",
+             "`PNLINK.ZIP`, the same ParlorNet Link.")),
            version="2.0", games=("gridwords",), port=6516, protocol="networdz", style="networdz",
            status_note="Networdz 2.0 has played whole games on the parlor through ParlorNet Link, under Wine.",
            ratings=(
@@ -869,7 +878,14 @@ PERIOD = [
            ((AUTHOR, "ParlorNet's releases on GitHub", "https://github.com/eric-cgn/parlornet-8bit/releases/tag/v2.0",
              "`parlornet.dsk`, the Apple IIe's self-booting disk; `parlor-files.po`, the program for your own "
              "ProDOS; `parlornet-gs.po`, the Apple IIgs program for GS/OS with Marinetti; and `parlornet.d64`, "
-             "the Commodore 64's disk, which a Commodore 128 boots too. MIT license."),),
+             "the Commodore 64's disk, which a Commodore 128 boots too. MIT license."),
+            (PARLORNET_FTP, "ftp.parlornet.org", FTP + "clients/apple/apple_iie/",
+             "The Apple IIe's `parlornet.dsk` and `parlor-files.po`, and `parlornet.shk`, a ShrinkIt archive of "
+             "the program for your own ProDOS."),
+            (PARLORNET_FTP, "ftp.parlornet.org", FTP + "clients/apple/apple_iigs/",
+             "The Apple IIgs's `parlornet-gs.po`, and `parlornet-gs.shk`, a ShrinkIt archive of it."),
+            (PARLORNET_FTP, "ftp.parlornet.org", FTP + "clients/commodore_64/",
+             "The Commodore 64's `parlornet.d64`.")),
            version="2.0",
            games=("reversi", "backgammon", "gridwords", "dotsandboxes", "navalcombat", "checkers", "mancala",
                   "fiveinarow", "rummytile", "cannonfire"),

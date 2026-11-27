@@ -126,5 +126,4 @@ Anything else you type is chat with the other players.
 
 ## Screenshots
 
-![Networdz 2.0 at the end of a game against the bot, with the parlor as the host, under Wine](../../static/img/networdz-game.gif)
-![ParlorNet Link, which connects Networdz to the parlor, under Wine](../../static/img/networdz-link.gif)
+None yet.

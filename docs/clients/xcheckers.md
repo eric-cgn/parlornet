@@ -33,4 +33,7 @@ The help window's buttons send what the resource file says. The build fills them
 
 ## Screenshots
 
-![xcheckers 2.2.3 in a game against the bot](../../static/img/xcheckers.gif)
+![xcheckers' terminal showing the parlor's greeting and a login prompt](../../static/img/xcheckers-login.gif "xcheckers 2.2.3 connects to the parlor, which greets it in the terminal and asks for a login.")
+![The terminal after sign-in, with the who command listing ann and the bot](../../static/img/xcheckers-who.gif "After signing in, the who command lists the players online, here ann and the bot.")
+![The xcheckers board window in the middle of a game, red pieces against white](../../static/img/xcheckers-game.gif "In the board window, ann plays the bot with the red pieces, and the clocks run at the bottom.")
+![The terminal line that reports the game against the bot as a draw](../../static/img/xcheckers-result.gif "The terminal reports the end of the game, a draw by the move limit.")

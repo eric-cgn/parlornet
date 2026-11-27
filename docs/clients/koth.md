@@ -22,4 +22,7 @@ KOTH does not play on a parlor, for the reason under History. Its players can pl
 
 ## Screenshots
 
-None yet.
+![KOTH's whole screen before the first shot, with two tanks on hills under a dark blue sky](../../static/img/koth-arena.gif "KOTH 0.8.0 on its own server, shown at a quarter of its size, with Bob and Alice in their tanks before the first shot.")
+![KOTH's weapon shop before a round, listing weapons and prices](../../static/img/koth-pregame.gif "Before each round, KOTH's shop sells weapons, and here Alice has bought a MIRV.")
+![A large white blast over Alice's tank](../../static/img/koth-tac-nuke.gif "Bob's tactical nuke lands on Alice's tank.")
+![Bob's tank in a dug-out crater, with his health and a chat line from Alice](../../static/img/koth-later.gif "Later in the game, Bob's tank sits in a crater, and Alice's chat line shows under the field.")

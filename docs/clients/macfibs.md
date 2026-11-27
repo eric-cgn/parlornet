@@ -29,6 +29,7 @@ MacFIBS 3 is shareware, and its ReadMe asks you to register once you have played
 
 ## Screenshots
 
-![The Server pane of the Preferences, with the server's name and port 6505](../../static/img/macfibs-server.gif)
-![The Game Room's player list after signing in](../../static/img/macfibs-players.gif)
-![A match in progress, after the opening roll](../../static/img/macfibs-board.gif)
+![MacFIBS's Connect dialog with the server address, the user name ann and a hidden password](../../static/img/macfibs-connect.gif "MacFIBS 3 asks for a user name and password when File, Connect opens the dialog.")
+![The Game Room's Players tab listing ann and the bot, both ready](../../static/img/macfibs-game-room.gif "The Game Room lists the players online after signing in.")
+![The MacFIBS board with red and white checkers and two white checkers on the bar](../../static/img/macfibs-board.gif "In a match against the bot, two white checkers wait on the bar after being hit.")
+![A small Chat with bot window with the bot's greeting and a reply from the player](../../static/img/macfibs-chat.gif "The bot's greeting and the player's reply appear in the Chat with bot window.")

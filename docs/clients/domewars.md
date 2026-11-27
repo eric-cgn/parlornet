@@ -21,4 +21,7 @@ Dome Wars does not play on a parlor, for the reason under History. Its players c
 
 ## Screenshots
 
-None yet.
+![The File menu of Dome Wars 1.5.1 with Join Net Game grayed out](../../static/img/domewars-file-menu.gif "Dome Wars 1.5.1 grays out Join Net Game, because only 1.2b1 plays over a network.")
+![The Dome Wars Player Selection Window with two players in the game, each with a name and a color](../../static/img/domewars-player-selection.gif "Nathan Sturtevant's Dome Wars sets up a game on one Mac in its Player Selection Window.")
+![A Dome Wars landscape of mountains under a starry sky, at a quarter of its size](../../static/img/domewars-local-game.gif "Two computer players fight it out on one Mac, with no parlor involved.")
+![A red dome on a mountainside under a starry night sky](../../static/img/domewars-dome-close-up.gif "A close-up of a dome on the Dome Wars landscape.")

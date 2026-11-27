@@ -15,8 +15,10 @@ Use 5.x on current Windows, or Pro 2.3 on Windows 95 and NT. Its readme says to 
 
 ## Known quirks
 
-Nothing known yet.
+- Tera Term Pro 2.3 doesn't show the name you type at `Login` or at `Name you want`, because its local echo is off and the parlor leaves the echo to the terminal until you sign in. The name still gets there. Local echo in Setup > Terminal should show it.
 
 ## Screenshots
 
-None yet.
+![The PuTTY window titled parlor - PuTTY, showing the start of ParlorNet's title in colored blocks](../../static/img/telnet-title.gif "Every telnet program reaches the same screens. Here PuTTY shows ParlorNet's title page.")
+![The lobby in PuTTY, with bob's Checkers game listed under Other tables](../../static/img/telnet-lobby.gif "The lobby lists the tables being played, here bob's game against the bot.")
+![Half of a Backgammon board in PuTTY, with a white checker waiting on the bar](../../static/img/telnet-backgammon.gif "A game of Backgammon against the bot is under way, and cora has a checker on the bar.")

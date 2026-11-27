@@ -23,11 +23,12 @@ Use version 1.2, the only version the 68k fix accepts. Freeverse no longer sells
 
 - On 68k Macs, version 1.2 turns every host name shorter than 32 characters into repeats of its first letter, so it cannot connect. The [Eclipse 68k Fix](http://docs.parlornet.org/eclipse-68k-fix.html) changes two bytes in your copy to fix it.
 - IOS login names are at most 8 letters and digits, so an account with a longer name cannot sign in from Eclipse.
-- In a test with the screen set to millions of colors, the game said there was not enough memory to create a new game window. Giving it more memory in the Finder's Get Info window (12,000K instead of the suggested 7,000K) fixed it, and fewer colors should help too.
+- With the suggested 7,000K, the game said there was not enough memory to create a new game window, in 256 colors as well as in millions. Giving it 12,000K in the Finder's Get Info window fixed it.
 - Games here are unrated, so there are no ratings to see.
 
 ## Screenshots
 
-![The Log onto ios server dialog, with the server's name and port 6503](../../static/img/eclipse-server.gif)
-![The Players & Command Window after signing in, with the bot in the player list](../../static/img/eclipse-players.gif)
-![A game against the bot, a few moves in](../../static/img/eclipse-game.gif)
+![The Log onto ios server dialog with the parlor's address as the hostname and 6503 as the port](../../static/img/eclipse-log-on.gif "Reversi The Eclipse logs on to the parlor with its own Log on IOS dialog.")
+![The player list of the Players and Command Window, with the bot and juno, above the Match, Observe and Talk To buttons](../../static/img/eclipse-player-list.gif "The Players & Command Window lists who is online, and Match starts a game.")
+![The Match you against bot dialog with 20 minutes for each player](../../static/img/eclipse-match-the-bot.gif "Choosing bot and clicking Match opens this dialog, and OK starts the game.")
+![Lars Graulund's Greek-style Reversi board a few moves into a game, with gold and blue discs, at a third of its size](../../static/img/eclipse-game.gif "A few moves into a game against the bot in Lars Graulund's Reversi The Eclipse on System 7.6.1.")

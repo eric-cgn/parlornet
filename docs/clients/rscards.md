@@ -34,16 +34,7 @@ Every screen is built for 2400 baud: a whole board costs 1 to 2.5 KB once, a mov
 
 ## Screenshots
 
-![The lobby, on the IBM PC version in DOSBox](../../static/img/rscards-ibm-lobby.gif)
-![The end of a whole game of Checkers against the bot, IBM PC](../../static/img/rscards-ibm-checkers.gif)
-![Reversi on the IBM PC version](../../static/img/rscards-ibm-reversi.gif)
-![The end of a whole game of Checkers on the color Mac version in Basilisk II](../../static/img/rscards-mac-checkers.gif)
-![Checkers on the mono Mac version](../../static/img/rscards-mac-mono.gif)
-![Backgammon on the color Mac version](../../static/img/rscards-mac-backgammon.gif)
-![Mancala on the color Mac version](../../static/img/rscards-mac-mancala.gif)
-![Five in a Row on the color Mac version](../../static/img/rscards-mac-fiveinarow.gif)
-![Dots and Boxes on the color Mac version](../../static/img/rscards-mac-dotsandboxes.gif)
-![Naval Combat on the color Mac version](../../static/img/rscards-mac-navalcombat.gif)
-![Grid Words on the color Mac version](../../static/img/rscards-mac-gridwords.gif)
-![Rummy Tile Classic on the color Mac version](../../static/img/rscards-mac-rummytile.gif)
-![Cannon Fire on the color Mac version](../../static/img/rscards-mac-cannonfire.gif)
+![The right side of the RSCARDS lobby on the color Mac version, with one game of juno's, no invitations and two other tables with Watch buttons](../../static/img/rscards-mac-color-lobby.gif "The lobby of J. Weaver Jr.'s RSCARDS on the color Mac version lists your games and the other tables.")
+![A green, red and yellow Backgammon board with dice showing 1 and 5 and a ring where the picked checker can land, at half size](../../static/img/rscards-mac-color-backgammon.gif "In Backgammon on the color Mac version, a ring marks where the picked checker can land.")
+![The whole window of the mono Mac version with a Reversi board on the left and the game's status on the right, at a third of its size](../../static/img/rscards-mac-mono-reversi.gif "The mono Mac version plays Reversi in black and white.")
+![A Dots and Boxes board on the IBM PC version with several lines drawn and one box taken by the bot, at half size](../../static/img/rscards-ibm-dots-and-boxes.gif "Dots and Boxes against the bot on the IBM PC version in DOSBox.")

@@ -34,5 +34,7 @@ Challenging any player in the list invites them; they accept by sitting down, on
 
 ## Screenshots
 
-![A game against the bot on an emulated Mac](../../static/img/awale-game.gif)
-![The result of that game](../../static/img/awale-result.gif)
+![Awale's Network Setup dialog with the name cora and ParlorNet picked in the list of networks](../../static/img/awale-network-setup.gif "In Network Setup the player fills in a name and picks ParlorNet before clicking Connect now.")
+![The Opponent selection list with two rows, ParlorNet and the bot, and the bot selected](../../static/img/awale-players.gif "The players' list shows ParlorNet and the bot, ready to be challenged.")
+![The Awale board with its two rows of six pits a few moves into a game](../../static/img/awale-game.gif "A game against the bot is under way, and two seeds have been captured.")
+![Awale's game result dialog showing 4 seeds captured to 25 and the words Your opponent wins](../../static/img/awale-result.gif "The bot wins 25 to 4, and Awale shows the parlor's final count.")
