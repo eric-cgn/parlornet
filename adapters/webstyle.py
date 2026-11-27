@@ -6,8 +6,8 @@ server's name and a link to the message of the day. No CSS: the look comes from 
 and one small GIF, the emblem. Each color and face list is named once, here.
 
 The two sites share the frame but not the colors. The game server's pages are card-table green (GREEN), and the
-docs site's pages are greyscale (GREY), so a reader can tell at a glance which site they are on when they move
-between the two. The helpers read the palette in use (colors()), which is GREEN unless a build switches it
+docs site's pages are light blue (DOCS_BLUE), so a reader can tell at a glance which site they are on when they
+move between the two. The helpers read the palette in use (colors()), which is GREEN unless a build switches it
 with using().
 
 How the palette reads in each class of browser:
@@ -34,8 +34,13 @@ GREEN = Palette(paper="#FFFFFF", ink="#000000",
                 bar="#99CC99",          # light felt
                 tint="#FFFFCC",         # ivory
                 link="#003399", vlink="#663366", alink="#CC0000")
-GREY = Palette(paper="#FFFFFF", ink="#000000", edge="#333333", heading="#000000", bar="#999999",
-               tint="#CCCCCC", link="#000000", vlink="#333333", alink="#666666")
+DOCS_BLUE = Palette(paper="#FFFFFF",
+                    ink="#003366",          # navy
+                    edge="#336699",         # steel blue
+                    heading="#003366",      # navy, as the text
+                    bar="#99CCFF",          # sky blue
+                    tint="#CCFFFF",         # pale blue
+                    link="#0033CC", vlink="#000099", alink="#0000FF")
 _IN_USE = [GREEN]
 
 
@@ -46,7 +51,7 @@ def colors():
 
 @contextmanager
 def using(palette):
-    """Build pages in palette for a while (the docs site's build uses GREY)."""
+    """Build pages in palette for a while (the docs site's build uses DOCS_BLUE)."""
     old = _IN_USE[0]
     _IN_USE[0] = palette
     try:
@@ -68,8 +73,9 @@ MOTD = [False]              # whether the server has a message of the day (web.p
 
 DOCS = ["http://docs.parlornet.org/"]     # site.docs_url, the docs site ("" when cleared; web.py keeps it current)
 
-# The icon after every link from the game server's pages to the docs site, which shows that the link leaves the
-# site: a box with an arrow out of its corner, drawn by external_gif(). Text browsers show its ALT text.
+# The icon after every link from the game server's pages to the docs site, and after the docs site's link back to
+# the main site, which shows that the link leaves the site: a box with an arrow out of its corner, drawn by
+# external_gif() in each site's link color. Text browsers show its ALT text.
 EXTERNAL = "/img/external.gif"
 EXTERNAL_SIZE = 9
 EXTERNAL_ALT = "(external)"
@@ -106,10 +112,11 @@ def away(html):
     return html + "&nbsp;" + external_img()
 
 
-def external_gif():
-    """The external-link icon: EXTERNAL_ROWS in the game server's link color, on a transparent background."""
+def external_gif(palette=GREEN):
+    """The external-link icon: EXTERNAL_ROWS in the palette's link color, on a transparent background. The game
+    server's is in GREEN's, and the docs site's in DOCS_BLUE's."""
     from .board import transparent_gif
-    ink = tuple(int(GREEN.link[i:i + 2], 16) for i in (1, 3, 5))
+    ink = tuple(int(palette.link[i:i + 2], 16) for i in (1, 3, 5))
     px = [1 if ch == "#" else 0 for row in EXTERNAL_ROWS for ch in row]
     return transparent_gif(EXTERNAL_SIZE, EXTERNAL_SIZE, [(255, 255, 255), ink], px)
 

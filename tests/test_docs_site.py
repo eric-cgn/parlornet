@@ -130,7 +130,7 @@ class SiteWide(Built):
         from docsite import build
         from docsite import downloads
         for name in ("index.html", "protocols.html", "browsers.html", "telnet.html", "docs.html",
-                     "eclipse-68k-fix.html", "404.html", "img/parlor.gif",
+                     "eclipse-68k-fix.html", "404.html", "img/parlor.gif", "img/external.gif",
                      "img/eclipse-68k-fix.gif", "download/eclipse-68k-fix-readme.txt", ".nojekyll",
                      "parlornet-rulebook.html", "download/parlornet-rulebook-readme.txt",
                      "gamemaster-rulebooks.html", "download/gamemaster-rulebooks-readme.txt", "running.html",
@@ -155,6 +155,22 @@ class SiteWide(Built):
             self.assertFalse(p.endswith((".md", ".patch", ".py")), p)
         st = os.stat(os.path.join(self.out, "index.html"))
         self.assertGreater(st.st_size, 0)
+
+    def test_emblem_and_external_icon(self):
+        """The emblem and the external-link icon are drawn in the docs site's blues. The icon is the main site's
+        picture, EXTERNAL_ROWS, in the docs site's link color on a transparent background."""
+        from adapters import board, webstyle as S
+        from adapters.web import make_gif
+        self.assertEqual(self.files["img/parlor.gif"], S.emblem_gif(make_gif, S.DOCS_BLUE))
+        self.assertEqual(self.files["img/parlor.gif"][13:16], bytes.fromhex(S.DOCS_BLUE.edge[1:]))
+        data = self.files["img/external.gif"]
+        self.assertEqual(data, S.external_gif(S.DOCS_BLUE))
+        self.assertNotEqual(data, S.external_gif())                     # not the main site's copy
+        self.assertEqual((data[6], data[8]), (S.EXTERNAL_SIZE, S.EXTERNAL_SIZE))
+        self.assertIn(b"\x21\xf9\x04\x01", data)                         # index 0 is transparent
+        self.assertEqual(data[13:19], bytes([255, 255, 255]) + bytes.fromhex(S.DOCS_BLUE.link[1:]))
+        img = board.decode_gif(data)
+        self.assertEqual("".join("#" if v else "." for v in img.pixels), "".join(S.EXTERNAL_ROWS))
 
     def test_every_internal_link_resolves(self):
         """Every href and src that is not an absolute URL names a file of the site, and its fragment an
@@ -184,6 +200,7 @@ class SiteWide(Built):
         self.assertGreater(checked, 500)
 
     def test_every_page_is_html32_in_the_frame(self):
+        from adapters import webstyle as S
         for name, page in self.pages.items():
             c = check(page)
             self.assertEqual(c.problems, [], name)
@@ -197,12 +214,20 @@ class SiteWide(Built):
             self.assertRegex(page, r"<title>ParlorNet Docs: [^<]+</title>", name)
             self.assertIn("ParlorNet Docs covers every ParlorNet server.", page[-900:], name)
             nav = plain(page)[:plain(page).index("</table>")]
-            bar = nav[nav.rindex('<td bgcolor="#999999">'):]
+            bar = nav[nav.rindex('<td bgcolor="%s">' % S.DOCS_BLUE.bar):]
             labels = re.findall(r">([^<>|]+)</(?:a|b)>", bar)
             self.assertEqual(labels, ["ParlorNet", "Clients", "Protocols", "Browsers", "Telnet programs", "Docs",
                                       "Run a server", "Source"], name)
-            self.assertTrue(bar.startswith('<td bgcolor="#999999"><a href="http://parlornet.org/">ParlorNet</a> | '),
-                            name)       # the main site first, over plain HTTP
+            # The main site comes first, over plain HTTP, with the external-link icon after it, since it leaves
+            # the docs site. It is the only icon in the bar.
+            icon = '<img src="%simg/external.gif" width="9" height="9" alt="(external)">' % (
+                "/" if name == "404.html" else "../" * name.count("/"))
+            self.assertTrue(bar.startswith('<td bgcolor="%s"><a href="http://parlornet.org/">ParlorNet</a>&nbsp;%s | '
+                                           % (S.DOCS_BLUE.bar, icon)), name)
+            self.assertEqual(bar.count("<img "), 1, name)
+            # every color on the page is one of the palette's blues
+            self.assertEqual(set(re.findall(r'(?:bgcolor|color|link)="(#[0-9A-F]{6})"', page)) - set(S.DOCS_BLUE),
+                             set(), name)
             self.assertNotIn("Server: <b>", page, name)              # no server's name: it serves them all
 
     def test_breadcrumbs(self):
@@ -425,7 +450,7 @@ class ClientsPage(Built):
 
     @staticmethod
     def rows(section):
-        return re.findall(r'<tr(?: bgcolor="#CCCCCC")?><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td>'
+        return re.findall(r'<tr(?: bgcolor="#CCFFFF")?><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td>'
                           r'<td>(.*?)</td></tr>', section)
 
     def test_the_retro_window(self):
@@ -538,7 +563,7 @@ class ClientsPage(Built):
             u = urlsplit(href.replace("&amp;", "&"))
             self.assertEqual(u.path, "index.html")
             self.assertEqual(C.filter_values(parse_qs(u.query)), (plat, arch), label)
-            got = re.findall(r'<td(?: bgcolor="#999999")?><a href="([^"]+)">([NTW-])</a>((?:<img [^>]+>)*)</td>',
+            got = re.findall(r'<td(?: bgcolor="#99CCFF")?><a href="([^"]+)">([NTW-])</a>((?:<img [^>]+>)*)</td>',
                              cells)
             self.assertEqual(len(got), len(games), label)
             for (link, sym, icons), (_, gtype) in zip(got, games):
