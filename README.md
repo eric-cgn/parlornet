@@ -31,7 +31,7 @@ A parlor is a set of separate programs in one Docker container. Its daemon is `p
 
 A parlor runs in one Docker container. The `docker run` below is enough to try ParlorNet or to run a small parlor. For a server that stays up, [deploy/README.md](deploy/README.md) installs the same image with a memory limit and a read-only root file system, and it keeps the admin menus and ParlorNet Play on the host's loopback address.
 
-Get the source from https://github.com/eric-cgn/parlornet. Then build the image from its top directory and start it:
+Get the source from https://github.com/eric-cgn/parlornet. Then build the image from its top directory and start it. Each release also publishes the image for linux/amd64 as `ghcr.io/eric-cgn/parlornet:<version>`, and you can pull that instead of building it.
 
 ```sh
 docker build -t parlornet .
@@ -145,6 +145,6 @@ Every pull request and every push to `main` runs the fast tests on Python 3.13 a
 
 `PARLOR_TESTS=fast python3 -m unittest discover -s tests` runs the fast tests, and `python3 -m unittest discover -s tests` runs them all. The slow tests play whole games through the server extensions and the bot, use real timers and run the long matrices. They run together with the fast tests every night and by hand on `dev` (`.github/workflows/slow.yml`), and before a release is tagged (`.github/workflows/release.yml`). `tests/speed.py` says which tests are slow and how they are marked.
 
-There is no separate dev pre-release. The server ships as its source, so the `dev` branch is the dev build.
+There is no separate dev pre-release, so the `dev` branch is the dev build.
 
-A push to `main` whose version has no release yet runs the release workflow (`.github/workflows/release.yml`). It runs the tests, builds the image, tags the commit `v<version>` and publishes a GitHub Release of the source. No image is published, because each parlor builds its own.
+A push to `main` whose version has no release yet runs the release workflow (`.github/workflows/release.yml`). It runs the tests and builds the linux/amd64 image. It pushes the image to GitHub's container registry as `ghcr.io/eric-cgn/parlornet:<version>`, tags the commit `v<version>` and publishes a GitHub Release of the source. The release has a file named `IMAGE-DIGEST`, which names the image by its digest, so a parlor can pull the exact image that was built from the tag.
