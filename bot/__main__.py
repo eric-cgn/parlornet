@@ -30,6 +30,8 @@ def main(argv=None):
     ap.add_argument("--think", type=pair, default=(0.5, 2.0), help="seconds before a turn: least,most")
     ap.add_argument("--pace", type=float, default=0.12, help="least seconds between two requests on a connection")
     ap.add_argument("--poll", type=float, default=2.0, help="seconds between looks for invitations")
+    ap.add_argument("--open-tables", action=argparse.BooleanOptionalAction, default=True,
+                    help="keep one open table of every two-player game for players to join (needs the name bot)")
     ap.add_argument("--gridwords-secs", type=float, default=gridwords.TIME_CAP, help="Grid Words search time a turn")
     ap.add_argument("--host", help=argparse.SUPPRESS)     # start.py gives every extension these two
     ap.add_argument("--port", help=argparse.SUPPRESS)
@@ -42,7 +44,7 @@ def main(argv=None):
     gridwords.TIME_CAP = a.gridwords_secs
     names = [n.strip() for n in a.names.split(",") if n.strip()]
     bot = service.Bot(host or "127.0.0.1", int(port), a.key, names, a.cap, a.think, a.pace, a.poll,
-                      log=lambda text: print(text, flush=True))
+                      log=lambda text: print(text, flush=True), keep_open=a.open_tables)
     try:
         asyncio.run(bot.run())
     except KeyboardInterrupt:
