@@ -58,4 +58,4 @@ Push notifications are on when all three of these hold:
 - `play.push_contact` (`PARLOR_PLAY_PUSH_CONTACT`, `--push-contact`) is your own `mailto:` or `https:` address, which push services may use to reach you about the messages this server sends;
 - the extension has a data directory (`--data`; in the container, `play/` beside the database, which deploy/start.py makes).
 
-The container must be able to reach the push services over HTTPS; deploy/install.sh's network allows that, while the split layout of deploy/install-split.sh gives each extension a network without a way out, so there notifications stay off. The log says at start whether push is on, and why not when it is off.
+The container must be able to reach the push services over HTTPS; the networks of deploy/install.sh and deploy/install-extensions.sh allow that, while the split layout of deploy/install-split.sh gives each extension a network without a way out, so there notifications stay off. The log says at start whether push is on, and why not when it is off.

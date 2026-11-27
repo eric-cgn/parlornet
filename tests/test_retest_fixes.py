@@ -475,7 +475,8 @@ class R2WebHostsPassThrough(unittest.TestCase):
         with open(os.path.join(ROOT, "deploy", "install.sh")) as f:
             text = f.read()
         self.assertNotIn("parlornet.org", text)
-        line = text[text.index("$(for v in"):text.index("done)") + 5]
+        start = text.index("$(for v in")
+        line = text[start:text.index("done)", start) + 5]
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PARLOR_NAME": "games.example.org",
                "PARLOR_AUTH": "password", "PARLOR_WEB_HOSTS": "games.example.org,www.games.example.org"}
         out = subprocess.run(["sh", "-eu", "-c", "echo " + line], env=env, capture_output=True, text=True).stdout

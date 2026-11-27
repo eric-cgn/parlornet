@@ -2,11 +2,13 @@
 bot (docs/bot.md), a client of the core with no port of its own.
 
 The admin panel stores which ones run (setting adapters.enabled); the
-container's start script (deploy/start.py) reads it and starts those. An
-entry whose module is not in this copy of ParlorNet is shown as not
-installed and never started.
+container's start script (deploy/start.py) reads it and starts those. With
+nothing stored, PARLOR_ADAPTERS chooses them, and without that every installed
+one runs (chosen). An entry whose module is not in this copy of ParlorNet is
+shown as not installed and never started.
 """
 import importlib.util
+import os
 
 # name, module, port (None: it listens on none), what it is
 ADAPTERS = [
@@ -44,6 +46,15 @@ def installed(module):
 
 def default_enabled():
     return [name for name, module, _, _ in ADAPTERS if installed(module)]
+
+
+def chosen(stored):
+    """The ones the container starts: the admin menus' list (stored, None when they saved none), else
+    PARLOR_ADAPTERS, else every installed one. The start script and the admin menus' Adapters screen both
+    use it, so the screen shows what runs."""
+    if stored is None:
+        stored = os.environ.get("PARLOR_ADAPTERS") or ",".join(default_enabled())
+    return parse(stored)
 
 
 def parse(value):
