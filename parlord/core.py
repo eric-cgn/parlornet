@@ -26,7 +26,7 @@ PREF_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\Z")   # and at most Limits.pref_key_l
 NATIVE_NS = ":native"     # the public port's namespace for PRF: never an extension's key name (no colon there)
 PREF_SHARED = {"play": "web"}  # extensions whose PRF data is kept under another's name (pref_ns)
 SIGNIN_VERBS = ("HELO", "USER", "REG", "AUT", "SES", "CAN", "SRC", "BYE", "MOTD", "GAM",  # before signing in
-                "PRO", "PRD", "PRL", "NFY", "CLI", "TOP", "TIM")
+                "PRO", "PRD", "PRL", "NFY", "CLI", "TOP", "TIM", "PAG", "CNT")
 # What a client says it is (CLI; docs/protocol.md, Clients and machines): the program and the machine. The
 # words of CLI and of the TRX lines of a turn (TRN, FEED), and the words of the profile (PFL).
 CLAIM_FIELDS = ("PROG", "MACH")
@@ -452,6 +452,10 @@ class Session:
         self.signed_in = None             # when it signed in (TIM counts from here)
         self.signed_out = self.opened     # when it was last not signed in (the sign-in limit counts from here)
         self.closing = False
+        # Paged replies (PAG; docs/protocol.md, Paged replies), on the public port only: the most bytes a page may
+        # hold (0: no paging), and the rest of a reply that waits for the client's CNT (None: nothing waits).
+        self.pag = 0
+        self.rest = None
         # The time allowance (parlord/allowance.py): the connection's class, its meter (None: not metered),
         # what its gateway said of the call, the notices it has had (seconds left), the end of the grace a
         # player whose month is used up has (monotonic), and the notices waiting for its next reply.
@@ -1185,6 +1189,8 @@ class Server:
                 if not good:
                     await self.send(sess, [err("NEWLINE", "lines end with %s here" % native.NAMES[sess.eol])])
                     continue
+                if line.split()[0].upper() != native.CNT:
+                    sess.rest = None        # any other request drops what was left of a paged reply
                 try:
                     out = await self.dispatch(sess, line)
                 except PluginError:
@@ -1196,7 +1202,7 @@ class Server:
                     out = [err("INTERNAL", "")]
                 if sess.meter is not None:
                     self.time_signed(sess)
-                await self.send(sess, ["INF " + n for n in sess.notes] + out)
+                await self.reply(sess, ["INF " + n for n in sess.notes] + out)
                 sess.notes = []
         except (ConnectionError, OSError):
             pass
@@ -1278,6 +1284,12 @@ class Server:
         data = b"".join(l.encode("ascii", "replace") + sess.eol for l in lines)
         sess.writer.write(data)
         await sess.writer.drain()
+
+    async def reply(self, sess, lines):
+        """Send the reply to a request: whole, or its first page when the connection asked for pages (PAG) and
+        the reply does not fit one. The rest waits in sess.rest for CNT (native.page)."""
+        now, sess.rest = native.page(lines, sess.pag, sess.eol)
+        await self.send(sess, now)
 
     # ---- request dispatch ---------------------------------------------
     async def dispatch(self, sess, line):
@@ -1547,6 +1559,24 @@ class Server:
             r = self.accounts.key_forget(sess, which)
             return [err(r[1], r[2])] if r[0] == "err" else [ok(r[1])]
         return [err("SYNTAX", "KEY NEW [label], KEY LST, KEY DEL, KEY DEL n or KEY DEL all")]
+
+    # ---- paged replies (PAG, CNT; docs/protocol.md, Paged replies) ----------------------------------------
+    async def cmd_pag(self, sess, args, line):
+        """PAG bytes (the public port only): the most bytes a page of any reply may hold on this connection, each
+        line counted with its line ending. PAG 0 turns paging off. The reply is OK."""
+        if sess.frontend:
+            return [err("NOTPUBLIC", "PAG is only for the public port")]
+        n = int(args[0]) if len(args) == 1 and re.match(r"^[0-9]{1,5}\Z", args[0]) else -1
+        if n != 0 and not native.PAG_MIN <= n <= native.PAG_MAX:
+            return [err("SYNTAX", "PAG 0, or PAG bytes from %d to %d" % (native.PAG_MIN, native.PAG_MAX))]
+        sess.pag = n
+        return [ok()]
+
+    async def cmd_cnt(self, sess, args, line):
+        """CNT: the next page of the reply that waits (serve_conn keeps it for CNT alone), or ERR STATE when
+        nothing waits."""
+        rest, sess.rest = sess.rest, None
+        return rest if rest else [err("STATE", "no reply is waiting for CNT")]
 
     async def cmd_bye(self, sess, args, line):
         sess.closing = True
@@ -1944,9 +1974,9 @@ class Server:
             await self.leave_game(t, seat, "resign")
             self.save(t)
             t.cond.notify_all()
-            lines = t.lines_since(sess.cursor.get(t.id, 0), not self.clients_visible(sess, t))
-            sess.cursor[t.id] = t.seq
-        return lines + [ok()]
+            final = ok()
+            lines = self.unseen(sess, t, final)
+        return lines + [final]
 
     async def cmd_see(self, sess, args, line):
         t, e = self.table_for(args)
@@ -2062,10 +2092,28 @@ class Server:
             await self.turn_made(t, seat, sess, made, done)
             self.save(t)
             t.cond.notify_all()
-            since = sess.cursor.get(t.id, 0)
-            lines = t.lines_since(since, not self.clients_visible(sess, t))
-            sess.cursor[t.id] = t.seq
-        return lines + [ok(r.get("staged") or "")]
+            final = ok(r.get("staged") or "")
+            lines = self.unseen(sess, t, final)
+        return lines + [final]
+
+    def unseen(self, sess, t, final):
+        """The events of t this connection has not read, for the reply to MOV, UND, END or RES, which ends with
+        final; the connection's cursor moves past them. On a connection that pages (PAG), only the oldest that
+        fit one page with final and the time allowance's notices in front are sent, and the cursor stays after
+        the last one sent, so SIN brings the rest (docs/protocol.md, Paged replies)."""
+        lines = t.lines_since(sess.cursor.get(t.id, 0), not self.clients_visible(sess, t))
+        sess.cursor[t.id] = t.seq
+        if sess.pag:
+            eol = len(sess.eol)
+            room = sess.pag - sum(len("INF " + n) + eol for n in sess.notes) - len(final) - eol
+            keep = 0
+            while keep < len(lines) and len(lines[keep]) + eol <= room:
+                room -= len(lines[keep]) + eol
+                keep += 1
+            if keep < len(lines):
+                sess.cursor[t.id] = int(lines[keep].split()[2]) - 1
+                lines = lines[:keep]
+        return lines
 
     # ---- the turns played: who, with which program, on which machine (TRN, FEED) -----------------------
     async def turn_made(self, t, seat, sess, events, done):
@@ -2361,12 +2409,14 @@ class Server:
         games = [(key, p.info["name"], r) for key, p in self.plugins.items()     # in GAM's order, first ruleset
                  for r in [next((r for r in p.info["rules"] if "%s:%s" % (key, r) in offered), None)] if r]
         con = commands.CoreConsole(req, sess.player.name, games, at, sure, typed, width=MAXLINE - 6)
-        cursor = dict(sess.cursor)
+        cursor, pag = dict(sess.cursor), sess.pag
+        sess.pag = 0            # the command reads whole replies: only its own reply is paged
         try:
             await con.handle("/" + tail)
         except Slow:
             return [err("RATE", "slow down")]
         finally:
+            sess.pag = pag
             if sess.player is not None:
                 sess.cursor = cursor
         out = []

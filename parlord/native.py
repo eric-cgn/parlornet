@@ -26,6 +26,10 @@ A dial-in gateway listed in the setting dialin.gateways may put a PROXY protocol
 opening (docs/protocol.md, Dial-in gateways). Lines.proxy() reads it when the first bytes are its signature
 and returns it as a Proxy. From any other address, and when it is not well formed, it is BadOpening(*WRONG).
 It comes within the same 20 seconds as the opening.
+
+A client may ask for paged replies with PAG bytes (docs/protocol.md, Paged replies). page() splits a reply's
+lines into the page sent now and the rest, which waits for the client's CNT. Only the public port pages. The
+extension channel refuses PAG.
 """
 import asyncio
 import ipaddress
@@ -41,6 +45,29 @@ OPENING_SECS = 20.0       # from connecting to the opening
 ENDING_SECS = 0.25        # after the first CR (LF), for the LF (CR) of a two-byte ending
 PAGE = "docs/protocol.html"     # the protocol's reference on the docs site (site.docs_url)
 MAXLINE = 80
+# Paged replies (PAG): the fewest and the most bytes a page may be set to. The fewest has room for six lines of
+# 80 bytes and the CNT line. The reply to every request that changes something fits in it, and a move's reply
+# carries only the events that fit (Server.unseen; docs/protocol.md, Paged replies). The most is the largest
+# 16-bit number.
+PAG_MIN = 512
+PAG_MAX = 65535
+CNT = "CNT"               # the line that ends a page with more to come, and the request for the next page
+
+
+def page(lines, most, eol):
+    """A reply's lines (str, the final line last) -> (the lines to send now, the rest or None). most: the bytes
+    a page may hold (PAG), 0 for no paging. Each line counts with its ending eol. A reply that fits is sent
+    whole. Otherwise the page is as many whole lines as fit with the CNT line after them, which counts too,
+    and the rest waits for the client's CNT, when page() is given it again."""
+    size = lambda l: len(l) + len(eol)      # noqa: E731  (the server's lines are ASCII: one byte a character)
+    if not most or sum(map(size, lines)) <= most:
+        return list(lines), None
+    room, used, n = most - size(CNT), 0, 0
+    while n < len(lines) and used + size(lines[n]) <= room:
+        used += size(lines[n])
+        n += 1
+    n = max(n, 1)           # a page always takes a line (it has room for six of 80 bytes)
+    return list(lines[:n]) + [CNT], list(lines[n:])
 
 
 def opening_error(code, text, docs_url=""):

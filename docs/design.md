@@ -478,6 +478,7 @@ Every frontend reaches the server through a protocol. ParlorNet's own frontends 
 | `TIM` | the time signed in and the time left, for frontends without a clock |
 | `PRF` | small settings kept with the player, such as the display choice and the answer to the tutorial dialog |
 | `KEY` | Stay signed in, with a sign-in key for this computer (`KEY NEW`), the player's list of keys (`KEY LST`) and forgetting them (`KEY DEL`). `AUT key` signs in with one. |
+| `PAG`, `CNT` | long replies in pages of a size the frontend chooses, so a frontend with little memory reads one page at a time |
 | `OUT`, `BYE` | signing out, which forgets this computer's sign-in key, and closing |
 
 The server runs every command in one place, with `CMD` ([protocol.md](protocol.md), Commands). It has the names of [chat-commands.md](chat-commands.md), and a typed move goes to the game's own reading of it. Telnet's command line, Play's chat box, the web's Say form and the 8-bit command line all send their slash lines this way. A command that ends a turn or a game, such as `/resign` or `/pass`, answers with the dialog to open, and the dialog's Yes sends the confirmed form. No command answers an offer. The commands the client handles itself never take this path ([Commands the client handles itself](#commands-the-client-handles-itself)).

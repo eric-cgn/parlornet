@@ -80,7 +80,7 @@ After the greeting the frontend speaks again, and the server only ever answers: 
 
 A frontend sends a line, then reads lines until one starts with `OK`, `ERR` or `ASK`. Data lines before it start with a tag that says what they are (`GAM`, `TAB`, `EVT`, `V`, `INF` and the view lines).
 
-Requests allowed before signing in are `HELO`, `USER`, `REG`, `AUT`, `CAN`, `MOTD`, `GAM`, `PRL`, `TIM`, `CLI`, `TOP`, `BYE`, and on the extension channel `SES`, `SRC`, `PRO`, `PRD` and `NFY`. Anything else is refused with `ERR NOHELO`. This sample connects, reads the message of the day and the list of games, and signs in on a server with sign-in `none`:
+Requests allowed before signing in are `HELO`, `USER`, `REG`, `AUT`, `CAN`, `MOTD`, `GAM`, `PRL`, `TIM`, `CLI`, `TOP`, `PAG`, `CNT`, `BYE`, and on the extension channel `SES`, `SRC`, `PRO`, `PRD` and `NFY`. Anything else is refused with `ERR NOHELO`. This sample connects, reads the message of the day and the list of games, and signs in on a server with sign-in `none`:
 
 ```pnp greeting
 A> PARLORNET/1
@@ -121,6 +121,70 @@ A< OK
 ```
 
 `BYE` ends the connection (`OK`, then the server closes it). A connection that sends nothing for 15 minutes gets `ERR IDLE closing` and is closed. A connection has 5 minutes to sign in, counted from connecting or from signing out, whatever it sends in that time. After that it gets `ERR IDLE closing: sign in within 5 minutes of connecting` and is closed. Once signed in, it may stay in the lobby or at a table as long as it keeps talking to the server. Closing the connection, or losing it, does not leave a table or resign a game.
+
+### Paged replies
+
+Most replies are a few lines, but some are long. The list of tables with `LST clients` and a view with its legal moves can each run to a few kilobytes. A frontend with little memory can ask for long replies in pages, so it never holds more than one page at a time. On the public port, `PAG bytes` sets the most bytes in one page, from 512 to 65535, and each line counts with its line ending. Paging is off until a frontend asks for it, and `PAG 0` turns it off again.
+
+A reply that fits in one page comes whole, as it always does. A longer one comes as a page of whole lines and then a line `CNT`, which counts toward the page too. The frontend sends `CNT` for the next page, and the last page ends with the reply's own final line. So with paging on, a frontend reads a page until a line starting with `OK`, `ERR`, `ASK` or `CNT`. Any other request drops the rest of the reply and is answered as usual. `CNT` with nothing waiting is `ERR STATE`.
+
+The reply to a request that changes something, such as signing in, `NEW`, `JON`, `INV`, a move or a command, always fits in one page. A move's reply carries the table's events since the frontend last read them, and with paging on it carries only as many as fit. The rest wait for the next `SIN`, so a frontend that pages reads `SIN` after every move. [protocol.md](protocol.md) (Paged replies) has the full rules.
+
+```pnp paging
+A> PARLORNET/1
+A< PARLORNET/1 parlornet AUTH=none SIGNUP=none
+A> HELO ann
+A< OK -
+# Pages of at most 512 bytes, each line counted with its CR LF.
+A> PAG 512
+A< OK
+# The list of games is longer than a page: whole lines, then CNT.
+A> GAM
+A< GAM backgammon/1 standard Backgammon 2 2 staged
+A< GAM cannonfire/1 classic Cannon_Fire 2 8 nomoves,drop
+A< GAM checkers/1 american Checkers 2 2 staged
+A< GAM dotsandboxes/1 standard Dots_and_Boxes 2 4 drop
+A< GAM dotsandboxes/1 majority Dots_and_Boxes 2 4 drop
+A< GAM fiveinarow/1 freestyle Five_in_a_Row 2 2 nomoves
+A< GAM fiveinarow/1 standard Five_in_a_Row 2 2 nomoves
+A< GAM gridwords/1 english Grid_Words 2 4 nomoves
+A< GAM gridwords/1 classic Grid_Words 2 4 nomoves
+A< GAM mancala/1 kalah Mancala 2 2
+A< CNT
+# CNT brings the next page. The last page ends with the reply's own final line.
+A> CNT
+A< GAM mancala/1 oware Mancala 2 2
+A< GAM navalcombat/1 classic Naval_Combat 2 2
+A< GAM navalcombat/1 batnav Naval_Combat 2 2
+A< GAM navalcombat/1 salvo Naval_Combat 2 2
+A< GAM reversi/1 standard Reversi 2 2
+A< GAM rummytile/1 standard Rummy_Tile_Classic 2 4 staged,nomoves,drop
+A< OK
+A> GAM
+A< GAM backgammon/1 standard Backgammon 2 2 staged
+A< GAM cannonfire/1 classic Cannon_Fire 2 8 nomoves,drop
+A< GAM checkers/1 american Checkers 2 2 staged
+A< GAM dotsandboxes/1 standard Dots_and_Boxes 2 4 drop
+A< GAM dotsandboxes/1 majority Dots_and_Boxes 2 4 drop
+A< GAM fiveinarow/1 freestyle Five_in_a_Row 2 2 nomoves
+A< GAM fiveinarow/1 standard Five_in_a_Row 2 2 nomoves
+A< GAM gridwords/1 english Grid_Words 2 4 nomoves
+A< GAM gridwords/1 classic Grid_Words 2 4 nomoves
+A< GAM mancala/1 kalah Mancala 2 2
+A< CNT
+# Any other request drops the rest of the list and is answered as usual.
+A> LST
+A< OK
+# Nothing waits for CNT now.
+A> CNT
+A< ERR STATE no reply is waiting for CNT
+# A page holds at least 512 bytes.
+A> PAG 300
+A< ERR SYNTAX PAG 0, or PAG bytes from 512 to 65535
+# PAG 0 turns paging off.
+A> PAG 0
+A< OK
+```
 
 ### Signing in
 
