@@ -37,6 +37,7 @@ import sys
 from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urlsplit
 
 from parlord import DOCS_URL, PROJECT_URL
+from parlord.accounts import as_ip, proxy_list, trusted_proxy
 from parlord.auth import NEW_NAME_RULE
 from parlord.frontends import read_key
 
@@ -44,8 +45,7 @@ from .common import (BG_HOME_PREF, BG_HOMES, CoreClient, CoreError, NeedAuth, Re
                      describe_invite_event, err_text, on_machine, parse_profile, parse_turns, turn_sentence,
                      turn_time, with_program,
                      group_games, more_tables, parse_games, parse_invites, parse_players, parse_tables, pending_invites)
-from .common import parse_client, parse_clients
-from .common import as_ip, forwarded_client, proxy_list, trusted_proxy
+from .common import forwarded_client, parse_client, parse_clients
 from .common import SCORES_NOTE, parse_top, score_text
 from .chatcmd import note_lines
 from .board import BoardCache, hit, view_digest

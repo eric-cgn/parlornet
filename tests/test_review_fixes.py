@@ -928,7 +928,8 @@ class F09WebBehindAProxy(WebStack):
         self.assertIn("Location: http://games.example.org/lobby.htm", h)
 
     def test_the_visitor_is_the_address_before_the_proxy(self):
-        from adapters.common import forwarded_client, proxy_list
+        from adapters.common import forwarded_client
+        from parlord.accounts import proxy_list
         proxies = proxy_list("172.30.4.1, 10.1.0.0/16")
         hdr = {"x-forwarded-for": "198.51.100.7, 203.0.113.9, 10.1.2.3", "x-forwarded-proto": "https"}
         self.assertEqual(forwarded_client("172.30.4.1", hdr, proxies), ("203.0.113.9", "https"))

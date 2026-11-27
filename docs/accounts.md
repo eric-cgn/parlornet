@@ -254,6 +254,18 @@ Settings live in the SQLite database and take effect at once; the command line (
 | `games.turn_max_days` | 5 | 30 | Days per turn a new table may set at most; `turn=` past it is `ERR BADOPT` with the maximum. Running tables keep their own, and the default time per turn (Server) is held within it. |
 | `lists.max` | 20 | 200 | Tables `LST` lists besides the player's own tables and invitations, which are always all listed; a last line `MORE n` says how many more there are. |
 
+**Time limits on the public port.** Each connection on the public port is in a class, and each class has three time limits (protocol.md, Time allowance). A call that a dial-in gateway carries is in the dial-in class, `dialin`, and every other connection is in the default class, `default`. The settings go in the settings file, or in the environment as `PARLOR_` and the key in capitals with `_` for the dot, such as `PARLOR_DIALIN_CALL_MINS`. The settings file takes precedence over the environment. Each limit is whole minutes from 0, which means no limit, up to 44640, a month. Empty means the default.
+
+| Setting | Default | What it is |
+|---|---|---|
+| `dialin.gateways` | none | The dial-in gateways' addresses or networks, separated by commas. Only they may send a PROXY header (protocol.md, Dial-in gateways). Without it, no connection is a call. |
+| `dialin.call_mins` | 75 | Minutes one call may last, counted from when the call came up. |
+| `dialin.user_month_mins` | 60 | Minutes one player may be signed in on calls in a calendar month (UTC). |
+| `dialin.pool_month_mins` | 150 | Minutes all calls together may last in a calendar month (UTC), signed in or not. |
+| `default.call_mins`, `default.user_month_mins`, `default.pool_month_mins` | 0 | The same limits for every other connection on the public port. |
+
+The server keeps the minutes used in the table `allowance`, by month, class and player, with the empty name for the pool. It keeps only this month's and last month's. Deleting an account deletes its rows, and the pool keeps its minutes.
+
 **Scores.** Every finished game gives each player seated at it points (docs/protocol.md, Scores and the leaderboard), counted when the game ends with the values set then. Each value is a whole number from 0 to 99, set in the admin menus (Scores) or in the settings file; empty means the default.
 
 | Setting | Default | What it is |

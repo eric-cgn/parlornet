@@ -22,7 +22,7 @@ from parlord import frontends  # noqa: E402
 from parlord.core import MAXLINE, Server  # noqa: E402
 from speed import slow  # noqa: E402
 
-TIM_RE = re.compile(r"^TIM (\d+) (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)\Z")
+TIM_RE = re.compile(r"^TIM (\d+) (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) left=unl call=unl month=unl\Z")    # no time limit here
 
 
 class Public:
@@ -198,23 +198,38 @@ class TimeCommand(unittest.TestCase):
         return said
 
     def test_time(self):
-        self.assertEqual(self.said((["TIM 754 2026-11-24T21:05:33Z"], "OK")),
+        self.assertEqual(self.said((["TIM 754 2026-11-24T21:05:33Z left=unl call=unl month=unl"], "OK")),
                          ["Signed in 12:34. Server time 21:05 UTC."])
-        self.assertEqual(self.said((["TIM 3725 2026-11-24T09:00:00Z"], "OK")),      # two lines on 40 columns
+        self.assertEqual(self.said((["TIM 3725 2026-11-24T09:00:00Z left=unl call=unl month=unl"], "OK")),      # two lines on 40 columns
                          ["Signed in 1:02:05.", "Server time 09:00 UTC."])
-        self.assertEqual(self.said((["TIM 5 2026-11-24T00:00:00Z"], "OK")),
+        self.assertEqual(self.said((["TIM 5 2026-11-24T00:00:00Z left=unl call=unl month=unl"], "OK")),
                          ["Signed in 0:05. Server time 00:00 UTC."])
-        self.assertEqual(self.said((["TIM 0 2026-11-24T00:00:00Z"], "OK")),        # not signed in yet
+        self.assertEqual(self.said((["TIM 0 2026-11-24T00:00:00Z left=unl call=unl month=unl"], "OK")),        # not signed in yet
                          ["Server time 00:00 UTC."])
         self.assertEqual(self.said(([], "ERR UNKNOWN no such request")), ["This server does not tell the time."])
         self.assertEqual(self.said(([], "OK")), ["The server's time is not known."])
 
+    def test_time_left(self):
+        """A connection with time limits: the call's and the player's month, each in whole minutes, and the
+        parlor's month when it is the shortest."""
+        self.assertEqual(self.said((["TIM 754 2026-11-24T21:05:33Z left=2400 call=3800 month=2400"], "OK")),
+                         ["Signed in 12:34. Server time 21:05 UTC.", "This call has 63 minutes left.",
+                          "You have 40 minutes left this month."])
+        self.assertEqual(self.said((["TIM 754 2026-11-24T21:05:33Z left=600 call=3800 month=2400"], "OK")),
+                         ["Signed in 12:34. Server time 21:05 UTC.", "This call has 63 minutes left.",
+                          "You have 40 minutes left this month.", "The parlor's month has 10 minutes left."])
+        self.assertEqual(self.said((["TIM 754 2026-11-24T21:05:33Z left=59 call=119 month=59"], "OK")),
+                         ["Signed in 12:34. Server time 21:05 UTC.", "This call has 1 minute left.",
+                          "You have less than a minute left this", "month."])
+        self.assertEqual(self.said((["TIM 0 2026-11-24T21:05:33Z left=3800 call=3800 month=unl"], "OK")),
+                         ["Server time 21:05 UTC.", "This call has 63 minutes left."])     # not signed in yet
+
     def test_help_and_fits_a_40_column_screen(self):
         self.assertIn("/time: time signed in, server time", CC.help_lines(CC.NAMES))
         for secs in (0, 3599, 3600, 86399, 999999):
-            for line in CC.time_text(["TIM %d 2026-11-24T23:59:59Z" % secs], "OK"):
+            for line in CC.time_text(["TIM %d 2026-11-24T23:59:59Z left=%d call=%d month=%d" % ((secs,) + (44640 * 60,) * 3)], "OK"):
                 self.assertLessEqual(len(line), 40, line)
-        self.assertEqual(CC.time_text(["TIM 3725 2026-11-24T09:00:00Z"], "OK", width=80),
+        self.assertEqual(CC.time_text(["TIM 3725 2026-11-24T09:00:00Z left=unl call=unl month=unl"], "OK", width=80),
                          ["Signed in 1:02:05. Server time 09:00 UTC."])
 
     def test_against_the_core(self):

@@ -23,7 +23,7 @@ Some services give players a chat-style console: a box where they type lines to 
 | `/note [text]` | shows the notes of the game you are playing; with text, adds a note of up to 48 characters to it. Notes are kept with the table, and anyone who may see the table can read them |
 | `/say TEXT` | says a line at the table you are at. It is for a command line, since on a chat console every line without a slash is said anyway |
 | `/motd` | shows the message of the day |
-| `/time` | shows how long you have been signed in and the server's time in UTC: "Signed in 12:34. Server time 21:05 UTC." From an hour on, the time signed in has hours too (1:02:05), and the two sentences then take a line each, so each fits a 40-column screen. Before signing in it shows the server's time alone |
+| `/time` | shows how long you have been signed in and the server's time in UTC: "Signed in 12:34. Server time 21:05 UTC." From an hour on, the time signed in has hours too (1:02:05), and the two sentences then take a line each, so each fits a 40-column screen. Before signing in it shows the server's time alone. When the connection has a time limit (protocol.md, Time allowance), it says each limit as a sentence of its own: "This call has 63 minutes left. You have 40 minutes left this month." When the parlor's own time for the month is the shortest, it adds "The parlor's month has 10 minutes left." Each sentence is wrapped to fit 40 columns. |
 | `/signin NAME PASSWORD` | signs in, on a console that signs in through chat |
 | `/quit` | signs out; `/bye` does the same |
 | `/help` | lists the commands this console offers |

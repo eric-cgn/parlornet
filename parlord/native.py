@@ -21,8 +21,14 @@ connection's ending; a CR or LF used any other way ends a line that is refused
 (ERR NEWLINE) and not run. The extension channel does not use this: it keeps
 CR LF lines and the server's greeting first. The GameMaster extension's
 tunnel (adapters/gamemaster.py) starts the same way.
+
+A dial-in gateway listed in the setting dialin.gateways may put a PROXY protocol version 2 header before the
+opening (docs/protocol.md, Dial-in gateways). Lines.proxy() reads it when the first bytes are its signature
+and returns it as a Proxy. From any other address, and when it is not well formed, it is BadOpening(*WRONG).
+It comes within the same 20 seconds as the opening.
 """
 import asyncio
+import ipaddress
 
 CR, LF = 13, 10
 NAMES = {b"\r\n": "CR LF", b"\r": "CR", b"\n": "LF", b"\n\r": "LF CR"}
@@ -58,6 +64,61 @@ class BadOpening(Exception):
 
 class TooLong(Exception):
     """A line longer than the protocol allows."""
+
+
+# The PROXY protocol, version 2 (the HAProxy project's proxy-protocol.txt): a 12-byte signature, a byte with the
+# version (2) and the command (LOCAL 0, PROXY 1), a byte with the address family and transport, the length of
+# the rest (16 bits, big-endian), the addresses, and then TLVs (type, 16-bit length, value).
+PROXY_SIG = b"\r\n\r\n\x00\r\nQUIT\n"
+PROXY_MOST = 512            # the longest header taken (the length after the first 16 bytes); a call's TLVs are short
+PROXY_ADDRS = {0x00: 0, 0x11: 12, 0x21: 36, 0x31: 216}      # unspecified, TCP over IPv4, over IPv6, a Unix stream
+# The TLVs a dial-in gateway sends, by type: what the call is. TLV_PRIOR is 32 bits, big-endian: the seconds the
+# call had been up before the gateway connected. Other types are allowed and passed over.
+TLV_CALL = {0xE0: "caller", 0xE1: "dialed", 0xE2: "modulation", 0xE3: "rate"}
+TLV_PRIOR = 0xE4
+TLV_TEXT = 64               # the most of a call's text TLV that is kept
+
+
+class Proxy:
+    """A PROXY v2 header: local (the gateway's own connection, a health check say, rather than a call it
+    carries), src (the source address it names, or None for an unspecified or Unix one), call ({name: text}
+    from TLV_CALL, printable ASCII) and prior (TLV_PRIOR's seconds, 0 when it is not there)."""
+
+    def __init__(self, local, src, call, prior):
+        self.local, self.src, self.call, self.prior = local, src, call, prior
+
+
+def parse_proxy(data):
+    """The bytes after the 12-byte signature: version and command, family, length, addresses and TLVs, all of
+    them -> Proxy. BadOpening(*WRONG) when they are not exactly one well-formed header."""
+    if len(data) < 4 or data[0] >> 4 != 2 or data[0] & 15 not in (0, 1) or data[1] not in PROXY_ADDRS:
+        raise BadOpening(*WRONG)
+    size = int.from_bytes(data[2:4], "big")
+    body = data[4:]
+    need = PROXY_ADDRS[data[1]]
+    if len(body) != size or size < need:
+        raise BadOpening(*WRONG)
+    src = None
+    if data[1] == 0x11:
+        src = str(ipaddress.IPv4Address(body[:4]))
+    elif data[1] == 0x21:
+        src = str(ipaddress.IPv6Address(body[:16]))
+    call, prior, i = {}, 0, need
+    while i < size:
+        if i + 3 > size:
+            raise BadOpening(*WRONG)
+        kind, n = body[i], int.from_bytes(body[i + 1:i + 3], "big")
+        value = body[i + 3:i + 3 + n]
+        if len(value) != n:
+            raise BadOpening(*WRONG)
+        if kind == TLV_PRIOR:
+            if n != 4:
+                raise BadOpening(*WRONG)
+            prior = int.from_bytes(value, "big")
+        elif kind in TLV_CALL:
+            call[TLV_CALL[kind]] = "".join(chr(b) for b in value[:TLV_TEXT] if 32 <= b < 127)
+        i += 3 + n
+    return Proxy(data[0] & 15 == 0, src, call, prior)
 
 
 class Lines:
@@ -98,6 +159,34 @@ class Lines:
                 return j
             raise BadOpening(*WRONG)
         raise BadOpening(*WRONG)                    # more than JUNK bytes, and none of them start it
+
+    async def proxy(self, secs, trusted):
+        """A PROXY v2 header at the very start, read whole within secs -> Proxy; None when the first bytes are
+        not its signature (they stay for the opening, and a client that closes while they could still become
+        it gets None too). BadOpening(*WRONG) for the signature from an address that is not trusted, and for a
+        header that is too long, cut short or not well formed; TimeoutError when it has not all come in time."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + secs
+        while True:
+            n = min(len(self.buf), len(PROXY_SIG))
+            if self.buf[:n] != PROXY_SIG[:n]:
+                return None
+            if n == len(PROXY_SIG) and not trusted:
+                raise BadOpening(*WRONG)
+            if len(self.buf) >= len(PROXY_SIG) + 4:
+                size = int.from_bytes(self.buf[14:16], "big")
+                if size > PROXY_MOST:
+                    raise BadOpening(*WRONG)
+                if len(self.buf) >= 16 + size:
+                    break
+            if not await self._more(deadline - loop.time()):
+                if n == len(PROXY_SIG):
+                    raise BadOpening(*WRONG)
+                return None
+        size = 16 + int.from_bytes(self.buf[14:16], "big")
+        head = bytes(self.buf[12:size])
+        del self.buf[:size]
+        return parse_proxy(head)
 
     async def start(self, secs, pair_secs):
         """Wait up to secs for the client's opening (PARLORNET/1 and the first byte of its ending) and

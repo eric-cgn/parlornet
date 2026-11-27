@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS scores (player TEXT PRIMARY KEY, points INTEGER NOT N
 CREATE TABLE IF NOT EXISTS scored (table_id TEXT NOT NULL, player TEXT NOT NULL, gtype TEXT NOT NULL,
     points INTEGER NOT NULL, reason TEXT NOT NULL, at REAL NOT NULL, PRIMARY KEY (table_id, player));
 CREATE INDEX IF NOT EXISTS scored_at ON scored (at);
+CREATE TABLE IF NOT EXISTS allowance (month TEXT NOT NULL, class TEXT NOT NULL, player TEXT NOT NULL,
+    secs REAL NOT NULL, PRIMARY KEY (month, class, player));
 """
 # Columns a table gained after it was first made: (table, column, its definition). A database made before
 # them gets them, empty, when the server starts (Store.migrate); the rows it had are kept.
@@ -196,6 +198,7 @@ class Store:
         self.db.execute("DELETE FROM scored WHERE player=?", (name.lower(),))
         self.db.execute("DELETE FROM turns WHERE lower(name)=?", (name.lower(),))
         self.db.execute("UPDATE events SET client='', machine='' WHERE lower(who)=?", (name.lower(),))
+        self.db.execute("DELETE FROM allowance WHERE player=?", (name.lower(),))
 
     # ---- profiles (PFL): what the player entered, and the facts counted from their play ----------
     def profile_machine(self, player):
@@ -385,6 +388,19 @@ class Store:
         had = self.db.execute("SELECT COUNT(*) FROM signin_keys WHERE used < ?", (before,)).fetchone()[0]
         self.db.execute("DELETE FROM signin_keys WHERE used < ?", (before,))
         return had
+
+    # ---- the time allowance (parlord/allowance.py): seconds by month, class and player ("" for the pool) ------
+    def allowance_used(self, month, cls):
+        """[(player, seconds)] charged in a month to a class's players and its pool ("")."""
+        return self.db.execute("SELECT player, secs FROM allowance WHERE month=? AND class=?", (month, cls)).fetchall()
+
+    def add_allowance(self, month, cls, player, secs):
+        self.db.execute("INSERT INTO allowance (month, class, player, secs) VALUES (?,?,?,?)"
+                        " ON CONFLICT (month, class, player) DO UPDATE SET secs = secs + excluded.secs",
+                        (month, cls, player, secs))
+
+    def forget_allowance_before(self, month):
+        self.db.execute("DELETE FROM allowance WHERE month < ?", (month,))
 
     def settings(self):
         rows = self.db.execute("SELECT key, value FROM meta WHERE key LIKE 'set:%'").fetchall()

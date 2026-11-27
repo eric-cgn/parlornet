@@ -35,6 +35,25 @@ On the public port (6501) the client speaks first. Its first line is the protoco
 - No other bytes are treated specially: telnet negotiation (IAC) is not understood on this port (the telnet extension has its own, 6502).
 - A server that is full sends `ERR BUSY server is full` (ending CR LF) at once on connecting and closes the connection.
 - The extension channel does not use these rules: there the server sends the greeting as soon as the TLS handshake is done, and lines end with CR LF.
+- A dial-in gateway may put a PROXY header before the opening (Dial-in gateways, below).
+
+## Dial-in gateways (PROXY)
+
+A dial-in gateway answers calls from modems and carries each call to the public port as a TCP connection. The operator lists the gateways' addresses or networks in the setting `dialin.gateways` (`PARLOR_DIALIN_GATEWAYS`), separated by commas, the same way the web's proxies are listed in `web.proxies`. Without the setting, no connection comes from a gateway.
+
+A gateway may send a header of the PROXY protocol, version 2, before anything else on the connection. This is the binary header that the HAProxy project describes in its `proxy-protocol.txt`. It has a 12-byte signature, a byte with the version and the command, a byte with the address family, a 16-bit length, the addresses and then TLVs. The server reads these TLVs and passes over any others:
+
+| Type | What it holds |
+|---|---|
+| `0xE0` | the caller ID, as text |
+| `0xE1` | the number the caller dialed |
+| `0xE2` | the modulation, such as `V.34` |
+| `0xE3` | the rate |
+| `0xE4` | the seconds the call had already been up when the gateway connected, as a 32-bit big-endian number |
+
+The header counts toward the 20 seconds the client has for its opening, and the client's opening comes after it as usual. With the PROXY command, the connection carries a call and is in the dial-in class (Time allowance, below). When the header names a source address, the per-address limits count that address. Otherwise they count the gateway's. With the LOCAL command the connection is the gateway's own, a health check for example, and it is in the default class. The server keeps the text TLVs with the connection in memory only. It never stores or logs them.
+
+A PROXY header from an address that is not listed is a protocol error. So is a header from a listed gateway that is cut short, has more than 512 bytes after its first 16, or is not well formed. Either way the server sends `ERR PROTOCOL wrong protocol`, as for any other bad opening, and closes the connection. A listed gateway may also connect without a header, and then the connection is in the default class.
 
 ## Greeting
 
@@ -89,7 +108,7 @@ A reply is any number of data lines (`GAM`, `TAB`, `V`, `EVT` ...) ending with e
 | `MOTD` | The operator's message of the day: `MOTD text` lines (at most 73 characters of text each, so the line fits 80 bytes with its CR LF; a line that fits is sent as written, spaces and all, so an ASCII layout survives; a longer one is wrapped at spaces, and a longer word is cut; `MOTD` alone for a blank line), at most 20 of them, then `OK`. The marker `{contribute}` in the operator's text is replaced by the setting `site.contribute_url` (by default the project's home, https://github.com/eric-cgn/parlornet); where the operator cleared it, every line holding the marker is left out. Allowed before signing in. |
 | `GAM` | List what this server hosts: `GAM type/ver rules name minplayers maxplayers [flags]`, ending `OK`. Flags: `staged` (turns made of steps, needs `UND`/`END`), `nomoves` (no legal-move list; use `CHK`), `drop` (in a game of three or more, one player can leave and the others play on; see Turn timer). Allowed before signing in. |
 | `PRL` | The protocols this server speaks now: `DOC url` (the documentation site, the setting `site.docs_url`; left out when the operator cleared it), then for each protocol `PRO key port name` and, when it has one, `PRD key text`, by port; then `OK`. The core's own `PARLORNET/1` on the public port is always there; every other protocol is there while the server extension that declared it is connected (Protocols, below). Allowed before signing in, on both listeners. |
-| `TIM` | How long the player has been signed in, and the server's time, for clients with no clock of their own: one line `TIM secs now`, then `OK`, such as `TIM 754 2026-11-24T21:05:33Z`. `secs` is whole seconds, and it is 0 until the connection signs in. On the public port it counts from this connection's sign-in. On the extension channel it counts from the start of the session, the sign-in on that server extension, so every connection that resumes the session with `SES` (the web opens one for each page) gives the same count. `secs` may pass 65535 (about 18 hours). `now` is the server's time in UTC, as `YYYY-MM-DDTHH:MM:SSZ`. The line stays under 40 bytes. `TIM` reads no database and is not activity: it leaves `WHO`'s `idle=` alone. A client without a clock can poll it, for example with its regular lobby poll, and count the seconds between polls itself. Allowed before signing in, on both listeners. RSCARDS front ends and GameMaster have clocks of their own, and nothing changes for them. |
+| `TIM` | How long the player has been signed in, the server's time, and the time this connection has left, for clients with no clock of their own: one line `TIM secs now left=rem call=rem month=rem`, then `OK`, such as `TIM 754 2026-11-24T21:05:33Z left=2400 call=3780 month=2400`. `secs` is whole seconds, and it is 0 until the connection signs in. On the public port it counts from this connection's sign-in. On the extension channel it counts from the start of the session, the sign-in on that server extension, so every connection that resumes the session with `SES` (the web opens one for each page) gives the same count. `secs` may pass 65535 (about 18 hours). `now` is the server's time in UTC, as `YYYY-MM-DDTHH:MM:SSZ`. Each `rem` is whole seconds, or `unl` for no limit (Time allowance, below). `left` is the connection's time allowance, the smallest of its limits, and the one a clock shows. `call` is the time the call has left, and `month` is the time the signed-in player has left this month. The line fits the 80-byte limit. `TIM` writes nothing to the database and is not activity: it leaves `WHO`'s `idle=` alone. A client without a clock can poll it, for example with its regular lobby poll, and count the seconds between polls itself. Allowed before signing in, on both listeners. RSCARDS front ends and GameMaster have clocks of their own, and nothing changes for them. |
 | `PRO key port name` | Extension channel only: this connection serves the protocol `key` on the public port `port`, under `name` (below). `OK`, `ERR SYNTAX`, `ERR LIMIT` (more than 4 keys on one connection), `ERR NOTFRONTEND` (public port). Allowed before signing in. |
 | `PRD key text` | Extension channel only: the one-line description of a protocol this connection declared. `OK`, `ERR NOPROTO` (not declared on this connection), `ERR SYNTAX`, `ERR NOTFRONTEND`. Allowed before signing in. |
 | `LST [words]` | List the tables that are open or playing (finished ones are not listed): `TAB id type/ver rules filled/seats status names turn=secs [vis=private] [bot=seat,...] [integrity=false]`, where `names` lists every seat in order, `-` for an empty one, `turn` is the table's time per turn, `vis=private` marks a private table, `bot=` lists the seats held by bots (docs/bot.md), and `integrity=false` marks a table where the server has given out something it normally keeps (`INT`); ending `OK`. Public tables are listed for everyone, private ones only for their creator and players seated or invited there. The asker's own tables (seated, or the creator) and invitations come first, all of them, by number; then the others, open ones newest first, then games being played newest first, at most `lists.max` of them (20), and a line `MORE n` when n more were left out. The words narrow the list: `open` or `playing`; `mine` (own tables and invitations); `game=reversi` or `game=reversi/1`; `player=name`, the tables where that player sits (a private one only if the asker sits there too); `table=id`, that one table. The word `clients` adds, after each `TAB` line, a `CLIENT seat text` line for each seated player who said what they play with (Clients and machines, below), where the asker may see it. Each at most once, in any order; anything else is `ERR SYNTAX`. On the extension channel, `all` lists every table, with no `MORE` (`ERR NOTFRONTEND` on the public port): for an extension's own bookkeeping, not for a list it shows. |
@@ -448,7 +467,7 @@ Events are numbered per table: `EVT table seq kind ...`.
 - **Common lines** (every type may use these): `S text` status; `T seat points` scores; `M token...` one legal move per line when the type provides a list (flag `M`, only on your turn); `CLK seat secs_left turn_secs` while a game runs: whose turn it is and how long they have left; `BOT seat...` the seats held by bots (docs/bot.md), only when there are any; `CLIENT seat text` what a seated player plays with (flag `C`, before and during the game, where the player may see it; Clients and machines, above). `INT false text` at a table that keeps no integrity, with why (`INT`, below), before and during the game.
 - **Type-defined lines** carry the state itself, with a short tag per line (`P` points, `R` rack, and so on). Each type/ver spec defines them. Large or sparse structures are lists (coordinates and values), not character grids; a dense one-dimensional series, such as terrain, is a string with one character per entry.
 - **Static geometry** (flag `G`) is sent once and cached by the client: things fixed for a type/rules/options, such as a board's size and the positions of special squares.
-- There are no keepalives, and nothing is pushed to a client that did not ask (`WAT`).
+- There are no keepalives, and nothing is pushed to a client that did not ask (`WAT`). The one exception is the `ERR` line the server sends just before it closes a connection, `ERR IDLE` or `ERR LIMIT`.
 
 ## Turn timer
 
@@ -491,6 +510,28 @@ For types flagged `staged`, a turn is a series of steps. `MOV` applies one step 
 ## Type specs
 
 Every type/ver has a spec (docs/types/) that defines: its view lines, event kinds, move tokens, staged-turn pattern, worst-case view and typical event size, and a set of recorded games as conformance vectors. It must also have a reference 80x25 ASCII rendering in the telnet extension, so every game works on a character screen.
+
+## Time allowance (`TIM`, `ERR LIMIT`)
+
+Every connection on the public port is in a class. A connection that a dial-in gateway carries for a call is in the dial-in class, `dialin` (Dial-in gateways, above). Every other connection is in the default class, `default`. Each class can have three limits, and each limit is a setting in whole minutes (accounts.md, Admin panel), where 0 means no limit:
+
+- `CLASS.call_mins` limits one connection. For a call it counts from when the call came up, so the seconds the gateway gave in `0xE4` count too.
+- `CLASS.user_month_mins` limits one player in a calendar month, in UTC. It counts only the time the player is signed in on connections of the class.
+- `CLASS.pool_month_mins` limits the whole parlor in a calendar month. It counts every connection of the class from when it connects, signed in or not.
+
+The dial-in class has 75, 60 and 150 minutes by default. The default class has no limits unless the operator sets some. Connections of server extensions on the extension channel have no time allowance.
+
+A connection's time allowance is the smallest of the time its call has left, the time its player has left this month and the time the pool has left. `TIM` gives it as `left=` and the seconds, or as `left=unl` when none of the limits applies. It also gives the call's time left as `call=` and the player's month as `month=`, so a client can say each limit on its own. The pool has no field of its own. When the pool is the shortest, `left` is below both. Before signing in, only the call and the pool apply, and `month` is `unl`. Signing out ends the charge to the player, and the call goes on.
+
+At 5 minutes left, and again at 1 minute, the server tells the player. It puts an `INF` line in front of its next reply on that connection, whatever the request was, such as `INF This call ends in 5 minutes.` A client shows it as it shows any other `INF` line. When the time runs out, the server sends `ERR LIMIT` with the limit that ran out and closes the connection, without waiting for a request:
+
+```
+ERR LIMIT closing: this call has had its 75 minutes
+ERR LIMIT closing: you have used your 60 dial-in minutes this month
+ERR LIMIT closing: the parlor has used its 150 dial-in minutes this month
+```
+
+A player whose month is used up can still sign in. The reply to the sign-in carries `INF You have used your 60 dial-in minutes this month.` and `INF This call closes in 20 seconds.` Twenty seconds later the server sends `ERR LIMIT` and closes the connection. When the pool is used up, a new connection of the class gets the greeting, then `ERR LIMIT` at once, and is closed.
 
 ## Rate limits
 

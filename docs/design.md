@@ -196,7 +196,7 @@ When a place holds more pieces than the screen draws, as a Backgammon point or t
 
 | What | How it reads |
 |---|---|
-| the time signed in | "0m" in the first minute, then "42m", then "1h 3m" from an hour on. It starts when sign-in completes, and no screen shows it before then. |
+| the time signed in | "0m" in the first minute, then "42m", then "1h 3m" from an hour on. The time left follows it, so the clock reads "12m onl 63m rem" on a connection with a time limit and "12m onl unl rem" on one without. The time left is in whole minutes, from `TIM`'s `left=` (protocol.md, Time allowance). The clock starts when sign-in completes, and no screen shows it before then. |
 | your clock | "You have 4:12 left." It shows in red, or in bold on a black and white screen, under a minute. |
 | another player's clock | "ann has 2:03 left." |
 | a clock from an hour up | "You have 1h 3m left." |
@@ -475,7 +475,7 @@ Every frontend reaches the server through a protocol. ParlorNet's own frontends 
 | `CHT` | a line said at the table |
 | `CMD` | a command line typed after the slash, at a table or in the lobby, run on the server with the lines to show, and the confirmation dialog for the commands that ask first |
 | `NOTE` | the table's notes |
-| `TIM` | the time signed in, for frontends without a clock |
+| `TIM` | the time signed in and the time left, for frontends without a clock |
 | `PRF` | small settings kept with the player, such as the display choice and the answer to the tutorial dialog |
 | `KEY` | Stay signed in, with a sign-in key for this computer (`KEY NEW`), the player's list of keys (`KEY LST`) and forgetting them (`KEY DEL`). `AUT key` signs in with one. |
 | `OUT`, `BYE` | signing out, which forgets this computer's sign-in key, and closing |

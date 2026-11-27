@@ -168,7 +168,7 @@ class Tutorial(AnsiGame):
 
     def time_sentence(self):
         """/time as the server says it, from the clock here: the time signed in and the time in UTC."""
-        tim = "TIM %d %s" % (time.time() - self.s.since, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        tim = "TIM %d %s left=unl call=unl month=unl" % (time.time() - self.s.since, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         return " ".join(time_text([tim], "OK", width=COLS - 2))
 
     async def place(self, square, typed=False):

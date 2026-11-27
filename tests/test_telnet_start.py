@@ -269,7 +269,7 @@ class Clock(unittest.TestCase):
             s, menu = self.menu(mode, time.time() - 65 * 60)
             cv, _ = menu.screen()
             top = "".join(cv.ch[0])
-            self.assertTrue(top.rstrip().endswith("ann %s 1h 5m" % s.g["v"]), top)
+            self.assertTrue(top.rstrip().endswith("ann %s 1h 5m onl unl rem" % s.g["v"]), top)
             self.assertIn("Lobby", top)
 
     def test_redrawn_only_when_the_minute_changes(self):
@@ -296,7 +296,7 @@ class Clock(unittest.TestCase):
         g = reversi.AnsiScreen(s, "3", reversi.KEY, 0)
         g.names, g.v = ["ann", "bob"], None
         cv, _ = g.screen()
-        self.assertTrue("".join(cv.ch[0]).rstrip().endswith("12m"))
+        self.assertTrue("".join(cv.ch[0]).rstrip().endswith("12m onl unl rem"))
 
     def test_the_plain_menu_header(self):
         from test_adapters import FakeIO
@@ -311,8 +311,32 @@ class Clock(unittest.TestCase):
         s.since = time.time() - 12 * 60
         asyncio.run(T.PlainMenu(s).relist())
         header = next(l for l in io.vt.lines() if l.startswith("== ParlorNet lobby"))
-        self.assertTrue(header.endswith("= ann | 12m"), header)
+        self.assertTrue(header.endswith("= ann | 12m onl unl rem"), header)
         self.assertLessEqual(len(header), 79)
+
+    def test_the_time_left_from_tim(self):
+        """A connection with a time limit: TIM's left= gives the minutes left, asked at most once a minute."""
+        from test_adapters import FakeIO
+        asked = []
+
+        class Core:
+            auth = "none"
+
+            async def req(self, text):
+                asked.append(text)
+                if text == "TIM":
+                    return (["TIM 720 2026-11-24T21:05:33Z left=3800 call=3800 month=unl"], "OK")
+                return ([], "OK")
+        io = FakeIO("plain")
+        s = T.Session(io, Core(), "plain", "ann")
+        s.since = time.time() - 12 * 60
+        asyncio.run(T.PlainMenu(s).relist())
+        header = next(l for l in io.vt.lines() if l.startswith("== ParlorNet lobby"))
+        self.assertTrue(header.endswith("= ann | 12m onl 63m rem"), header)
+        asyncio.run(s.load())
+        self.assertEqual(asked.count("TIM"), 1)             # once a minute, not with every list
+        s.left_at -= 120                                     # asked two minutes ago: 61 minutes are left
+        self.assertEqual(T.online_text(s), "12m onl 61m rem")
 
 
 if __name__ == "__main__":
