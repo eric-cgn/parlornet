@@ -106,7 +106,7 @@ import time
 from collections import namedtuple
 
 from . import bots
-from .replies import (err_text, parse_games, parse_invites, parse_players, parse_profile, parse_tables, parse_tim,
+from .replies import (bot_waits, err_text, parse_games, parse_invites, parse_players, parse_profile, parse_tables, parse_tim,
                       parse_top, pending_invites)
 
 # The message of the day as the text frontends show it: between a top and a bottom rule, 39 columns wide
@@ -596,16 +596,36 @@ class Console:
             await self.say("The invitation was not withdrawn. %s" % sentence(err_text(final)))
 
     def waiting_table(self, tables, name=None, tid=None):
-        """An open public table with a free seat, where NAME waits or numbered tid, not one of mine."""
+        """An open public table with a free seat, where NAME waits or numbered tid, not one of mine. By name it
+        never finds one of the bot's open tables (docs/bot.md, Open tables): /invite bot makes a table of the
+        player's own, with the settings they chose."""
         me = self.me.lower()
         for t in tables:
             low = [n.lower() for n in t["names"]]
             if (t["status"] != "open" or t.get("vis") == "private" or t["filled"] >= t["seats"] or me in low
                     or not low):
                 continue
-            if (tid is not None and t["id"] == tid) or (name is not None and name.lower() in low):
+            if (tid is not None and t["id"] == tid) or (name is not None and name.lower() in low
+                                                        and not bot_waits(t)):
                 return t
         return None
+
+    async def bot_table(self, tables, name):
+        """/join bot: the bot's open table of this console's game, or None after saying which there are."""
+        me = self.me.lower()
+        found = [t for t in tables if bot_waits(t) and t["filled"] < t["seats"] and name.lower() in
+                 [n.lower() for n in t["names"]] and me not in [n.lower() for n in t["names"]]]
+        if len(found) > 1:
+            gdata, gfinal = await self.req("GAM")
+            games = {g["key"]: g["name"] for g in parse_games(gdata)} if gfinal.startswith("OK") else {}
+            await self.say("%s waits at a table of each of these games: %s. Type /join and the number." % (
+                name, ", ".join("%s %s" % (games.get(t["key"], t["key"].split("/")[0]), t["id"])
+                                for t in sorted(found, key=lambda t: int(t["id"])))))
+            return None
+        if not found:
+            await self.say("%s is not waiting at an open table. /list shows the open tables." % name)
+            return None
+        return found[0]
 
     async def says_at(self, tid):
         """{name: what they play with} at a table (LST table=N clients); {} when nothing is known."""
@@ -700,6 +720,10 @@ class Console:
             return
         tables = await self.tables()
         t = (self.waiting_table(tables, tid=arg) if arg.isdigit() else None) or self.waiting_table(tables, name=arg)
+        if t is None and not arg.isdigit() and any(bot_waits(x) for x in tables):
+            t = await self.bot_table(tables, arg)
+            if t is None:
+                return
         if t is None:
             await self.say("Table %s has no open seat for you. /list shows the open tables." % arg if arg.isdigit()
                            else "%s is not waiting at an open table. /list shows the open tables." % arg)

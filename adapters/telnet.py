@@ -1623,7 +1623,7 @@ class PlainMenu(MenuBase):
         tabs, clocks = await self.s.load()
         me = self.s.name
         mine = [t for t in tabs if me in t["names"]]
-        others = [t for t in tabs if me not in t["names"]]
+        others = sorted((t for t in tabs if me not in t["names"]), key=botflag.list_rank)
         self.say("")
         tail = "%s | %s" % (me, online_text(self.s))      # the time connected and the time left
         self.say(("== ParlorNet lobby " + "=" * 60)[:78 - len(tail)] + " " + tail)
@@ -1776,7 +1776,8 @@ class AnsiMenu(MenuBase, AnsiView):
             i = fresh[0]
             self.say("%s invites you to play %s at table %s. Press Enter on it to answer." % (
                 i["from"], self.s.game_name(i["key"]), i["id"]), A_YELLOW)
-        self.others = [("table", t) for t in tabs if me not in t["names"]] + [("tutorial", None)]
+        others = sorted((t for t in tabs if me not in t["names"]), key=botflag.list_rank)
+        self.others = [("table", t) for t in others] + [("tutorial", None)]
         ids = [self.item_id(it) for it in self.items]
         if self.first:
             self.first = False

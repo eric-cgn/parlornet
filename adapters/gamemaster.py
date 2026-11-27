@@ -1602,7 +1602,8 @@ class Session:
         if inviter is None:
             for t in tables.values():
                 if (t["key"] != key or t["rules"] not in accepts or t["status"] != "open" or t["vis"] != "public"
-                        or t["seats"] != 2 or not t["names"] or self.name.lower() in [n.lower() for n in t["names"]]):
+                        or t["seats"] != 2 or not t["names"] or self.name.lower() in [n.lower() for n in t["names"]]
+                        or botflag.bot_waits(t)):      # "anyone" means a person; the bot is chosen by name
                     continue
                 why = "%s's table %s" % (t["names"][0], t["id"])
                 for seat in (0, 1):
@@ -2053,10 +2054,11 @@ class Tunnel:
                     if ok.startswith("OK") else -1
                 mine.append("YG %s %d %d %s" % (game, seat, turn, t["seated"][1 - seat]))
             elif (me not in low and t["status"] == "open" and t["vis"] == "public" and t["names"]
-                    and t["filled"] < t["seats"] and len(waiting) < TBL_MAX):
-                waiting.append("WG %s %s" % (game, t["names"][0]))
+                    and t["filled"] < t["seats"]):
+                waiting.append((botflag.bot_waits(t), "WG %s %s" % (game, t["names"][0])))
             elif me not in low and t["status"] == "playing":
                 playing.append("PG %s %s %s" % (game, t["seated"][0], t["seated"][1]))
+        waiting = [l for _, l in sorted(waiting, key=lambda w: w[0])][:TBL_MAX]   # people's first, then the bot's
         for l in mine + waiting + playing[::-1][:TBL_MAX]:      # the newest games of others
             self.send_line(l)
         self.send_line("OK")

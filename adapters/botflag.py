@@ -2,6 +2,7 @@
 core flags them: bot=seat,... on LST's TAB lines), and which bot name to invite
 next (each bot name is one seat: bot, then bot1 to bot3)."""
 from parlord.bots import NAMES, listed  # noqa: F401  (listed: the frontends' player lists)
+from parlord.replies import bot_waits  # noqa: F401  (an open table of the bot's, from a parsed LST line)
 
 
 def bot_seats(lines):
@@ -25,6 +26,12 @@ def bot_names(lines):
             seats = bot_seats([line]).get(f[1], set())
             out[f[1]] = {names[i].lower() for i in seats if i < len(names)}
     return out
+
+
+def list_rank(t):
+    """Where a parsed table goes among the other tables a lobby lists: 0 for an open table where a person waits,
+    1 for one of the bot's open tables, 2 for a game being played."""
+    return 2 if t["status"] != "open" else 1 if bot_waits(t) else 0
 
 
 def next_name(taken):

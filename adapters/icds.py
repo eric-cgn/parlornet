@@ -652,7 +652,7 @@ class Session:
             return
         waiting = next((t for t in await self.tables() if t["key"] == CHECKERS and t["status"] == "open"
                         and t["vis"] == "public" and t["filled"] < t["seats"] and t["names"]
-                        and all(n.lower() == opp.lower() for n in t["names"])), None)
+                        and all(n.lower() == opp.lower() for n in t["names"]) and not botflag.bot_waits(t)), None)
         if waiting:
             await self.join(waiting["id"], waiting["names"][0])
             return

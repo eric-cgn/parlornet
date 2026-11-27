@@ -359,14 +359,16 @@ class WithTheBot(unittest.TestCase):
         try:
             self.assertEqual(c.req("HELO amy")[-1], "OK -")
             until(lambda: "bot" in " ".join(c.req("WHO")), "the bot to sign in")
-            self.assertEqual(c.req("CMD /open reversi"),
-                             ["INF Your table 1 is open: anyone can join it. /close closes it.", "OK"])
-            self.assertEqual(c.req("CMD 1 /invite bot"),
-                             ["INF You invited the bot to table 1. It will sit down in a few seconds.", "OK"])
-            until(lambda: any(l.startswith("TAB 1 ") and " playing amy,bot " in l for l in c.req("LST")),
+            opened = c.req("CMD /open reversi")         # (the bot's open tables have the first numbers)
+            self.assertRegex(opened[0], r"^INF Your table \d+ is open: anyone can join it\. /close closes it\.$")
+            tid = opened[0].split()[3]
+            self.assertEqual(c.req("CMD %s /invite bot" % tid),
+                             ["INF You invited the bot to table %s. It will sit down in a few seconds." % tid, "OK"])
+            until(lambda: any(l.startswith("TAB %s " % tid) and " playing amy,bot " in l for l in c.req("LST")),
                   "the bot to sit down")
-            self.assertEqual(c.req("CMD 1 /d3"), ["OK"])
-            self.assertTrue(any(l.startswith("EVT 1 ") and l.endswith(" PUT 0 d3 FLP d4") for l in c.req("SIN 1 0")))
+            self.assertEqual(c.req("CMD %s /d3" % tid), ["OK"])
+            self.assertTrue(any(l.startswith("EVT %s " % tid) and l.endswith(" PUT 0 d3 FLP d4")
+                                for l in c.req("SIN %s 0" % tid)))
         finally:
             c.close()
 

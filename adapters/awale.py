@@ -1052,9 +1052,9 @@ class Console(chatcmd.Console):
             return None
         return await super().sit(tid, seat, opp, how)
 
-    def waiting_table(self, tables, name=None, tid=None):
-        t = super().waiting_table(tables, name, tid)
-        return t if t is None or t.get("rules") == RULES else None
+    async def tables(self):
+        """Oware tables only, so /list never offers a table Awale cannot play."""
+        return [t for t in await super().tables() if t["rules"] == RULES]
 
     async def new_table(self, vis):
         """As the default, with this extension's time per turn and the Oware rules."""

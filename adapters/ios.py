@@ -708,7 +708,8 @@ class Session:
         data, _ = await self.core_req("LST open game=%s" % REVERSI)
         tables = parse_tables(data)
         open_tab = next((t for t in tables if t["key"] == REVERSI and t["status"] == "open" and t["names"]
-                         and t["vis"] == "public" and all(n[:8].lower() == opp.lower() for n in t["names"])), None)
+                         and t["vis"] == "public" and all(n[:8].lower() == opp.lower() for n in t["names"])
+                         and not botflag.bot_waits(t)), None)      # a match of the bot makes its own table
         if open_tab:
             await self.join(open_tab["id"], colour)
             return

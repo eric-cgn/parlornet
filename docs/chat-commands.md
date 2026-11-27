@@ -9,10 +9,10 @@ Some services give players a chat-style console: a box where they type lines to 
 | `/list` | your games of this kind, with the table, the opponent, whose move it is and the time left, then the open tables where someone waits for a player |
 | `/resume [table]` | brings a running game back, the first one when no table is given |
 | `/resign [table]` | resigns the game you are playing, or the table given. It asks first: type `/resign` again within 30 seconds to resign, or `/resign TABLE yes` to resign at once |
-| `/invite NAME` | invites a player to a game. The bot is a player too: `/invite bot` plays the bot |
+| `/invite NAME` | invites a player to a game. The bot is a player too: `/invite bot` plays the bot at a table of your own |
 | `/uninvite NAME` | withdraws an invitation to the table you are at |
 | `/open` | opens a table anyone can join |
-| `/join TABLE` or `/join NAME` | sits you down at an open table, given its number from `/list` or the name of the player waiting there. No invitation is needed. If NAME has invited you, it takes that invitation, as `/accept NAME` does |
+| `/join TABLE` or `/join NAME` | sits you down at an open table, given its number from `/list` or the name of the player waiting there. No invitation is needed. If NAME has invited you, it takes that invitation, as `/accept NAME` does. `/join bot` sits you down at the bot's open table of the game (docs/bot.md, Open tables), and where the bot waits at tables of several games, it names them with their numbers |
 | `/close` | closes your open table |
 | `/accept NAME` | takes NAME's invitation, as `/join NAME` does |
 | `/decline NAME` | refuses NAME's invitation |

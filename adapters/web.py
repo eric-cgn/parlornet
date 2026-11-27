@@ -923,7 +923,7 @@ def lobby_page(me, link, games, tables, note="", auth="password", invites=(), bo
     more: how many tables LST left out (its MORE line). scores: the server shows its leaderboard."""
     names = {g["key"]: g["name"] for g in games}
     rows = []
-    tables = sorted(tables, key=lambda t: (me not in t["names"], int(t["id"])))
+    tables = sorted(tables, key=lambda t: (me not in t["names"], botflag.list_rank(t), int(t["id"])))
     for t in tables:
         here = (bots or {}).get(t["id"], ())
         uses = t.get("clients") or {}       # LST clients: what each seated player plays with, where shown to me
