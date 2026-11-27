@@ -77,7 +77,7 @@ from collections import deque
 
 from . import botflag, chatcmd, declare
 from .chatcmd import game_lines, open_lines
-from .common import (CoreClient, CoreError, Gate, keepalive, err_text, framed_motd, parse_backgammon_view,
+from .common import (CoreClient, CoreError, Gate, Where, keepalive, err_text, framed_motd, parse_backgammon_view,
                      parse_invites, parse_players, parse_reversi_view, parse_tables, peer_addr, sign_in_lines,
                      uninvite_of)
 
@@ -584,8 +584,7 @@ INVITE_POLLS = 3        # invitations made elsewhere: looked at every third poll
 HUB_SECS = 3.0
 REFUSE_LINGER = 3.0
 LOGIN_SECS = 60.0         # a connection that has not logged in by then is closed
-WHERE = "on the web (http://parlornet.org) or by telnet (parlornet.org port 6502)"
-NEW_WHERE = "on the web (http://parlornet.org, New account) or by telnet (parlornet.org port 6502, log in as new)"
+WHERE = Where()          # where else to play, from the server's name and its ports (common.Where)
 
 ids = itertools.count(1)
 
@@ -1020,6 +1019,7 @@ class Session:
                 self.core = await CoreClient.connect(*self.core_addr)
                 await self.core.source(peer_addr(self.w))
                 await self.core.claim(CLIENT, "Macintosh")      # what the turns say they were played with (CLI)
+                await WHERE.update(self.core)
             except (OSError, asyncio.TimeoutError, CoreError):
                 self.core = None
                 return "The game server isn't answering; try again soon.", 1
@@ -1028,8 +1028,8 @@ class Session:
         if refusal is None:
             return None, 0
         if refusal == unknown:          # V 1: no such account, as Outland's own service said
-            return "%s Make one %s, then sign in here with it." % (unknown, NEW_WHERE), 1
-        return ("%s (Sign up or sign in %s.)" % (refusal, WHERE) if "web" not in refusal else refusal,
+            return "%s Make one %s, then sign in here with it." % (unknown, WHERE.new_text), 1
+        return ("%s (Sign up or sign in %s.)" % (refusal, WHERE.text) if "web" not in refusal else refusal,
                 2 if password else 1)
 
     async def refuse(self, code, text):
@@ -1282,7 +1282,7 @@ class Session:
                 if i["id"] not in self.told:
                     self.told.add(i["id"])
                     self.pub("%s invites you to %s at table %s. You can play it %s."
-                             % (i["from"], i["key"].split("/")[0].capitalize(), i["id"], WHERE))
+                             % (i["from"], i["key"].split("/")[0].capitalize(), i["id"], WHERE.text))
                 continue
             if k in self.invited or k in self.hub.sessions or self.busy() or self.invited:
                 continue
@@ -2537,7 +2537,7 @@ class ReversiService:
                 if i["id"] not in self.told:
                     self.told.add(i["id"])
                     self.notice("%s invites you to %s at table %s. You can play it %s."
-                                % (i["from"], i["key"].split("/")[0].capitalize(), i["id"], WHERE))
+                                % (i["from"], i["key"].split("/")[0].capitalize(), i["id"], WHERE.text))
                 continue
             if k in self.invited or k in self.hub.sessions or self.busy() or self.asked or self.invited:
                 continue
@@ -2818,7 +2818,7 @@ class ReversiService:
                 # has none, which would put its count of moves out of step
                 if not g.board.can_move(me):
                     await self.elsewhere(g, "Your game at table %s goes on, but it can't be shown here from its "
-                                            "start. Play it %s." % (g.tid, WHERE))
+                                            "start. Play it %s." % (g.tid, WHERE.text))
                     return
                 self.send(bytes([RV_S_MOVE, rv_packed(a[1]), RV_PLACE]))
         elif kind == "PASS" and a:
@@ -2842,7 +2842,7 @@ class ReversiService:
         brd = next((l.split() for l in v[0] if l.startswith("BRD ")), None)
         if brd and brd[1:3] != ["8", "8"]:
             await self.elsewhere(g, "Table %s's board is %sx%s; Outland Reversi plays on 8x8 only. Play it %s."
-                                    % (g.tid, brd[1], brd[2], WHERE))
+                                    % (g.tid, brd[1], brd[2], WHERE.text))
             return
         names = list(g.names)
         if None in names:
@@ -2856,7 +2856,7 @@ class ReversiService:
         self.pinned.add(g.opp.lower())
         ids = [self.pid if i == g.seat else self.need_player(g.opp) for i in range(2)]
         if None in ids:
-            await self.elsewhere(g, "Your game at table %s can't be shown here. Play it %s." % (g.tid, WHERE))
+            await self.elsewhere(g, "Your game at table %s can't be shown here. Play it %s." % (g.tid, WHERE.text))
             return
         self.send(bytes([RV_S_GAMEINFO, 0, ids[0], ids[1]]))
         self.send(rv_start(ids[0], ids[1]))
@@ -2914,7 +2914,7 @@ class ReversiService:
         if not final.startswith("OK"):
             await self.elsewhere(g, "%s is not legal here (%s), so this board no longer matches the game. "
                                     "Your game at table %s goes on; play it %s." % (sq, err_text(final), g.tid,
-                                                                                    WHERE))
+                                                                                    WHERE.text))
             return
         g.told_turn = False
         await self.poll_game()

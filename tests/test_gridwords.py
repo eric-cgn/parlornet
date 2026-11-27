@@ -824,8 +824,8 @@ class Web(WordList):
         self.assertIn('value="EXCH "', html)
         hrefs = re.findall(r'href="([^"]+)"', html)
         moves = [h for h in hrefs if h.startswith("/move.htm")]
-        self.assertEqual(moves, ["/move.htm?s=%s&amp;x=%s&amp;t=3&amp;mv=PASS" % (SID, CSRF)])
-        sels = [re.search(r"sel=([^&]+)", h).group(1) for h in hrefs if "sel=" in h]
+        self.assertEqual(moves, ["/move.htm?s=%s;x=%s;t=3;mv=PASS" % (SID, CSRF)])
+        sels = [re.search(r"sel=([^&;]+)", h).group(1) for h in hrefs if "sel=" in h]
         self.assertEqual(len(sels), 225)                           # every square can start a word (map areas)
         self.assertEqual(html.count("<area "), 225)
         for s in sels:

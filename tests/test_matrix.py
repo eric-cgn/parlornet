@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 import procs
 from test_adapters import Browser, Client, spawn
+from test_adapters import query_of  # noqa: E402
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
@@ -576,7 +577,7 @@ def find_link(body, path, **want):
         u = urlsplit(h)
         if u.path != path:
             continue
-        q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        q = {k: v[0] for k, v in parse_qs(u.query.replace(";", "&")).items()}
         if all(q.get(k) == v for k, v in want.items()):
             return h
     return None
@@ -650,7 +651,7 @@ class WebFE:
         self.tc.assertIsNotNone(find_link(body, "/lobby.htm"), body)        # and the way back
 
     def x(self, p):
-        return parse_qs(urlsplit(p.b.link(r"[?&]x=")).query)["x"][0]
+        return query_of(p.b.link(r"[?&;]x="))["x"][0]
 
     def watch(self, p, tid):
         body = self.lobby(p)
@@ -688,7 +689,7 @@ class WebFE:
     def area(self, body, path, **want):
         for x, y, h in self.areas(body):
             u = urlsplit(h)
-            q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            q = {k: v[0] for k, v in parse_qs(u.query.replace(";", "&")).items()}
             if u.path == path and all(q.get(k) == v for k, v in want.items()):
                 return x, y, h
         return None

@@ -136,7 +136,7 @@ def public_url(text):
     host = (u.netloc or "").lower()
     if (u.scheme not in ("http", "https") or "@" in host or not HOST_RE.match(host) or u.query or u.fragment
             or u.path not in ("", "/", "/play", "/play/")):
-        raise ValueError("play.public_url is an address like https://parlornet.org/play/")
+        raise ValueError("play.public_url is an address like https://games.example.org/play/")
     default = {"http": 80, "https": 443}[u.scheme]
     if host.endswith(":%d" % default):
         host = host[:-len(":%d" % default)]
@@ -480,7 +480,7 @@ def parse_args(argv=None):
     declare.add_args(ap)
     ap.add_argument("--public-url", default=os.environ.get("PARLOR_PLAY_URL", ""),
                     help="play.public_url: the address players open, behind a TLS proxy "
-                         "(https://parlornet.org/play/); its port is the one declared to the core")
+                         "(https://games.example.org/play/); its port is the one declared to the core")
     ap.add_argument("--proxies", default=os.environ.get("PARLOR_PLAY_PROXIES", ""),
                     help="play.proxies: comma-separated addresses or networks of the reverse proxies whose "
                          "X-Forwarded-For and X-Forwarded-Proto are believed")

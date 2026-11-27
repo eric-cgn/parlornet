@@ -594,6 +594,47 @@ async def sign_in_lines(core, name, password, prompt=None, show=None, mode="any"
             return no_wait(str(e))
 
 
+class Where:
+    """Where else a player can sign up, sign in or play, in words, for an extension's messages: the web site and
+    telnet, at the server's name and at the ports their extensions declared to the core (PRL), such as "on the
+    web (http://games.example.org:6500/) or by telnet (games.example.org port 6502)". update() reads them on a
+    connection the extension has open, at most once a minute. A way the core does not list is left out, and
+    with neither the text is "on the web or by telnet"."""
+    PLAIN = "on the web or by telnet"
+
+    def __init__(self):
+        self.text, self.new_text, self.at = self.PLAIN, self.PLAIN, 0.0
+
+    @staticmethod
+    def words(name, ports, new=False):
+        """The text for the server's name and its ports {key: port}; new: with how to make an account on each."""
+        web, tel = ports.get("HTTP"), ports.get("TELNET")
+        ways = []
+        if web:
+            ways.append("on the web (http://%s%s/%s)" % (name, "" if web == 80 else ":%d" % web,
+                                                         ", New account" if new else ""))
+        if tel:
+            ways.append("by telnet (%s port %d%s)" % (name, tel, ", log in as new" if new else ""))
+        return " or ".join(ways) or Where.PLAIN
+
+    async def update(self, core):
+        if time.monotonic() - self.at < 60 and self.at:
+            return
+        self.at = time.monotonic()
+        try:
+            data, final = await core.req("PRL")
+        except (OSError, asyncio.TimeoutError, CoreError):
+            return
+        if not final.startswith("OK"):
+            return
+        ports = {}
+        for f in (l.split(" ", 3) for l in data):
+            if f[0] == "PRO" and len(f) >= 3 and f[2].isdigit():
+                ports.setdefault(f[1], int(f[2]))
+        name = (core.greeting.split() + ["", ""])[1] or "localhost"
+        self.text, self.new_text = self.words(name, ports), self.words(name, ports, True)
+
+
 CHAT_WORDS = frozenset(("tell", "tellx", "say", "shout", "whisper", "kibitz", "message", "wall"))
 
 

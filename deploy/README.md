@@ -101,6 +101,62 @@ sudo PARLOR_DIALIN_GATEWAYS=172.30.4.1 sh deploy/install.sh parlornet:1
 
 Without `PARLOR_DIALIN_GATEWAYS` (`dialin.gateways` in the settings file), the parlor trusts no gateway, and a PROXY header from anywhere is refused. Calls have three limits in minutes, whether they go to the native protocol or to telnet. `PARLOR_DIALIN_CALL_MINS` limits one call (75 by default), `PARLOR_DIALIN_USER_MONTH_MINS` one player's calls in a calendar month (60), and `PARLOR_DIALIN_POOL_MONTH_MINS` all calls together in a month (150). 0 means no limit. docs/accounts.md lists these settings with the same limits for other connections, and docs/protocol.md describes the header and what callers are told.
 
+## A site of your own
+
+A server can show words of its own on the web site and in the message of the day, such as how to reach it by modem or when it hosts an event. Keep these files in a directory on the host, outside the image, and give its path to `install.sh` as `PARLOR_SITE_DIR`:
+
+```sh
+sudo PARLOR_SITE_DIR=/srv/parlornet-site sh deploy/install.sh parlornet:1
+```
+
+The script mounts the directory read-only at `/run/parlornet/site` in the container. Every file in it is optional, and a server without the directory works as before. The server extensions may run under users of their own, so make the files readable by everyone, for example with `chmod -R a+rX /srv/parlornet-site`. The server reads the files when it starts. After you change one, run the script again or `docker restart parlornet`.
+
+- `motd.txt` is the message of the day. It takes the place of the image's `deploy/motd.txt` when the server starts. A message of the day saved in the admin menus still takes the place of both. It is plain ASCII, at most 20 lines, and each line of up to 73 characters is shown as written, so it can hold an ASCII layout.
+- `welcome.htm` is a piece of HTML 3.2 that the welcome page shows right after the message of the day, in its Welcome section. Write it as you would write the inside of a page's body, with paragraphs, lists, links and tables, and leave out `<html>`, `<head>` and `<body>`.
+- `pages/NAME.htm` is a page of its own at `/NAME.htm` on the web site. NAME is 1 to 32 lower-case letters, digits and hyphens. The file's first line is the page's title, written as `<title>Dial-in access</title>`, and the rest of the file is the page's body, in HTML 3.2 as in `welcome.htm`. The page comes in the site's frame with its navigation bar, with the breadcrumb line Welcome > its title under the bar and its title as its heading. Nothing links to it on its own, so link to it from `welcome.htm`.
+
+The web extension refuses a page whose name the site already uses, such as `lobby` or `login`, and a page without its title line. It also refuses a file that is larger than 32 KB or that is not UTF-8 text. `docker logs parlornet` names each file it leaves out and says why.
+
+### Placeholders
+
+The files name the server's addresses and ports through placeholders. The server fills them in from its configuration when it builds the message of the day or a page, so the same files work on any host and stay right when a name or a port changes. A placeholder is a word in braces:
+
+- `{name}` is the server's name, from `PARLOR_NAME` or the admin menus.
+- `{host}` is the host name in `PARLOR_WEB_URL` when that is set, and otherwise the server's name.
+- `{web}` is the web site's address. It is `PARLOR_WEB_URL` when that is set, and otherwise `http://`, the host and the web extension's port.
+- `{play}` is ParlorNet Play's address while Play runs. It is `PARLOR_PLAY_URL` when that is set, and otherwise `http://`, the host, Play's port and `/play/`.
+- `{docs}` is the docs site's address (`site.docs_url`).
+- `{contribute}` is the project's home, where anyone can get the source (`site.contribute_url`).
+- `{port:KEY}` is the public port that the server extension for the protocol KEY declared to the core, such as `{port:TELNET}`, `{port:HTTP}` or `{port:PARLORNET/1}`. The keys are the ones in the docs site's protocols reference.
+
+Write `{{` for a brace `{` and `}}` for a brace `}`. The server only looks for these words and never runs anything in the files. In the HTML files it escapes each value for HTML. A placeholder it doesn't know stays in the text as you wrote it, and so does one that has no value at the moment, such as `{play}` while ParlorNet Play is off. The log names each of them once. The message of the day leaves out a line that holds a placeholder with no value instead.
+
+The message of the day takes its values from the core's settings, and the web files take theirs from the web extension's. When some server extensions run on another host, as [Server extensions on another host](#server-extensions-on-another-host) describes, `install-extensions.sh` takes `PARLOR_SITE_DIR` too. Its directory on the front host holds `welcome.htm` and `pages/`, and `motd.txt` stays in the directory on the core's host. `install-split.sh` takes `PARLOR_SITE_DIR` as well.
+
+### An example
+
+Here is a site directory for a server named games.example.org that also takes modem calls. Its message of the day, `/srv/parlornet-site/motd.txt`, is two lines:
+
+```text
+Welcome to {name}.
+Telnet to {host} port {port:TELNET}, or browse {web}.
+```
+
+Its `welcome.htm` points to a page about calling in:
+
+```html
+<p>You can also play by modem. <a href="/dial-in.htm">Dial-in access</a> says how.</p>
+```
+
+That page is `pages/dial-in.htm`:
+
+```html
+<title>Dial-in access</title>
+<p>{name} answers modem calls at 555-0100, at up to 14,400 bit/s. Set your terminal program to
+8 data bits, no parity and 1 stop bit, and dial. Each call lasts up to 75 minutes.</p>
+<p>On the Internet, telnet to <tt>{host}</tt> port {port:TELNET} instead.</p>
+```
+
 ## Administration
 
 The admin menus listen on port 6510 on the host's loopback address. From another machine, open an SSH tunnel to the host and connect through it:

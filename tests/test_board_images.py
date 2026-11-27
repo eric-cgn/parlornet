@@ -8,10 +8,10 @@ import re
 import socket
 import time
 import unittest
-from urllib.parse import parse_qs, urlsplit
 
 from game_checks import LONG, MAX_IMAGES, ScreenCore, board_image, session, web_page
 from test_adapters import Client, FakeIO, Native, Stack
+from test_adapters import query_of  # noqa: E402
 
 import test_cannonfire as TC
 import test_gridwords as TG
@@ -231,7 +231,7 @@ class Live(Stack):
     def new_table(self, a, b, key):
         st, loc, _, _ = a.act("/new.htm?g=%s&turn=1d" % key.replace("/", "%2F"))
         self.assertEqual(st, 302, key)
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         self.assertEqual(b.act("/join.htm?t=%s" % tid)[0], 302)
         return tid
 
@@ -297,7 +297,7 @@ class Live(Stack):
                 st, _, _, page = ann.get(stale + "?%d,%d" % ((int(x1) + int(x2)) // 2, (int(y1) + int(y2)) // 2))
                 self.assertEqual(st, 200)
                 self.assertEqual(events(tid), before)
-                no_x = re.sub(r"x=[0-9a-f]+&", "", click)
+                no_x = re.sub(r"x=[0-9a-f]+[;&]", "", click)
                 page = ann.get(no_x + "?%d,%d" % ((int(x1) + int(x2)) // 2, (int(y1) + int(y2)) // 2))[3]
                 self.assertIn("That link is out of date.", page)
                 st, loc, _, _ = ann.get(click + "?%d,%d" % ((int(x1) + int(x2)) // 2, (int(y1) + int(y2)) // 2))

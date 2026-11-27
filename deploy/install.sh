@@ -52,8 +52,22 @@
 #   PARLOR_REMOTE_EXTENSIONS  the server extensions that run on another host, comma-separated, such as
 #                     web,telnet,play. The script enrolls a key for each one that has none and puts a copy
 #                     of every key in /srv/parlornet-keys. Copy those files to the other host.
+#   PARLOR_SITE_DIR   a directory on the host with the site's own files, such as /srv/parlornet-site, mounted
+#                     read-only at /run/parlornet/site. motd.txt there is the message of the day, welcome.htm
+#                     goes on the welcome page, and pages/NAME.htm are pages of their own (deploy/README.md,
+#                     "A site of your own"). Without it the container uses the image's own message of the day.
 set -eu
 IMAGE=${1:?usage: install.sh IMAGE}
+SITE=
+if [ -n "${PARLOR_SITE_DIR:-}" ]; then
+	case $PARLOR_SITE_DIR in
+	/*[!A-Za-z0-9/._-]* | [!/]*)
+		echo "install.sh: PARLOR_SITE_DIR is an absolute path of letters, digits and / . _ -" >&2
+		exit 2 ;;
+	esac
+	[ -d "$PARLOR_SITE_DIR" ] || { echo "install.sh: PARLOR_SITE_DIR $PARLOR_SITE_DIR is not a directory" >&2; exit 2; }
+	SITE="-v $PARLOR_SITE_DIR:/run/parlornet/site:ro"
+fi
 IP=${PARLOR_PUBLISH_IP:+$PARLOR_PUBLISH_IP:}
 PLAY_IP=127.0.0.1:
 [ "${PARLOR_PLAY_OPEN:-}" = 1 ] && PLAY_IP=$IP
@@ -103,6 +117,7 @@ docker run -d --name parlornet --restart unless-stopped --network parlor \
 		eval "x=\${$v:-}"; [ -n "$x" ] && echo "-e $v=$x"; done) \
 	-v /srv/parlornet:/data \
 	$([ -f /etc/parlornet/settings.conf ] && echo "-v /etc/parlornet/settings.conf:/run/parlornet/settings.conf:ro") \
+	$SITE \
 	--user 10042:10042 --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges \
 	--pids-limit 64 --memory "${PARLOR_MEMORY:-448m}" \
 	$([ -n "${PARLOR_MEMORY_SWAP:-}" ] && echo "--memory-swap $PARLOR_MEMORY_SWAP") \

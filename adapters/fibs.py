@@ -58,7 +58,7 @@ import sys
 import time
 
 from . import botflag, declare
-from .common import (framed_motd, LOGIN_SECS, LOGIN_TOTAL_SECS, CoreClient, claim_text, CoreError, Gate,
+from .common import (framed_motd, LOGIN_SECS, LOGIN_TOTAL_SECS, CoreClient, claim_text, CoreError, Gate, Where,
                      client_change_sentence, client_sentence, keepalive, err_text, parse_client, with_program,
                      loggable, parse_backgammon_view, parse_invites, parse_players, parse_tables, peer_addr,
                      sign_in_lines, uninvite_of)
@@ -79,7 +79,7 @@ MAX_LOGIN_TRIES = 3
 PROMPT_WAIT = 120.0     # a sign-in answer typed in the client's window
 MAX_LINE = 400
 MAX_MATCH = 99
-WHERE = "on the web (http://parlornet.org) or by telnet (port 6502)"
+WHERE = Where()          # where else to play, from the server's name and its ports (common.Where)
 # The login banner: ParlorNet's own words. It says what this service is and where FIBS itself is. (FIBS's
 # ASCII-art banner is not reproduced: no client needs it to log in.)
 BANNER = ("",
@@ -677,6 +677,7 @@ class Session:
             try:
                 self.core = await CoreClient.connect(*self.core_addr)
                 await self.core.source(self.addr)
+                await WHERE.update(self.core)
             except (OSError, asyncio.TimeoutError, CoreError):
                 self.core = None
                 return "The game server isn't answering. Try again soon.", None
@@ -1203,7 +1204,7 @@ class Session:
                         "Type 'join %s' to accept." % i["from"]]
             else:
                 out.append("** %s invites you to %s at table %s. You can play it %s." % (
-                    i["from"], i["key"].split("/")[0].capitalize(), i["id"], WHERE))
+                    i["from"], i["key"].split("/")[0].capitalize(), i["id"], WHERE.text))
         if out:
             self.post(out)
 
