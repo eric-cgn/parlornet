@@ -54,6 +54,7 @@ class Parlor:
         self.fe, self.pub = free_port(), free_port()
         self.doubles = []
         self.srv = None
+        self.closed = []            # the cores stopped, whose databases close once their connections have ended
 
     async def start(self):
         core.Limits.rate_per_sec = core.Limits.rate_burst = 1000      # the players here play with no pause
@@ -85,7 +86,7 @@ class Parlor:
             await ls.wait_closed()
         for p in self.srv.plugins.values():
             p.stop()
-        self.srv.store.db.close()
+        self.closed.append(self.srv)
 
     def standing(self):
         """{game type/ver: [table ids]}: the open public tables where only bots sit (what a player sees as the
@@ -150,6 +151,12 @@ class OpenTables(unittest.TestCase):
                 for r in runs:
                     await r.stop()
                 await parlor.stop()
+                rest = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+                for t in rest:                  # the core's connections still waiting (WAT)
+                    t.cancel()
+                await asyncio.gather(*rest, return_exceptions=True)
+                for srv in parlor.closed:
+                    srv.store.db.close()
         asyncio.run(asyncio.wait_for(run(), timeout))
 
     async def started(self, parlor, runs, **kw):
@@ -363,6 +370,29 @@ class OpenTables(unittest.TestCase):
                 c.close()
             await asyncio.sleep(1)
             self.assertTrue(parlor.one_each())
+            self.assertEqual(parlor.doubles, [])
+        self.go(body)
+
+    def test_a_players_own_table_with_the_bot_leaves_the_open_table_alone(self):
+        """A table a player opens and invites the bot to, as Play the bot and /invite bot do, is the player's: it
+        neither stands in for the bot's open table of that game nor makes another one open."""
+        async def body(parlor, runs):
+            await self.started(parlor, runs)
+            before = parlor.standing()
+            c = await Native.connect(parlor.pub, "ann")
+            try:
+                for opts in ("", " turn=5m vis=private"):           # the defaults too, and settings of the player's
+                    tid = (await c.req("NEW reversi standard%s" % opts))[1].split()[1]
+                    self.assertEqual((await c.req("JON %s" % tid))[1], "OK 0")
+                    self.assertEqual((await c.req("INV %s bot" % tid))[1], "OK")
+                    await until(lambda: parlor.table(tid).status == "playing", "the bot to sit down", 5)
+                    self.assertEqual(parlor.table(tid).seats, ["ann", "bot"])
+                    self.assertNotIn(service.OPEN_KEY, parlor.table(tid).data)
+                    await asyncio.sleep(1)                          # several looks: nothing else changes
+                    self.assertEqual(parlor.standing(), before)
+                    self.assertEqual((await c.req("RES %s" % tid))[1], "OK")
+            finally:
+                c.close()
             self.assertEqual(parlor.doubles, [])
         self.go(body)
 
