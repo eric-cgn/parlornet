@@ -985,8 +985,7 @@ class Admin:
         g = await self.get()
         if not g:
             return
-        stored = g["settings"].get("adapters.enabled")
-        enabled = catalog.parse(stored) if stored is not None else catalog.default_enabled()
+        enabled = catalog.chosen(g["settings"].get("adapters.enabled"))
         items = [(name, "%s  %s%s" % (port or "-", what, "" if catalog.installed(mod) else " (not installed)"),
                   name in enabled) for name, mod, port, what in catalog.ADAPTERS]
         on = await self.ui.checklist("Adapters", "Which frontends the container starts. A change takes effect "

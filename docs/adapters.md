@@ -150,7 +150,7 @@ It is a client of the core's admin socket (127.0.0.1:6599: TLS 1.3 with an admin
 
 ## Which server extensions run
 
-`adapters/catalog.py` lists the server extensions a parlor can run, the admin console included, with their ports. The admin menus store the choice (the Adapters menu; setting `adapters.enabled`); the container's start script (`deploy/start.py`) reads it before starting anything and starts those that are installed, then parlord. With no choice stored, `PARLOR_ADAPTERS` or else every installed extension runs. If any process exits, the container exits and Docker restarts it.
+`adapters/catalog.py` lists the server extensions a parlor can run, the admin console included, with their ports. The admin menus store the choice (the Adapters menu; setting `adapters.enabled`); the container's start script (`deploy/start.py`) reads it before starting anything and starts those that are installed, then parlord. With no choice stored, `PARLOR_ADAPTERS` or else every installed extension runs, and the Adapters menu shows that choice. If any process exits, the container exits and Docker restarts it.
 
 ## Game-network extensions
 

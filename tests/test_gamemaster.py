@@ -321,7 +321,7 @@ class Wiring(unittest.TestCase):
         self.assertNotIn("gamemaster", catalog.PUBLISHED)
         with open(os.path.join(ROOT, "deploy", "install.sh")) as f:
             install = f.read()
-        self.assertIn("-p 6508:6508 -p 6512:6512", install)
+        self.assertRegex(install, r"for p in [0-9 ]* 6508 6512 ")
         with open(os.path.join(ROOT, "Dockerfile")) as f:
             docker = f.read()
         self.assertIn("gamemaster:10052", docker)
