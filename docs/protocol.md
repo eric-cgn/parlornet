@@ -35,7 +35,7 @@ On the public port (6501) the client speaks first. Its first line is the protoco
 - No other bytes are treated specially: telnet negotiation (IAC) is not understood on this port (the telnet extension has its own, 6502).
 - A server that is full sends `ERR BUSY server is full` (ending CR LF) at once on connecting and closes the connection.
 - The extension channel does not use these rules: there the server sends the greeting as soon as the TLS handshake is done, and lines end with CR LF.
-- A dial-in gateway may put a PROXY header before the opening (Dial-in gateways, below). A call that comes through the dial-in extension on 6521 starts the same way, within that extension's window of 5 seconds.
+- A dial-in gateway may put a PROXY header before the opening (Dial-in gateways, below). A call that comes through the dial-in extension on 6521 starts the same way, within that extension's window of 15 seconds.
 
 ## Dial-in gateways (PROXY)
 
@@ -61,10 +61,12 @@ A gateway may also connect to the public port, 6501, and send the header there. 
 
 On the dial-in port the program that called decides where the call goes, since the gateway knows nothing of ParlorNet:
 
-- The window is 5 seconds, counted from when the gateway connects. During it the server sends nothing and echoes nothing.
+- The window is 15 seconds, counted from when the gateway connects. During it the server sends nothing and echoes nothing.
 - The PROXY header comes first, at once. A header from an address that is not listed, or one that is not well formed, is refused as soon as it has come, with the line above.
-- When the bytes after the header are `PARLORNET/1` and a CR or LF within the window, with at most 10 bytes of anything before them, the call goes to the native protocol at once. From then on it follows the rules of Connecting, above, and nothing the client sent is lost.
-- Anything else, including silence, goes to telnet when the window ends, and the call never switches back. Bytes that cannot start the opening do not end the window early, since the modems may still be settling. When the call goes to telnet, the bytes of the window are dropped, and every byte after it reaches telnet.
+- The first CR or LF after the header decides. When the line before it is `PARLORNET/1`, with at most 10 bytes of anything before it, the call goes to the native protocol at once. From then on it follows the rules of Connecting, above, and nothing the client sent is lost.
+- Any other line goes to telnet at once, and so does an empty one. A caller who presses Enter sees the title page right away.
+- When no CR or LF comes within the window, the call goes to telnet when the window ends. Bytes before the first CR or LF do not end the window early, since the modems may still be settling.
+- Once the call has gone one way, it never switches back. When it goes to telnet, the bytes of the line that decided are dropped, and every byte after that line reaches telnet.
 - Telnet on the dial-in port sends plain text at 80 columns and no telnet commands, and it echoes what the caller types. It opens with the title page, then the message of the day and the login. It has the dial-in class's limits, and it shows the notices and the reason for `ERR LIMIT` on the screen before it hangs up.
 
 A ParlorNet client should send its opening the moment the modems connect. A client that waits for something from the server first will not get it, and the call goes to telnet.

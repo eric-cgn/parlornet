@@ -1,9 +1,9 @@
-"""The dial-in extension (adapters/dialin.py; docs/protocol.md, Dial-in gateways): its window of 5 seconds, a
-call that goes to the native protocol and one that goes to telnet, a PROXY header from an address that is not
-a gateway, and the time allowance of a call either way.
+"""The dial-in extension (adapters/dialin.py; docs/protocol.md, Dial-in gateways): its window of 15 seconds,
+in which the first CR or LF decides, a call that goes to the native protocol and one that goes to telnet, a
+PROXY header from an address that is not a gateway, and the time allowance of a call either way.
 
 The core, its extension channel and the extension run in the test's own event loop. Dialin runs the window as
-built, 5 seconds, and is a slow test. Quick runs the same tests with a window of 1 second, and runs in the
+built, 15 seconds, and is a slow test. Quick runs the same tests with a window of 1 second, and runs in the
 fast suite.
 
     python3 -m unittest discover -s tests -p "test_dialin.py"
@@ -135,7 +135,7 @@ class Calls:
     async def test_native_at_once(self):
         """An 8-bit client sends its opening the moment the modems connect, in the same packet as the header,
         and its first request after the greeting. Stray bytes before it are allowed, as on 6501."""
-        c = await self.call(header() + b"\x00~\rPARLORNET/1\r")
+        c = await self.call(header() + b"\x00~+PARLORNET/1\r")
         got = await c.until(b"\r", secs=1.0)
         self.assertTrue(got.startswith(b"PARLORNET/1 test "), got)
         await asyncio.sleep(0.3)                                # past the 250 ms for a second byte
@@ -145,7 +145,7 @@ class Calls:
 
     async def telnet_signin(self, c, name="ann"):
         """Through the title page and the login: the session's lobby."""
-        await c.until("Press Enter")
+        await c.until("Press Enter", secs=self.WINDOW + 2)
         c.send(b"\r")
         await c.until("Login (your name")
         c.send(name.encode() + b"\r")
@@ -173,19 +173,37 @@ class Calls:
         c.send(b"y\r")
         self.assertIn(b"Bye.", await c.closed())
 
+    async def test_enter_goes_to_telnet(self):
+        """Enter is an empty first line: telnet at once, with the title page. The LF of a CR LF is part of the
+        same Enter, even in a packet of its own, so the title page waits for the next one."""
+        c = await self.call(header())
+        await asyncio.sleep(self.TYPING)
+        c.send(b"\r")
+        got = await c.until("Press Enter", secs=1.0)
+        self.assertIn(b"########", got)
+        c.send(b"\n")
+        await asyncio.sleep(0.3)
+        self.assertNotIn(b"Login (your name", c.got)
+        c.send(b"\r")
+        await c.until("Login (your name")
+        p = await self.call(header() + b"\x8d")                 # Enter from a terminal set to 7 bits and parity
+        await p.until("Press Enter", secs=1.0)
+
     async def test_typing_goes_to_telnet(self):
-        """Keys typed during the window are not the opening: telnet when the window ends, and what was typed is
-        dropped. Then nothing switches it back."""
+        """A word typed and Enter are not the opening: telnet at once, and the line typed is dropped. Then
+        nothing switches it back."""
         c = await self.call(header())
         await asyncio.sleep(self.TYPING)
         c.send(b"hello\r")
-        await c.quiet(self.WINDOW - self.TYPING - 0.3)
-        await c.until("Press Enter", secs=2)
+        await c.until("Press Enter", secs=1.0)
         self.assertNotIn(b"hello", c.got)                       # neither echoed nor taken as the Enter
         c.send(b"PARLORNET/1\r\n")                              # too late: these are keys now
         await c.until("Login (your name")
         self.assertIn(b"PARLORNET/1", c.got.split(b"Press Enter")[-1])      # echoed as typed
         self.assertNotIn(b"AUTH=", c.got)
+        d = await self.call(header() + b"hi\r\r")               # after the line that decided, the keys count
+        await d.until("Login (your name", secs=2.0)
+        self.assertNotIn(b"hi", d.got)
 
     async def test_no_header(self):
         """A connection without a header, the gateway's or anyone's: the default class either way."""
@@ -199,7 +217,8 @@ class Calls:
 
     async def test_stray_bytes(self):
         """Line noise early in the window does not decide anything: the opening after it still goes native, with
-        at most 10 bytes before it. More than 10 is telnet, when the window ends."""
+        at most 10 bytes before it. With more than 10 the line is not the opening, and its CR takes the call to
+        telnet at once. A CR in the noise is the first line ending, so it decides too."""
         c = await self.call(header())
         await asyncio.sleep(self.EARLY)
         c.send(b"\x00\x7f+")
@@ -207,8 +226,11 @@ class Calls:
         c.send(b"PARLORNET/1\r\n")
         self.assertTrue((await c.until(b"\r\n", secs=1.0)).startswith(b"PARLORNET/1 test "))
         d = await self.call(header() + b"12345678901PARLORNET/1\r\n")
-        await d.quiet(self.WINDOW - 0.3)
-        await d.until("Press Enter", secs=2)
+        await d.until("Press Enter", secs=1.0)
+        self.assertNotIn(b"PARLORNET/1 test", d.got)
+        e = await self.call(header() + b"\x00\rPARLORNET/1\r")
+        await e.until("Press Enter", secs=1.0)
+        self.assertNotIn(b"PARLORNET/1 test", e.got)
 
     async def test_who_may_say_what_a_call_is(self):
         port = self.fe.sockets[0].getsockname()[1]
@@ -293,10 +315,10 @@ class Calls:
 
 @slow
 class Dialin(Calls, unittest.IsolatedAsyncioTestCase):
-    """The window as built: 5 seconds."""
+    """The window as built: 15 seconds."""
 
     WINDOW = dialin.WINDOW_SECS
-    EARLY, LATE, TYPING = 0.2, 4.9, 1.0
+    EARLY, LATE, TYPING = 0.2, 14.9, 1.0
 
 
 class Quick(Calls, unittest.IsolatedAsyncioTestCase):

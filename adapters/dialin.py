@@ -8,12 +8,15 @@ extension asks the core (DIA addr) as soon as a header has come. A header from a
 is not well formed, goes to the core at once as a native call would (below), and the core refuses it with ERR
 PROTOCOL and closes the line, as it does on the native port.
 
-Then the extension waits. For WINDOW_SECS (5 seconds) from the connection it sends nothing and echoes nothing.
-A ParlorNet client sends PARLORNET/1 and its line ending as soon as the modems connect. When they come within
-the window, with at most 10 bytes of anything before them as on the native port, the call goes to the native
-protocol at once. Anything else, including silence, takes the call to telnet when the window ends, and it
-never goes back. The bytes that came during the window are dropped then. They are line noise while the modems
-settle, or keys typed before anything was shown. Nothing that comes after the decision is dropped.
+Then the extension waits. For WINDOW_SECS (15 seconds) from the connection it sends nothing and echoes
+nothing. The window is long enough for a caller who sets up the line by hand. A ParlorNet client sends
+PARLORNET/1 and its line ending as soon as the modems connect. The first CR or LF decides where the call goes.
+When the line before it is PARLORNET/1, with at most 10 bytes of anything before it as on the native port, the
+call goes to the native protocol at once. Any other line goes to telnet at once, and so does an empty one, so
+a caller who presses Enter sees the title page right away. When no CR or LF comes within the window, the call
+goes to telnet when the window ends. Once the call has gone one way, it never goes back. The bytes of the line
+that decided are dropped, and so are the bytes of a window that ran out. They are line noise while the modems
+settle, or keys typed before anything was shown. Every byte after the line that decided reaches telnet.
 
 For a call to the native protocol, the extension asks the core to take the connection as one of the public
 port's, from the gateway (DIA NATIVE addr). Then it passes on every byte the caller sent, the PROXY header
@@ -48,7 +51,7 @@ from . import telnet as T
 from .common import CoreClient, CoreError, clean, keepalive, peer_addr
 
 PORT = 6521
-WINDOW_SECS = 5.0       # from the connection: nothing is sent or echoed, and PARLORNET/1 takes the call native
+WINDOW_SECS = 15.0      # from the connection: nothing is sent or echoed until the first CR or LF decides
 WATCH_SECS = 2.0        # a telnet call's TIM, for the time allowance's notices and its end
 MAX_CALLS = 60          # calls at once
 MAXLINE = 80            # the protocol's longest line, its ending included
@@ -169,7 +172,7 @@ class Call:
         if came:
             await self.native(head, lines)
         else:
-            await self.telnet(head, loop.time() - began)
+            await self.telnet(head, lines, loop.time() - began)
 
     async def connect(self):
         if self.core is None:
@@ -200,13 +203,17 @@ class Call:
                 t.cancel()
             await asyncio.gather(up, down, return_exceptions=True)
 
-    async def telnet(self, head, secs):
+    async def telnet(self, head, lines, secs):
         """The telnet session on the caller's line, with the call said to the core first."""
         if not await self.connect():
             return
         call = head is not None and not head.local
         core = self.core
         self.io = CallIO(self.r, self.w)
+        if lines.buf:
+            # the ending of the line that decided comes first: the LF of its CR LF is part of the same Enter
+            self.io.cr = (lines.buf[0] & 0x7F) == native.CR
+            self.io._feed(bytes(lines.buf[1:]))
         core.on_notes, core.on_end = self.show, self.end
         if call:
             # the call has been up since before the gateway connected, and for the window since
