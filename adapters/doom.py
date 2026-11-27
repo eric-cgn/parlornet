@@ -18,8 +18,9 @@ module keeps to the closest reading of them.
 The world is small: one room, the Gaming Room, and a board for every Grid Words table that is open or being
 played, called bd_<table id>. `join bd_12` (or `go bd_12`, or `join <player>`) goes to a board, which
 watches it; `join` at a board sits down (JON). The game starts when every seat is taken. `place` checks a
-play with the core (CHK) and shows its score; `commit` plays it (MOV). `newboard` makes a table, with the
-classic ruleset (six scoreless turns in a row end the game, as on DOoM) when the server has it. Invitations
+play with the core (CHK) and shows its score; `commit` plays it (MOV). `newboard` makes a table of the server's first
+Grid Words ruleset, or of the one named (`newboard 2 NAME`). BobGrid draws the board and the unseen tiles from
+what the server prints, so every ruleset plays here. Invitations
 are ParlorNet's own addition, as on the FIBS extension: `invite <name>` (the bot too), `accept <name>`,
 `decline <name>`; invitations made anywhere else arrive as a line of text.
 
@@ -45,7 +46,6 @@ from .games import gridwords as G
 from .telnet import TelnetIO
 
 GW = "gridwords/1"
-RULES = ("classic", "english")      # newboard uses the first of these the server has
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,12}\Z")
 MAX_SESSIONS = 60
 POLL_SECS = 1.0             # each session's board
@@ -93,7 +93,8 @@ HELP = {
                 "answer the questions, or sign up on the web or by telnet."],
     "play1": ["help play1", "",
               "`newboard' makes a board for a new game and sits you at it (`newboard 3' for three",
-              "players, `newboard 2 10m' for ten minutes a turn). `invite <name>' asks someone to it,",
+              "players, `newboard 2 10m' for ten minutes a turn, and a rules name such as",
+              "`newboard standard' for those rules). `invite <name>' asks someone to it,",
               "and `invite bot' asks the server's bot. Anyone can `join bd_<number>' to watch, and",
               "`join' there to sit down in a free seat. The game starts when every seat is taken.",
               "", "(continued in `help play2')"],
@@ -102,8 +103,9 @@ HELP = {
               "`commit' plays it, and `undo' takes it back. Instead, `exchange <tiles>' (`?' is a",
               "blank) or `pass'. `b' shows the board, `track' the unseen tiles, `time' the scores and",
               "the clock, `log' and `log2' the game so far. `resign' gives the game up.",
-              "Every word is checked when it is played, so there is nothing to challenge. Six",
-              "scoreless turns in a row end a game (on boards made elsewhere, two full rounds).",
+              "Every word is checked when it is played, so there is nothing to challenge. A run",
+              "of turns with no word played ends a game: two full rounds, unless the rules say",
+              "otherwise.",
               "", "See also: place play1"],
     "place": ["help place", "",
               "Usage: place <starting-square> <word>",
@@ -1173,16 +1175,20 @@ class Session:
         await self.poll_here()
 
     async def cmd_newboard(self, args, line):
-        players, turn = 2, None
+        players, turn, rules = 2, None, None
+        have = await self.hub.rulesets(self)
         for a in args:
             if a.isdigit() and 2 <= int(a) <= 4:
                 players = int(a)
             elif re.match(r"^\d{1,4}[mhd]\Z", a.lower()):
                 turn = a.lower()
+            elif a.lower() in have:
+                rules = a.lower()
             else:
-                await self.send(["Usage: newboard [2|3|4] [time for a turn, like 10m, 1h or 1d]"])
+                await self.send(["Usage: newboard [2|3|4] [time for a turn, like 10m, 1h or 1d] [rules]",
+                                 "The rules here are %s." % " and ".join(have or ["standard"])])
                 return
-        rules = await self.rules()
+        rules = rules or await self.rules()
         tid, why = await self.new_table(players, turn, rules)
         if tid is None:
             await self.send([why])
@@ -1192,8 +1198,9 @@ class Session:
                          "Enter `invite <name>' to ask someone, or `invite bot' for the server's bot."])
 
     async def rules(self):
+        """The server's first Grid Words ruleset, its default."""
         have = await self.hub.rulesets(self)
-        return next((r for r in RULES if r in have), have[0] if have else "english")
+        return have[0] if have else "standard"
 
     async def new_table(self, players=2, turn=None, rules=None):
         """A new Grid Words table with me seated and at it: (table id, None) or (None, why)."""
@@ -1330,7 +1337,7 @@ class Session:
             await self.send(["The game is over."])
         else:
             await self.send(["The game's not over yet. Games here end by themselves, after the last tile or "
-                             "six scoreless turns in a row."])
+                             "a run of turns with no word played."])
 
     async def cmd_extend(self, args, line):
         await self.send(["Games here end by themselves, so there is nothing to extend."])

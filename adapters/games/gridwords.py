@@ -2,9 +2,9 @@
 
 A crossword tile game for 2-4 players with a hidden rack each. There is no
 legal-move list (flag nomoves): a play is typed or built as one move,
-PLAY x y H|V letters, and CHK previews it. The board geometry (premium
-squares, tile values) comes from the view's G lines; the standard layout
-below is only the fallback.
+PLAY x y H|V letters, and CHK previews it. The board's bonus squares and the
+tiles' values come from the table's static geometry (the view's G lines), so
+every ruleset the server has is drawn as its own.
 """
 import re
 import textwrap
@@ -29,42 +29,24 @@ ABOUT = (
     "Two to four players build interlocking words on a square board from letter tiles drawn from a bag, "
     "the way a crossword fills in. Each tile is worth some points, and colored squares double or triple "
     "a letter or a whole word; when the tiles run out, or nobody can play, the highest score wins.",
-    ["English rules: a 15 by 15 board with the usual pattern of premium squares, 100 tiles (two of them "
-     "blanks that stand for any letter, worth nothing) and the usual letter values. Each player holds "
-     "seven tiles, hidden from the others, and draws back up to seven after each turn.",
+    ["Standard rules: a 15 by 15 board with ParlorNet's own pattern of bonus squares, 100 tiles (two of "
+     "them blanks that stand for any letter, worth nothing) and ParlorNet's own letter values. Each "
+     "player holds seven tiles, hidden from the others, and draws back up to seven after each turn.",
+     "A server may add rulesets of its own, each with its own letter values, tiles and bonus squares on "
+     "the same board. Each ruleset this server has is shown below this list.",
      "A turn places tiles in one row or column to make a word that joins those already on the board (the "
      "first word covers the center square), exchanges tiles with the bag (while it holds at least seven), "
      "or passes. Every word a play makes is scored, and using all seven tiles at once earns 50 more.",
      "Words are checked against the server's word list as they are played, so a wrong word is simply "
      "refused and there is no challenge round. The web site and telnet can preview a play's score first.",
      "The game ends when a player uses their last tile with the bag empty, or after two full rounds in "
-     "which nobody plays a word. Each player then loses the points still on their rack, and a player who "
-     "went out gains the others' total.",
+     "which nobody plays a word, unless the ruleset sets another number of turns. Each player then loses "
+     "the points still on their rack, and a player who went out gains the others' total.",
      "Time per turn: chosen when a table is started (from 5 minutes to a week on the web and telnet)."])
 
 SIZE = 15
 LETTERS = "ABCDEFGHIJKLMNO"
-
-
-def _std_premiums():
-    eighth = {"TW": [(1, 1), (8, 1)], "DW": [(2, 2), (3, 3), (4, 4), (5, 5), (8, 8)],
-              "TL": [(6, 2), (6, 6)], "DL": [(4, 1), (7, 3), (8, 4), (7, 7)]}
-    out = {}
-    for kind, squares in eighth.items():
-        for x, y in squares:
-            for p, q in ((x, y), (y, x)):
-                for px in (p, SIZE + 1 - p):
-                    for py in (q, SIZE + 1 - q):
-                        out[(px, py)] = kind
-    return out
-
-
-STD_PRM = _std_premiums()
-STD_TIL = {c: (v, n) for c, v, n in (
-    ("A", 1, 9), ("B", 3, 2), ("C", 3, 2), ("D", 2, 4), ("E", 1, 12), ("F", 4, 2), ("G", 2, 3), ("H", 4, 2),
-    ("I", 1, 9), ("J", 8, 1), ("K", 5, 1), ("L", 1, 4), ("M", 3, 2), ("N", 1, 6), ("O", 1, 8), ("P", 3, 2),
-    ("Q", 10, 1), ("R", 1, 6), ("S", 1, 4), ("T", 1, 6), ("U", 1, 4), ("V", 4, 2), ("W", 4, 2), ("X", 8, 1),
-    ("Y", 4, 2), ("Z", 10, 1), ("_", 0, 2))}
+MAX_POINTS = 10             # the most a letter is worth in any ruleset (plugins/gridwords)
 
 
 def sq_name(x, y):
@@ -176,7 +158,7 @@ def refusal(move, reason):
 def parse_view(lines):
     """VUE lines for gridwords/1 -> dict. rows is True once the game has started (there is a W line)."""
     v = {"seq": 0, "rows": False, "turn": -1, "moves": [], "status": "", "clock": None,
-         "w": SIZE, "h": SIZE, "ctr": (8, 8), "prm": dict(STD_PRM), "til": dict(STD_TIL),
+         "w": SIZE, "h": SIZE, "ctr": (8, 8), "prm": {}, "til": {},
          "tiles": {}, "rack": None, "counts": [], "bag": 0, "scores": [], "last": None}
     prm_seen = til_seen = False
 
@@ -502,12 +484,23 @@ def _swatch(pal):
 
 
 def images():
-    """Squares (plain, premiums, the center), the start arrows, the tiles A-Z, blanks a-z, a rack blank, and a
-    preview of each preset's colors (pal-<preset>.gif, for the colors page)."""
+    """Squares (plain, premiums, the center), the start arrows, the tiles A-Z with each value they can have
+    (ta1.gif is an A worth 1), blanks a-z, a rack blank, and a preview of each preset's colors (pal-<preset>.gif,
+    for the colors page). Made once."""
+    if not _images:
+        _images.update(_make_images())
+    return _images
+
+
+_images = {}
+
+
+def _make_images():
     out = {IMG + "s%s.gif" % k.lower(): _square(k) for k in SQ_COLOUR}
     out[IMG + "goh.gif"], out[IMG + "gov.gif"] = _arrow("H"), _arrow("V")
     for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-        out[IMG + "t%s.gif" % c.lower()] = _tile(c, value=STD_TIL[c][0])
+        for value in range(MAX_POINTS + 1):         # a ruleset gives each letter 0 to 10 points
+            out[IMG + "t%s%d.gif" % (c.lower(), value)] = _tile(c, value=value)
         out[IMG + "b%s.gif" % c.lower()] = _tile(c, blank=True)
     out[IMG + "blank.gif"] = _tile("", value=0)
     for name, pal in PAL.PRESETS.items():
@@ -554,11 +547,14 @@ def images_for(value):
     return fn
 
 
-def tile_name(c):
-    """The image of a tile on the board or the rack: t (a letter), b (a blank played as a letter), blank."""
+def tile_name(c, til):
+    """The image of a tile on the board or the rack: t and its value at this table (til, the view's), b (a
+    blank played as a letter), blank."""
     if c == "_":
         return IMG + "blank.gif"
-    return IMG + ("b" if c.islower() else "t") + c.lower() + ".gif"
+    if c.islower():
+        return IMG + "b%s.gif" % c
+    return IMG + "t%s%d.gif" % (c.lower(), min(max(til.get(c, (0, 0))[0], 0), MAX_POINTS))
 
 
 def square_name(v, x, y):
@@ -628,7 +624,7 @@ def board_image(v, seat, sel):
             if here and t is None:
                 c.tile(IMG + "go%s.gif" % start[2].lower(), px, py)
             else:
-                c.tile(tile_name(t) if t else square_name(v, x, y), px, py)
+                c.tile(tile_name(t, v["til"]) if t else square_name(v, x, y), px, py)
             if my_turn:
                 d = ("V" if start[2] == "H" else "H") if here else "H"
                 c.area("rect", (px, py, px + CELL - 1, py + CELL - 1), sq_name(x, y), "/table.htm",
@@ -639,7 +635,7 @@ def board_image(v, seat, sel):
         y0 = MARGIN + h * CELL + RACK_GAP
         c.text(2, y0 - 11, "Your rack", (0, 0, 0))
         for i, t in enumerate(rack):
-            c.tile(tile_name(t), MARGIN + i * CELL, y0)
+            c.tile(tile_name(t, v["til"]), MARGIN + i * CELL, y0)
         if rack:
             c.fill(MARGIN + len(rack) * CELL, y0, 1, CELL + 1, grid)
             c.fill(MARGIN, y0 + CELL, len(rack) * CELL + 1, 1, grid)
@@ -751,6 +747,24 @@ def web_parts(v, tid, link, seat, names, sel):
     return board, "\n".join(side), hint, actions
 
 
+def rules_html(name, lines, board):
+    """A ruleset on the game's own page (adapters/web.py, game_page), from its static geometry (GEO): a table
+    of what each letter is worth and how many the bag holds, then board, the HTML of the board's picture
+    (board_image of the empty board). "" without geometry."""
+    til = parse_view(lines)["til"]
+    if not til:
+        return ""
+    letters = sorted(til, key=lambda c: (c == "_", c))
+    row = '<tr><th align="left">%s</th>%s</tr>\n'
+    values = ('<table border="1" cellpadding="2" cellspacing="0">\n' +
+              row % ("Letter", "".join("<th>%s</th>" % ("?" if c == "_" else c) for c in letters)) +
+              row % ("Points", "".join("<td>%d</td>" % til[c][0] for c in letters)) +
+              row % ("In the bag", "".join("<td>%d</td>" % til[c][1] for c in letters)) + "</table>\n")
+    return ("<p><b>%s.</b> The bag holds %d tiles, and ? is a blank. 3W and 2W triple and double a word, and "
+            "3L and 2L a letter. The first word covers the star.</p>\n%s<p>%s</p>\n"
+            % (esc(name), sum(n for _, n in til.values()), values, board))
+
+
 # ---- telnet --------------------------------------------------------------------------
 
 RACK = 7                    # tiles on a rack, and the fewest in the bag that an exchange needs
@@ -819,13 +833,16 @@ class GridBase(GameBase):
     HELP_REFERENCE = []
 
     def reference(self):
-        """Page 2: what each letter is worth on this table, and the board's squares."""
-        til = (self.v or {}).get("til") or STD_TIL
+        """Page 2: what each letter is worth on this table, the tiles its bag started with, and the board's
+        squares."""
+        til = (self.v or {}).get("til") or {}
+        if not til:
+            return ["The letter values show here once the table's board has come."]
         groups = {}
         for c in sorted(til):
             if c != "_":
                 groups.setdefault(til[c][0], []).append(c)
-        lines = ["Letter values"]
+        lines = []
         for pts in sorted(groups):
             letters = groups[pts]
             lines += textwrap.wrap("%s %s worth %d point%s%s." % (
@@ -834,8 +851,12 @@ class GridBase(GameBase):
         blank = til.get("_", (0, 0))[0]
         lines.append("A blank is worth %s. Type _E to lay a blank as an E." % (
             "nothing" if not blank else "%d point%s" % (blank, "" if blank == 1 else "s")))
-        return lines + ["", "3W and 2W squares triple and double a word, and 3L and 2L a letter.",
-                        "The first word must cover the star in the middle."]
+        bag = " ".join("%s%d" % (c, til[c][1]) for c in sorted(til) if c != "_" and til[c][1])
+        blanks = til.get("_", (0, 0))[1]
+        lines += textwrap.wrap("The bag starts with %d tiles: %s%s." % (
+            sum(n for _, n in til.values()), bag, " and %d blank%s" % (blanks, "" if blanks == 1 else "s")
+            if blanks else ""), 68)
+        return lines + ["3W and 2W squares triple and double a word, and 3L and 2L a letter."]
 
     parse = staticmethod(parse_view)
     GAME = NAME

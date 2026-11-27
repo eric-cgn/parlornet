@@ -180,7 +180,7 @@ The Outland extension (`adapters/outland.py`) serves it. It listens on 4000 in t
 
 The DOoM extension (`adapters/doom.py`) serves it.
 
-**Not DOoM:** DOoM was John Chew's crossword-game server, and none of its servers is known to run today. ParlorNet speaks DOoM's commands so that DOoM's clients, BobGrid and any telnet or MUD client, can play ParlorNet's Grid Words with anyone on the parlor. The game is Grid Words on the standard board, with the `classic` ruleset on boards made here (docs/types/gridwords-1.md). The service says in its banner that it is not DOoM.
+**Not DOoM:** DOoM was John Chew's crossword-game server, and none of its servers is known to run today. ParlorNet speaks DOoM's commands so that DOoM's clients, BobGrid and any telnet or MUD client, can play ParlorNet's Grid Words with anyone on the parlor. The game is Grid Words with any of the server's rulesets, since the board's bonus squares and the unseen tiles come from the table (docs/types/gridwords-1.md). `newboard` makes a board of the server's first ruleset, and `newboard NAME` one of the ruleset called NAME. The service says in its banner that it is not DOoM.
 
 **Connect:** port 6507. In BobGrid, type `/HOST parlornet.org 6507` and then `/GO` (BobGrid's own default is a DOoM host on port 7777). From a terminal or a MUD client such as TinyFugue or MUDDweller, connect to the parlor's name on port 6507.
 
@@ -286,7 +286,7 @@ Served by the Networdz extension (`adapters/networdz.py`) on port 6516, for Netw
 
 **Status:** Gold with ParlorNet Link 1.0. A copy in Answer mode waits for its host to connect to it, and the parlor never connects out to players, so ParlorNet Link, beside Networdz on the player's PC, connects to both and passes the bytes along. The stock program with the Link has played whole games under Wine, against the bot and with other players; real Windows is not yet tried.
 
-**What it needs:** Networdz 2.0 ([Discmaster](https://discmaster.textfiles.com/file/10566/Giga%20Games%205%20%28Walnut%20Creek%29%20%28June%201997%29.iso/windows/puzzles/networdz.zip); US$12 shareware), Winsock and ParlorNet Link, ParlorNet's own small Windows program that connects the program in Answer mode to the parlor ([the client's page](clients/networdz.md)). Networdz takes its board and tiles from a configuration file, so load ParlorNet's (`PARLOR.CFG`, on the client's page): the standard 15 by 15 board, the 100 standard tiles and racks of 7.
+**What it needs:** Networdz 2.0 ([Discmaster](https://discmaster.textfiles.com/file/10566/Giga%20Games%205%20%28Walnut%20Creek%29%20%28June%201997%29.iso/windows/puzzles/networdz.zip); US$12 shareware), Winsock and ParlorNet Link, ParlorNet's own small Windows program that connects the program in Answer mode to the parlor ([the client's page](clients/networdz.md)). Networdz takes its board and tiles from a configuration file, so load ParlorNet's (`PARLOR.CFG`, on the client's page), which has the board, the 100 tiles and their points of the standard rules and racks of 7. Networdz plays only tables of the standard rules.
 
 **Signing up and signing in:** Networdz sends names but nothing secret. In Options, Chat, type `/signin name password`, or `/signin password` to sign in with the name Networdz sent. The first time you sign in with a password the server emailed you, it asks for a password of your own; this client cannot ask that, so sign in once on the web or by telnet first. Make your account on the web site (New account) or by telnet (log in as `new`) first.
 

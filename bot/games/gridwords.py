@@ -3,7 +3,8 @@ second. It walks every row and column from each starting square that can
 reach a tile on the board (the center on the first play), placing rack
 letters left to right and dropping a branch as soon as no word in the list
 starts that way or a letter would make a cross word that is not in the list.
-Every play found is scored by the game's own rules, a blank costing a little,
+Every play found is scored by the game's own rules, with the letter values and
+bonus squares of the table's ruleset from its view's geometry, a blank costing a little,
 and the best one is confirmed with CHK before it is played. With nothing
 found it exchanges its rack (keeping blanks and S) while the bag can take it,
 else passes.
@@ -37,6 +38,11 @@ def state(v, seat):
     rack = "" if r == "-" else r.upper()
     bag = int(v.one("BAG", ["0"])[0])
     return {"cells": "".join(cells), "racks": [""] * seat + [rack], "bag": bag}
+
+
+def ruleset(v):
+    """The table's ruleset as its view's geometry gives it (the PRM and TIL lines of VUE's flag G)."""
+    return plugin("gridwords").from_geometry(v.lines)
 
 
 class Finder:
@@ -180,9 +186,9 @@ class Finder:
                               placed + 1, joined or here_joins)
 
 
-def plays(st, seat, secs, best=8):
+def plays(st, seat, secs, rs, best=8):
     """[(score, x, y, d, text)] best first: the best few the search finds in secs (best=None: all of them).
-    Each is scored by the game's own rules as it is found."""
+    Each is scored by the game's own rules with the ruleset rs as it is found."""
     lex = lexicon()
     if not lex:
         return []
@@ -191,7 +197,7 @@ def plays(st, seat, secs, best=8):
 
     def found(x, y, d, text):
         try:
-            r = m.evaluate(st, seat, x, y, d, text, lex)
+            r = m.evaluate(st, seat, x, y, d, text, lex, rs)
         except m.Illegal:
             return
         play = (r["score"] - 8 * text.count("_"), x, y, d, text)
@@ -220,7 +226,7 @@ async def no_play(t, st):
 
 async def smart(t, v, secs=None):
     st = state(v, t.seat)
-    found = plays(st, t.seat, secs or TIME_CAP)
+    found = plays(st, t.seat, secs or TIME_CAP, ruleset(v))
     for score, x, y, d, text in found[:5]:
         tok = "PLAY %d %d %s %s" % (x, y, d, text)
         if (await t.check(tok)).startswith("OK"):
@@ -231,7 +237,7 @@ async def smart(t, v, secs=None):
 
 async def random_turn(t, v):
     st = state(v, t.seat)
-    found = plays(st, t.seat, 0.05, None)
+    found = plays(st, t.seat, 0.05, ruleset(v), None)
     if found and t.rng.random() < 0.8:
         score, x, y, d, text = t.rng.choice(found)
         if (await t.move("PLAY %d %d %s %s" % (x, y, d, text))).startswith("OK"):

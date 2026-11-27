@@ -98,8 +98,7 @@ A< GAM dotsandboxes/1 standard Dots_and_Boxes 2 4 drop
 A< GAM dotsandboxes/1 majority Dots_and_Boxes 2 4 drop
 A< GAM fiveinarow/1 freestyle Five_in_a_Row 2 2 nomoves
 A< GAM fiveinarow/1 standard Five_in_a_Row 2 2 nomoves
-A< GAM gridwords/1 english Grid_Words 2 4 nomoves
-A< GAM gridwords/1 classic Grid_Words 2 4 nomoves
+A< GAM gridwords/1 standard Grid_Words 2 4 nomoves
 A< GAM mancala/1 kalah Mancala 2 2
 A< GAM mancala/1 oware Mancala 2 2
 A< GAM navalcombat/1 classic Naval_Combat 2 2
@@ -147,13 +146,12 @@ A< GAM dotsandboxes/1 standard Dots_and_Boxes 2 4 drop
 A< GAM dotsandboxes/1 majority Dots_and_Boxes 2 4 drop
 A< GAM fiveinarow/1 freestyle Five_in_a_Row 2 2 nomoves
 A< GAM fiveinarow/1 standard Five_in_a_Row 2 2 nomoves
-A< GAM gridwords/1 english Grid_Words 2 4 nomoves
-A< GAM gridwords/1 classic Grid_Words 2 4 nomoves
+A< GAM gridwords/1 standard Grid_Words 2 4 nomoves
 A< GAM mancala/1 kalah Mancala 2 2
+A< GAM mancala/1 oware Mancala 2 2
 A< CNT
 # CNT brings the next page. The last page ends with the reply's own final line.
 A> CNT
-A< GAM mancala/1 oware Mancala 2 2
 A< GAM navalcombat/1 classic Naval_Combat 2 2
 A< GAM navalcombat/1 batnav Naval_Combat 2 2
 A< GAM navalcombat/1 salvo Naval_Combat 2 2
@@ -168,9 +166,9 @@ A< GAM dotsandboxes/1 standard Dots_and_Boxes 2 4 drop
 A< GAM dotsandboxes/1 majority Dots_and_Boxes 2 4 drop
 A< GAM fiveinarow/1 freestyle Five_in_a_Row 2 2 nomoves
 A< GAM fiveinarow/1 standard Five_in_a_Row 2 2 nomoves
-A< GAM gridwords/1 english Grid_Words 2 4 nomoves
-A< GAM gridwords/1 classic Grid_Words 2 4 nomoves
+A< GAM gridwords/1 standard Grid_Words 2 4 nomoves
 A< GAM mancala/1 kalah Mancala 2 2
+A< GAM mancala/1 oware Mancala 2 2
 A< CNT
 # Any other request drops the rest of the list and is answered as usual.
 A> LST
@@ -696,7 +694,7 @@ A< OK
 | `M` | The legal moves, one `M` line each, when it is this player's move and the game provides a list (not for `nomoves` games). |
 | `C` | `CLIENT seat text` for each seated player who said what they play with (Saying what you are, below). |
 
-The reply is, in this order: `V type/ver seq`, the geometry lines (with `G`), the game's view lines, `BOT seat ...` when bots hold seats, `CLK seat secs_left turn_secs` while the game runs, `S` (with `T`), the `M` lines (with `M`), the `CLIENT` lines (with `C`), `INT false text` at a table marked `integrity=false` (Part 2, Grid Words), then `OK`. `seq` is the table's latest event number: the view shows the table as it was after that event. Before the game starts the view is just `V type/ver seq` and `S Waiting for players`.
+The reply is, in this order: `V type/ver seq`, the geometry lines (with `G`), the game's view lines, `BOT seat ...` when bots hold seats, `CLK seat secs_left turn_secs` while the game runs, `S` (with `T`), the `M` lines (with `M`), the `CLIENT` lines (with `C`), `INT false text` at a table marked `integrity=false` (Part 2, Grid Words), then `OK`. `seq` is the table's latest event number: the view shows the table as it was after that event. Before the game starts the view is just `V type/ver seq` and `S Waiting for players`, with the geometry lines between them when you ask with `G` and the game has them, as Grid Words does. `GEO type rules` gives a ruleset's geometry without a table.
 
 The view lines of each game are in Part 2. Some tags are shared by convention: `W seat` (whose turn it is; `-1` or `-` once the game is over), `T seat points` (a score line per seat), `S`, `M`, `CLK` and `BOT seat ...` (the seats held by bots, after the game's lines, only when there are any). A view is drawn from scratch: a frontend that is unsure of its own picture of the table asks for the view again, at any time.
 
@@ -1067,8 +1065,7 @@ A< GAM dotsandboxes/1 standard Dots_and_Boxes 2 4 drop
 A< GAM dotsandboxes/1 majority Dots_and_Boxes 2 4 drop
 A< GAM fiveinarow/1 freestyle Five_in_a_Row 2 2 nomoves
 A< GAM fiveinarow/1 standard Five_in_a_Row 2 2 nomoves
-A< GAM gridwords/1 english Grid_Words 2 4 nomoves
-A< GAM gridwords/1 classic Grid_Words 2 4 nomoves
+A< GAM gridwords/1 standard Grid_Words 2 4 nomoves
 A< GAM mancala/1 kalah Mancala 2 2
 A< GAM mancala/1 oware Mancala 2 2
 A< GAM navalcombat/1 classic Naval_Combat 2 2
@@ -1611,14 +1608,14 @@ Spec: [types/gridwords-1.md](types/gridwords-1.md).
 
 | | |
 |---|---|
-| Type | `gridwords/1`, rulesets `english` and `classic` |
+| Type | `gridwords/1`, ruleset `standard` and any the operator adds |
 | Players | 2 to 4 (`players=n`) |
 | Flags | `nomoves` |
 | Options | none |
 
 A crossword-building tile game on a 15 by 15 board. Every word a play makes must be in the server's word list (this server's is ENABLE 1.0, `plugins/gridwords/words.txt`). Squares are `x y`, 1 to 15, across from the left and down from the top; the center is `8 8` (`h8` on a frontend's screen).
 
-**Geometry**: `BRD 15 15`, `CTR 8 8` (the square the first word covers), `PRM kind x y x y ...` (the premium squares by kind: `TW`, `DW`, `TL`, `DL`) and `TIL letter points count` (the tile set; `_` is the blank). About 680 bytes, once.
+**Geometry**: `BRD 15 15`, `CTR 8 8` (the square the first word covers), `PRM kind x y x y ...` (the premium squares by kind: `TW`, `DW`, `TL`, `DL`) and `TIL letter points count` (the tile set; `_` is the blank). About 680 bytes, once. Each ruleset has its own bonus squares and tiles, so draw the board and the points from these lines rather than from values of your own.
 
 **View lines**:
 
@@ -1634,7 +1631,7 @@ A crossword-building tile game on a 15 by 15 board. Every word a play makes must
 | `RK seat letters` | Only for a server extension (`VUE table O` at a table marked integrity=false): every seat's rack (`RK seat -` when it is empty). |
 | `BO letters` | Only for a server extension, as `RK`: the bag in draw order, the next tile first, up to 60 letters a line (`BO -` when it is empty). |
 
-**Moves**: `PLAY x y H|V letters` writes the whole main word from its first square, across (`H`) or down (`V`), including letters already on the board; `_` before a letter plays a blank as that letter (`PLAY 8 8 H HEL_LO`). `EXCH letters` exchanges tiles (while the bag holds at least 7); `PASS` passes. Under `english` two full rounds of passes and exchanges end the game, under `classic` six in a row, however many play.
+**Moves**: `PLAY x y H|V letters` writes the whole main word from its first square, across (`H`) or down (`V`), including letters already on the board; `_` before a letter plays a blank as that letter (`PLAY 8 8 H HEL_LO`). `EXCH letters` exchanges tiles (while the bag holds at least 7); `PASS` passes. Under `standard`, two full rounds of passes and exchanges end the game. A ruleset the operator adds may set another number of turns.
 
 **Events**: `PLAY seat x y H|V word points`, `X x y c ...` (the new tiles), `DRAW seat n` (how many, never which), `EXCH seat n`, `PASS seat`, `TURN seat`; at the end `ADJ seat ±n letters` (each rack's tiles taken off its score) and `END win seat s0/s1/...` or `END draw s0/s1/...`.
 
@@ -1657,7 +1654,7 @@ B> PARLORNET/1
 B< PARLORNET/1 parlornet AUTH=none SIGNUP=none
 B> HELO bob
 B< OK -
-A> NEW gridwords english
+A> NEW gridwords standard
 A< OK 1
 A> JON 1
 A< OK 0
@@ -1670,22 +1667,22 @@ A< V gridwords/1 4
 A< BRD 15 15
 A< CTR 8 8
 A< PRM TW 1 1 8 1 15 1 1 8 15 8 1 15 8 15 15 15
-A< PRM DW 2 2 14 2 3 3 13 3 4 4 12 4 5 5 11 5 8 8 5 11
-A< PRM DW 11 11 4 12 12 12 3 13 13 13 2 14 14 14
-A< PRM TL 6 2 10 2 2 6 6 6 10 6 14 6 2 10 6 10 10 10 14 10
-A< PRM TL 6 14 10 14
-A< PRM DL 4 1 12 1 7 3 9 3 1 4 8 4 15 4 3 7 7 7 9 7
-A< PRM DL 13 7 4 8 12 8 3 9 7 9 9 9 13 9 1 12 8 12 15 12
+A< PRM DW 2 2 14 2 3 3 13 3 4 4 12 4 8 8 4 12 12 12 3 13
+A< PRM DW 13 13 2 14 14 14
+A< PRM TL 6 2 10 2 8 4 5 5 11 5 2 6 14 6 4 8 12 8 2 10
+A< PRM TL 14 10 5 11 11 11 8 12 6 14 10 14
+A< PRM DL 4 1 12 1 7 3 9 3 1 4 15 4 6 6 10 6 3 7 7 7
+A< PRM DL 9 7 13 7 3 9 7 9 9 9 13 9 6 10 10 10 1 12 15 12
 A< PRM DL 7 13 9 13 4 15 12 15
 A< TIL A 1 9
 A< TIL B 3 2
-A< TIL C 3 2
+A< TIL C 2 3
 A< TIL D 2 4
-A< TIL E 1 12
+A< TIL E 1 11
 A< TIL F 4 2
-A< TIL G 2 3
-A< TIL H 4 2
-A< TIL I 1 9
+A< TIL G 3 3
+A< TIL H 3 3
+A< TIL I 1 8
 A< TIL J 8 1
 A< TIL K 5 1
 A< TIL L 1 4
@@ -1696,12 +1693,12 @@ A< TIL P 3 2
 A< TIL Q 10 1
 A< TIL R 1 6
 A< TIL S 1 4
-A< TIL T 1 6
-A< TIL U 1 4
-A< TIL V 4 2
+A< TIL T 1 7
+A< TIL U 2 3
+A< TIL V 5 2
 A< TIL W 4 2
-A< TIL X 8 1
-A< TIL Y 4 2
+A< TIL X 7 1
+A< TIL Y 3 2
 A< TIL Z 10 1
 A< TIL _ 0 2
 A< R RTHIOVT
@@ -1719,9 +1716,9 @@ A> CHK 1 PLAY 8 8 H HTORT
 A< ERR ILLEGAL not in the word list: HTORT
 # This one is: the points and the words.
 A> CHK 1 PLAY 8 8 H TROTH
-A< OK 24 TROTH
+A< OK 26 TROTH
 A> MOV 1 PLAY 8 8 H TROTH
-A< EVT 1 5 PLAY 0 8 8 H TROTH 24
+A< EVT 1 5 PLAY 0 8 8 H TROTH 26
 A< EVT 1 6 X 8 8 T 9 8 R 10 8 O 11 8 T 12 8 H
 A< EVT 1 7 DRAW 0 5
 A< EVT 1 8 TURN 1
@@ -1733,10 +1730,10 @@ B< R AROOETN
 B< K 0 7
 B< K 1 7
 B< BAG 81
-B< T 0 24
+B< T 0 26
 B< T 1 0
 B< W 1
-B< LAST 0 8 8 H TROTH 24
+B< LAST 0 8 8 H TROTH 26
 B< CLK 1 <secs> 86400
 B< OK
 B> CHK 1 PLAY 8 6 V ANTE
@@ -1754,7 +1751,7 @@ A< R IVXAEEQ
 A< K 0 7
 A< K 1 7
 A< BAG 78
-A< T 0 24
+A< T 0 26
 A< T 1 4
 A< W 0
 A< LAST 1 8 6 V ANTE 4
@@ -1781,9 +1778,9 @@ B> MOV 1 PASS
 B< EVT 1 17 PASS 0
 B< EVT 1 18 TURN 1
 B< EVT 1 19 PASS 1
-B< EVT 1 20 ADJ 0 -26 XAEEQNW
-B< EVT 1 21 ADJ 1 -8 ROOTUDE
-B< EVT 1 22 END win 0 -2/-4
+B< EVT 1 20 ADJ 0 -25 XAEEQNW
+B< EVT 1 21 ADJ 1 -9 ROOTUDE
+B< EVT 1 22 END win 0 1/-5
 B< OK
 A> VUE 1 T
 A< V gridwords/1 22
@@ -1792,11 +1789,11 @@ A< R XAEEQNW
 A< K 0 7
 A< K 1 7
 A< BAG 78
-A< T 0 -2
-A< T 1 -4
+A< T 0 1
+A< T 1 -5
 A< W -1
 A< LAST 1 8 6 V ANTE 4
-A< S Game over: win 0 -2/-4
+A< S Game over: win 0 1/-5
 A< OK
 ```
 

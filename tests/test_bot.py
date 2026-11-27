@@ -32,7 +32,7 @@ from parlord.core import Server  # noqa: E402
 from speed import slow  # noqa: E402
 
 GAMES = [("reversi", "standard"), ("backgammon", "standard"), ("checkers", "american"), ("fiveinarow", "freestyle"),
-         ("dotsandboxes", "standard"), ("mancala", "kalah"), ("navalcombat", "classic"), ("gridwords", "english"),
+         ("dotsandboxes", "standard"), ("mancala", "kalah"), ("navalcombat", "classic"), ("gridwords", "standard"),
          ("cannonfire", "classic"), ("rummytile", "standard")]
 
 
@@ -151,7 +151,7 @@ class Strategies(unittest.TestCase):
     def test_bots_against_bots(self):
         """Three bots and a random player, and every seat a bot: the games end."""
         for game, rules in (("rummytile", "standard"), ("cannonfire", "classic"), ("dotsandboxes", "standard"),
-                            ("gridwords", "english")):
+                            ("gridwords", "standard")):
             end = asyncio.run(local_game(game, rules, 4, 7, ["random", "smart", "smart", "smart"]))
             self.assertRegex(end, r"^(win|draw) ")
         for game, rules in GAMES:
@@ -437,7 +437,7 @@ class WithAServer(unittest.TestCase):
 
     def test_memory(self):
         """The bot's resident memory after Grid Words (the word list loaded) and a few games."""
-        self.run_async(self.vs_bots("memo", "gridwords", "english"))
+        self.run_async(self.vs_bots("memo", "gridwords", "standard"))
         rss = int(subprocess.run(["ps", "-o", "rss=", "-p", str(self.bot.pid)], capture_output=True,
                                  text=True).stdout.split()[0]) // 1024
         # 29-36 MB in python:3.13-slim on Linux (docs/bot.md); a macOS host's ps counts more shared pages

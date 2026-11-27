@@ -117,7 +117,7 @@ class Scoring(Helpers):
                            ("draw 12 -4 12 -20", ("ann", "cy"))):
             with self.subTest(end=end):
                 ps = [await self.player(n) for n in names]
-                t = await self.table("gridwords", *ps, opts="english players=4")
+                t = await self.table("gridwords", *ps, opts="standard players=4")
                 self.srv.event(t, "END " + end)
                 self.assertEqual(self.scored(t.id), {n: (2, "draw") if n in share else (1, "loss") for n in names})
 

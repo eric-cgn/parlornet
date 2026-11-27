@@ -18,7 +18,7 @@ In Answer mode Networdz waits for its host to connect, and a parlor never connec
 
 You will need Windows 3.1 or later with Winsock, ParlorNet Link, and an account, which you make on the web site or by telnet. Then:
 
-1. Save the text under `PARLOR.CFG` below in the Networdz folder: the standard board, the 100 standard tiles and their points, and racks of 7.
+1. Save the text under `PARLOR.CFG` below in the Networdz folder. It gives the board, the 100 tiles, their points and racks of 7 of ParlorNet's standard rules.
 2. Start Networdz, choose Options, Configuration and open `PARLOR.CFG`.
 3. Choose Options, Communicate, Answer Mode, type your name, choose Connect, then OK.
 4. Start ParlorNet Link, type `{host}` and port `6516`, and choose Connect (it reads Networdz's port from `NETWORDZ.INI`). The parlor's welcome shows in Networdz.
@@ -33,15 +33,15 @@ Squares per side=15
 row 1=T..d...T...d..T
 row 2=.D...t...t...D.
 row 3=..D...d.d...D..
-row 4=d..D...d...D..d
-row 5=....D.....D....
-row 6=.t...t...t...t.
+row 4=d..D...t...D..d
+row 5=....t.....t....
+row 6=.t...d...d...t.
 row 7=..d...d.d...d..
-row 8=T..d...C...d..T
+row 8=T..t...C...t..T
 row 9=..d...d.d...d..
-row 10=.t...t...t...t.
-row 11=....D.....D....
-row 12=d..D...d...D..d
+row 10=.t...d...d...t.
+row 11=....t.....t....
+row 12=d..D...t...D..d
 row 13=..D...d.d...D..
 row 14=.D...t...t...D.
 row 15=T..d...T...d..T
@@ -54,19 +54,19 @@ A Tiles=9
 A Points=1
 B Tiles=2
 B Points=3
-C Tiles=2
-C Points=3
+C Tiles=3
+C Points=2
 D Tiles=4
 D Points=2
-E Tiles=12
+E Tiles=11
 E Points=1
 F Tiles=2
 F Points=4
 G Tiles=3
-G Points=2
-H Tiles=2
-H Points=4
-I Tiles=9
+G Points=3
+H Tiles=3
+H Points=3
+I Tiles=8
 I Points=1
 J Tiles=1
 J Points=8
@@ -88,18 +88,18 @@ R Tiles=6
 R Points=1
 S Tiles=4
 S Points=1
-T Tiles=6
+T Tiles=7
 T Points=1
-U Tiles=4
-U Points=1
+U Tiles=3
+U Points=2
 V Tiles=2
-V Points=4
+V Points=5
 W Tiles=2
 W Points=4
 X Tiles=1
-X Points=8
+X Points=7
 Y Tiles=2
-Y Points=4
+Y Points=3
 Z Tiles=1
 Z Points=10
 ```
@@ -118,7 +118,7 @@ Anything else you type is chat with the other players.
 - Networdz's protocol sends the bag and every rack to each player's program, so a table where a Networdz player sits is marked `integrity=false`, with the line "Integrity: a Networdz program receives the bag and all racks." in the chat and in the table's log. Networdz shows you only your own rack, and the game goes on as at any other table.
 - A word the parlor's list lacks shows in Networdz as not in the dictionary, with at most five letters of it. A play whose tiles are not in a line, do not touch the board or miss the center square shows Networdz's own message for it. Either way the chat gives the table's reason; take your tiles back and play again.
 - The bot shows in Networdz as Computer, and the parlor's own lines come under the name ParlorNet, or with no name when all four seats play.
-- The parlor plays the standard board and tiles only: load `PARLOR.CFG` before you connect.
+- Networdz draws the board and scores plays from its configuration, so it plays only tables of the standard rules. Load `PARLOR.CFG` before you connect.
 - Trade Blanks, Exchange 4 of a kind, Timed and Tournament Rules are not played here; the parlor sends them off.
 - A game you leave goes on at the parlor: finish it on the web or by telnet, or `/resign` it. Networdz cannot load a game back.
 - Networdz answers once each time you choose Connect in its Communicate box. To play again after a connection ends, choose Disconnect and then Connect there, and ParlorNet Link connects again by itself.
