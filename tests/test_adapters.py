@@ -291,13 +291,13 @@ class Web(Stack):
         self.assertEqual(statuses(None)["Reversi"], "playable")      # core not reached yet: static list
         for name, gtype, _, _ in W.GAMES[2:]:
             self.assertEqual(statuses(None)[name], "playable" if gtype in built else "planned")
-        s = statuses(["GAM reversi/1 standard Reversi 2 2", "GAM gridwords/1 english Grid_Words 2 4 nomoves",
+        s = statuses(["GAM reversi/1 standard Reversi 2 2", "GAM gridwords/1 standard Grid_Words 2 4 nomoves",
                       "GAM go/1 standard Go 2 2"])
         self.assertEqual((s["Reversi"], s["Grid Words"], s["Go"]), ("playable", "playable", "playable"))
         self.assertEqual(s["Backgammon"], "not on this server")
         for name, gtype, _, _ in W.GAMES[3:]:
             self.assertEqual(s[name], "not on this server" if gtype in built else "planned")
-        page = plain(W.games_html(parse_games(["GAM gridwords/1 english Grid_Words 2 4 nomoves"])))
+        page = plain(W.games_html(parse_games(["GAM gridwords/1 standard Grid_Words 2 4 nomoves"])))
         self.assertIn('<td align="center">2-4</td><td>playable</td>', page)
 
     def test_games_page(self):

@@ -25,7 +25,7 @@ SRC_RE = re.compile(r"^[0-9A-Fa-f:.]{2,45}\Z")       # an IPv4 or IPv6 address (
 PREF_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\Z")   # and at most Limits.pref_key_len
 NATIVE_NS = ":native"     # the public port's namespace for PRF: never an extension's key name (no colon there)
 PREF_SHARED = {"play": "web"}  # extensions whose PRF data is kept under another's name (pref_ns)
-SIGNIN_VERBS = ("HELO", "USER", "REG", "AUT", "SES", "CAN", "SRC", "BYE", "MOTD", "GAM",  # before signing in
+SIGNIN_VERBS = ("HELO", "USER", "REG", "AUT", "SES", "CAN", "SRC", "BYE", "MOTD", "GAM", "GEO",  # before signing in
                 "PRO", "PRD", "PRL", "NFY", "CLI", "TOP", "TIM", "PAG", "CNT", "DIA")
 # The dial-in extension (adapters/dialin.py): the key name of the one server extension that may say what a call
 # is with DIA (docs/protocol.md, Dial-in gateways), and the call's text fields that DIA takes from it.
@@ -50,7 +50,7 @@ NATIVE_PROTOCOL = ("PARLORNET/%d" % VERSION, "ParlorNet protocol (PARLORNET/%d)"
 # Why an invitation ended, the last word of its UNINVITE event (docs/protocol.md, Invitations).
 UNINVITE_WHY = ("declined", "withdrawn", "expired", "started", "left")
 # The requests that are the player's own activity (docs/accounts.md, Who is online): what a player does.
-# Looking (LST, IVL, WHO, VUE, SIN, WAT, SEE, GAM, MOTD, TIM, PRF GET and LST) is what frontends also do on their
+# Looking (LST, IVL, WHO, VUE, SIN, WAT, SEE, GAM, GEO, MOTD, TIM, PRF GET and LST) is what frontends also do on their
 # own, every few seconds, so it never counts; a frontend reports the commands a player types that need no
 # other request with ACT. Signing in counts as well.
 ACTIVE_VERBS = frozenset(("ACT", "CMD", "NEW", "JON", "LVE", "INV", "UNV", "RES", "MOV", "CHK", "UND", "END", "CHT",
@@ -726,6 +726,9 @@ class Server:
                 print("parlord: plugin %s gave no usable info; not offered" % name, file=sys.stderr, flush=True)
                 continue
             p.info = info
+            for note in info.get("log") or []:      # what the plugin wants the operator to read, such as a
+                if isinstance(note, str):           # file of its own that it left out, and why
+                    print("parlord: plugin %s: %s" % (name, note[:300]), file=sys.stderr, flush=True)
             self.plugins["%s/%d" % (info["type"], info["ver"])] = p
         await host.close()
 
@@ -1671,6 +1674,29 @@ class Server:
                                                          i["min"], i["max"], flags)).rstrip())
         return out + [ok()]
 
+    async def cmd_geo(self, sess, args, line):
+        """GEO type rules: the static geometry of a ruleset without a table, as VUE's flag G gives it at a
+        table of that ruleset (docs/protocol.md). Nothing but OK for a game that has none."""
+        if len(args) != 2:
+            return [err("SYNTAX", "GEO type/ver rules")]
+        key = args[0] if "/" in args[0] else args[0] + "/1"
+        plugin = self.plugins.get(key)
+        offered = self.offered()
+        if plugin is None or not any(o.startswith(key + ":") for o in offered):
+            return [err("NOGAME", "this server does not host that game")]
+        if "%s:%s" % (key, args[1]) not in offered:
+            return [err("NORULES", "unknown ruleset")]
+        return await self.static_geometry(plugin, args[1], plugin.info["min"], {}) + [ok()]
+
+    async def static_geometry(self, plugin, rules, players, options):
+        """A ruleset's static geometry from a plugin whose info has "geometry": true (docs/plugins.md), else
+        none: [] too when the plugin gives an error."""
+        if not plugin.info.get("geometry"):
+            return []
+        r = await plugin.call({"op": "geometry", "rules": rules, "players": players, "options": options})
+        lines = r.get("geometry") if isinstance(r, dict) and "error" not in r else None
+        return [l for l in lines if isinstance(l, str)] if isinstance(lines, list) else []
+
     LST_SYNTAX = "LST [open|playing] [mine] [game=type] [player=name] [table=id]"   # [clients]: no room
 
     async def cmd_lst(self, sess, args, line):
@@ -2094,6 +2120,8 @@ class Server:
         flags = "".join(args[1:]).upper()
         out = ["V %s/%d %d" % (t.type, t.ver, t.seq)]
         if t.state is None:
+            if "G" in flags:            # a game with static geometry gives it before the game starts too
+                out += await self.static_geometry(t.plugin, t.rules, len(t.seats), t.options)
             out.append("S Waiting for players")
         else:
             call = {"op": "view", "rules": t.rules, "state": t.state, "seat": seat}

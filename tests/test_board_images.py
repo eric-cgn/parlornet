@@ -188,7 +188,7 @@ class Hidden(unittest.TestCase):
             y_rack = GW.MARGIN + 15 * GW.CELL + GW.RACK_GAP
             racks[seat] = [p for p, _, y in c.used if y == y_rack]
             v = GW.parse_view(TG.view_lines(st, seat))
-            self.assertEqual(racks[seat], [GW.tile_name(t) for t in v["rack"]])
+            self.assertEqual(racks[seat], [GW.tile_name(t, v["til"]) for t in v["rack"]])
         self.assertNotEqual(racks[0], racks[1])
         watch = board_image(self, GW, TG.view_lines(st, -1), -1)
         seat0 = board_image(self, GW, TG.view_lines(st, 0), 0)

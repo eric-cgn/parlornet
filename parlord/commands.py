@@ -49,7 +49,7 @@ The interface. Every console builds on it, so it is kept small and stable:
                                     notes; compact gives one "Commands: ..." line, wrapped to width
     commands_line(names)            "Commands: /list, /resume [table], ..., /help."
     Console(say, req, me, commands, kinds=(), label="", new="standard", notes=(),
-            handlers=None, seated=None, width=0, compact=False, current=None)
+            handlers=None, seated=None, width=0, compact=False, current=None, rules=None)
         await console.handle(text)  -> True when the line was a command (it has been answered), False
                                        when it is chat for the console to pass on
     game_lines(games, label, entering=False), open_lines(tables, me, join=True), clock_text(secs)
@@ -71,6 +71,10 @@ The hooks a console gives Console:
     commands            the names offered here (help lists them); any other command gets NOT_HERE
     kinds               the game keys the console plays ("backgammon/1"): /list, /open, /join, /invite
                         and /accept cover these, and /open and /invite make tables of the first
+    rules               the rules ids the console plays, or None for every one: /list, /join, /invite and
+                        /accept cover only tables of these. A program that draws a game's board or
+                        values itself plays only the rulesets that match it (docs/protocol.md, Game
+                        identity)
     label               the game's name for /list ("Backgammon"); "" for a console of several games
     new                 what follows the key in NEW for /open and /invite ("standard cube=0")
     notes               extra help lines (a bot that comes after a wait, for example)
@@ -334,8 +338,9 @@ class Console:
     """One chat-style console's commands (module docstring: the hooks)."""
 
     def __init__(self, say, req, me, commands, kinds=(), label="", new="standard", notes=(),
-                 handlers=None, seated=None, width=0, compact=False, current=None):
+                 handlers=None, seated=None, width=0, compact=False, current=None, rules=None):
         self.say_hook, self.req, self.me_hook = say, req, me
+        self.rules = None if rules is None else tuple(rules)
         self.current = current
         self.commands = list(commands)
         self.kinds, self.label, self.new = list(kinds), label, new
@@ -343,6 +348,10 @@ class Console:
         self.handlers = dict(handlers or {})
         self.seated = seated
         self.resign_ask = None      # (table, when): the /resign waiting for its confirmation
+
+    def plays(self, t):
+        """A table or an invitation (parse_tables, parse_invites) is of a game and a ruleset this console plays."""
+        return t["key"] in self.kinds and (self.rules is None or t.get("rules") in self.rules)
 
     @property
     def me(self):
@@ -430,7 +439,7 @@ class Console:
             who = names_with(t)
             one = len(t["names"]) == 1
             if t["status"] == "open":
-                free = (join and t["key"] in self.kinds and t["filled"] < t["seats"]
+                free = (join and self.plays(t) and t["filled"] < t["seats"]
                         and self.me.lower() not in [n.lower() for n in t["names"]])
                 out.append("Table %s, %s: %s %s.%s" % (t["id"], what, who, "waits" if one else "wait",
                                                         " /join %s" % t["id"] if free else ""))
@@ -478,7 +487,7 @@ class Console:
 
     async def tables(self):
         data, final = await self.req("LST game=%s clients" % self.kinds[0] if len(self.kinds) == 1 else "LST clients")
-        return [t for t in parse_tables(data) if t["key"] in self.kinds] if final.startswith("OK") else []
+        return [t for t in parse_tables(data) if self.plays(t)] if final.startswith("OK") else []
 
     async def do_list(self, cmd):
         me = self.me.lower()
@@ -700,7 +709,7 @@ class Console:
     async def do_accept(self, cmd):
         name = cmd.args[0]
         inv = next((i for i in await self.invitations()
-                    if i["from"].lower() == name.lower() and i["key"] in self.kinds), None)
+                    if i["from"].lower() == name.lower() and self.plays(i)), None)
         if inv is None:
             await self.say("You have no invitation from %s here." % name)
             return
@@ -712,7 +721,7 @@ class Console:
         open table, found by its number or by the player waiting there."""
         arg = cmd.args[0]
         invs = await self.invitations()
-        inv = next((i for i in invs if i["key"] in self.kinds
+        inv = next((i for i in invs if self.plays(i)
                     and (i["from"].lower() == arg.lower() or i["id"] == arg)), None)
         if inv is not None:                 # invited there: the seat held for me
             if await self.sit(inv["id"], None, inv["from"], "accept") is not None:
@@ -748,7 +757,7 @@ class Console:
             await self.say("You cannot invite yourself.")
             return
         theirs = next((i for i in await self.invitations()
-                       if i["from"].lower() == name.lower() and i["key"] in self.kinds), None)
+                       if i["from"].lower() == name.lower() and self.plays(i)), None)
         if theirs is not None:              # NAME invited me already: that is the game
             await self.do_accept(Command("accept", [name], cmd.text))
             return

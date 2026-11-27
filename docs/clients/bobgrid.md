@@ -16,6 +16,7 @@ The download is the author's page as the Internet Archive kept it. The author of
 - Make your account on the web site or by telnet first.
 - In BobGrid's input line, type `/HOST {host} 6507`, then `/GO`. Then `connect name password` signs you in, and `/CONWIZ` saves the host, name and password for next time, after which BobGrid connects and signs in by itself when it starts.
 - Type `/1152x864` to make the window large enough to show the scores and the logs.
+- `newboard` makes a board of the server's first Grid Words rules, and `newboard 2 NAME` makes one of the rules called NAME, when the server has them. `who` and the board list show each board's rules.
 - On ParlorNet you can play Grid Words against anyone on the server, the bot too. Type `invite bot`. Click the square your word starts on (again to go down), then your rack letters; click SC to have the server score the play, then OK to make it. OK without SC makes nothing. BobGrid's board, log windows and tile tracker follow the game.
 
 ## Known quirks

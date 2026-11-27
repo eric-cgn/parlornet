@@ -301,7 +301,7 @@ WORDS = "he hex ex quiz qi za ab be ax xi zax example"
 
 class GridWords(Typed):
     game = "gridwords"
-    rules = "english"
+    rules = "standard"
 
     @classmethod
     def setUpClass(cls):
@@ -340,7 +340,7 @@ class GridWords(Typed):
         reply = self.typed(st, 0, "h8 across QUIZ")
         self.assertEqual(reply["what"], "play QUIZ across from h8")
         st = self.plays(st, 0, "h8 across QUIZ")
-        self.assertEqual(st["scores"][0], 44)
+        self.assertEqual(st["scores"][0], 46)
 
     def test_layout_over_board_tiles(self):
         st = self.with_he()
@@ -368,14 +368,14 @@ class GridWords(Typed):
 
     def test_check(self):
         st = self.fresh()
-        self.assertEqual(self.typed(st, 0, "check h8 across QUIZ"), {"say": "QUIZ would score 44."})
+        self.assertEqual(self.typed(st, 0, "check h8 across QUIZ"), {"say": "QUIZ would score 46."})
         self.assertEqual(self.typed(st, 1, "check h8 BE"), {"say": "BE would score 8."})     # off turn
         self.assertEqual(self.typed(st, 1, "check h8 QUIZ"),
                          {"say": "QUIZ can't be played there. Your rack has no Q."})
         self.assertEqual(self.typed(st, 0, "check a1 QUIZ"),
                          {"say": "QUIZ can't be played there. The first word must cover the center square h8."})
         st = self.with_he()
-        self.assertEqual(self.typed(st, 1, "check j8 x"), {"say": "HEX would score 13."})
+        self.assertEqual(self.typed(st, 1, "check j8 x"), {"say": "HEX would score 11."})
         say = self.typed(st, 1, "check h9 across ex")["say"]       # the cross words are named too
         self.assertRegex(say, r"^EX, HE and EX would score [0-9]+\.$")
         self.assertEqual(self.typed(st, 1, "check j8 B"), {"say": "HEB can't be played there. "
@@ -389,9 +389,9 @@ class GridWords(Typed):
     def test_check_all_seven(self):
         st = self.fresh(rack0="EXAMPLE")
         score = self.P.evaluate(st, 0, 8, 8, "H", "EXAMPLE", None)["score"]
-        self.assertEqual(score, 92)
+        self.assertEqual(score, 96)
         self.assertEqual(self.typed(st, 0, "check h8 example"),
-                         {"say": "EXAMPLE would score 92, with 50 for using all seven tiles."})
+                         {"say": "EXAMPLE would score 96, with 50 for using all seven tiles."})
 
     def test_pass_and_exchange(self):
         st = self.fresh()

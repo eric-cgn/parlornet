@@ -780,7 +780,7 @@ def formable(word, rack):
 @scenario("gridwords", args=NONE, seed=5)
 async def _gridwords(r):
     gw, words = gridwords_words()
-    await two_players(r, "gridwords", "english")
+    await two_players(r, "gridwords", "standard")
     view = await r.say("A", "VUE 1 GT", note="The static geometry (flag G) comes first; a client keeps it.")
     rack = next(GW_RACK_RE.match(l).group(1) for l in view if GW_RACK_RE.match(l))
     cands = sorted((w for w in words if 4 <= len(w) <= 5 and formable(w, rack)), key=lambda w: (-len(w), w))

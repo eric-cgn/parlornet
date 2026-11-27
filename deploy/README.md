@@ -103,7 +103,7 @@ Without `PARLOR_DIALIN_GATEWAYS` (`dialin.gateways` in the settings file), the p
 
 ## A site of your own
 
-A server can show words of its own on the web site and in the message of the day, such as how to reach it by modem or when it hosts an event. Keep these files in a directory on the host, outside the image, and give its path to `install.sh` as `PARLOR_SITE_DIR`:
+A server can show words of its own on the web site and in the message of the day, such as how to reach it by modem or when it hosts an event. It can also offer game rulesets of its own. Keep these files in a directory on the host, outside the image, and give its path to `install.sh` as `PARLOR_SITE_DIR`:
 
 ```sh
 sudo PARLOR_SITE_DIR=/srv/parlornet-site sh deploy/install.sh parlornet:1
@@ -114,8 +114,9 @@ The script mounts the directory read-only at `/run/parlornet/site` in the contai
 - `motd.txt` is the message of the day. It takes the place of the image's `deploy/motd.txt` when the server starts. A message of the day saved in the admin menus still takes the place of both. It is plain ASCII, at most 20 lines, and each line of up to 73 characters is shown as written, so it can hold an ASCII layout.
 - `welcome.htm` is a piece of HTML 3.2 that the welcome page shows right after the message of the day, in its Welcome section. Write it as you would write the inside of a page's body, with paragraphs, lists, links and tables, and leave out `<html>`, `<head>` and `<body>`.
 - `pages/NAME.htm` is a page of its own at `/NAME.htm` on the web site. NAME is 1 to 32 lower-case letters, digits and hyphens. The file's first line is the page's title, written as `<title>Dial-in access</title>`, and the rest of the file is the page's body, in HTML 3.2 as in `welcome.htm`. The page comes in the site's frame with its navigation bar, with the breadcrumb line Welcome > its title under the bar and its title as its heading. Nothing links to it on its own, so link to it from `welcome.htm`.
+- `rules/gridwords/ID.json` adds a Grid Words ruleset whose rules id is ID, next to the standard rules that every release has. ID is a lower-case letter and then up to 11 lower-case letters or digits. The file gives what each letter is worth, how many of each the bag holds and where the bonus squares are on the 15 by 15 board, and it may set how many turns without a word end a game. The Ruleset files part of docs/types/gridwords-1.md describes the format. Players can then pick the ruleset wherever they start a table, by its id with a capital letter. A period client that draws its own board plays only the rulesets its server extension names.
 
-The web extension refuses a page whose name the site already uses, such as `lobby` or `login`, and a page without its title line. It also refuses a file that is larger than 32 KB or that is not UTF-8 text. `docker logs parlornet` names each file it leaves out and says why.
+The web extension refuses a page whose name the site already uses, such as `lobby` or `login`, and a page without its title line. It also refuses a file that is larger than 32 KB or that is not UTF-8 text. `docker logs parlornet` names each file it leaves out and says why. The game does the same for a ruleset file it can't use, with a line that starts `parlord: plugin gridwords:`.
 
 ### Placeholders
 
@@ -131,7 +132,7 @@ The files name the server's addresses and ports through placeholders. The server
 
 Write `{{` for a brace `{` and `}}` for a brace `}`. The server only looks for these words and never runs anything in the files. In the HTML files it escapes each value for HTML. A placeholder it doesn't know stays in the text as you wrote it, and so does one that has no value at the moment, such as `{play}` while ParlorNet Play is off. The log names each of them once. The message of the day leaves out a line that holds a placeholder with no value instead.
 
-The message of the day takes its values from the core's settings, and the web files take theirs from the web extension's. When some server extensions run on another host, as [Server extensions on another host](#server-extensions-on-another-host) describes, `install-extensions.sh` takes `PARLOR_SITE_DIR` too. Its directory on the front host holds `welcome.htm` and `pages/`, and `motd.txt` stays in the directory on the core's host. `install-split.sh` takes `PARLOR_SITE_DIR` as well.
+The message of the day takes its values from the core's settings, and the web files take theirs from the web extension's. When some server extensions run on another host, as [Server extensions on another host](#server-extensions-on-another-host) describes, `install-extensions.sh` takes `PARLOR_SITE_DIR` too. Its directory on the front host holds `welcome.htm` and `pages/`, and `motd.txt` and `rules/` stay in the directory on the core's host. `install-split.sh` takes `PARLOR_SITE_DIR` as well.
 
 ### An example
 

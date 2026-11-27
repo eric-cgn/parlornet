@@ -140,7 +140,7 @@ class Events(Base):
         """Seen by the players seated there and the creator; an invited player who watches sees the seat only."""
         ann, bob, cy = await self.player("ann"), await self.player("bob"), await self.player("cy")
         await self.said(bob, *APPLE)
-        tid = (await self.req(ann, "NEW gridwords english players=3 vis=private"))[-1].split()[1]
+        tid = (await self.req(ann, "NEW gridwords standard players=3 vis=private"))[-1].split()[1]
         await self.req(ann, "JON %s" % tid)
         await self.req(ann, "INV %s bob" % tid)
         await self.req(bob, "JON %s" % tid)

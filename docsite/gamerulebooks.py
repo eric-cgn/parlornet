@@ -25,7 +25,7 @@ RULEBOOKS = [
     Rulebook("fiveinarow-rulebook", "Five in a Row", "Five in a Row [ParlorNet]",
              "Five in a Row on a 15 by 15 board: five or more in a line wins"),
     Rulebook("gridwords-rulebook", "Grid Words", "Grid Words [ParlorNet]",
-             "Grid Words, the crossword game, by the classic rules on the standard board; on a parlor only"),
+             "Grid Words, the crossword game, with the board and letter values of each table's rules; on a parlor only"),
     Rulebook("rummytile-rulebook", "Rummy Tile", "Rummy Tile [ParlorNet]",
              "Rummy Tile, tile rummy for two by the standard rules; on a parlor only"),
     Rulebook("cannonfire-rulebook", "Cannon Fire", "Cannon Fire [ParlorNet]",

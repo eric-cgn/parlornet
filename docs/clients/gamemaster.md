@@ -40,6 +40,7 @@ On ParlorNet, Dots&Boxes is won by the first to hold more than half its 13 by 11
 - Swap and Restart from your Mac are declined.
 - GameMaster plays two. Tables for three or more players are left out of the ParlorNet window, and an invitation to one is turned down with the reason. Grid Words, Rummy Tile and Cannon Fire can have more, so play those tables on the web, by telnet or in ParlorNet Play.
 - Grid Words, Rummy Tile, Cannon Fire and Backgammon play only on a parlor, which deals the tiles, checks the words and turns, flies the shells and rolls the dice. Checkers, Mancala and Five in a Row also play between two Macs that both have the rulebook.
+- The Grid Words rulebook draws the bonus squares and the letter values that the parlor sends for the table, so it plays every Grid Words ruleset the server has. Grid Words 1.1.1 and older draw a board of their own, which doesn't match the standard rules, so use 1.2.0 or later.
 - Backgammon draws your home board on the right. Home left (or H) draws the mirror image, and the parlor keeps that choice for your next game in GameMaster. It is kept apart from the same choice on the web and by telnet.
 - ParlorNet's own games take up where they were left. Resume on Your games picks one up, even a game started on the web, by telnet or in another program such as Outland.
 

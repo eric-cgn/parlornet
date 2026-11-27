@@ -127,13 +127,6 @@ FIBS_HOME = "http://fibs.com/"
 # Plain text; the page escapes it. A game with a module in adapters/games/ has its own ABOUT there, which
 # is used instead (Reversi's and Backgammon's are there).
 GAME_ABOUT = {
-    "gridwords": (
-        "Two to four players build interlocking words on a square board from letter tiles drawn from a "
-        "bag. Each tile has a value, and special squares multiply a letter or "
-        "a whole word; the player with the highest score when the tiles run out wins.",
-        ["Planned (a draft type spec exists): an English ruleset first, a 15 by 15 board, words checked "
-         "against the server's word list as they are played, so there is no challenge round. The word list "
-         "and tile set will come from freely licensed sources."]),
     "cannonfire": (
         "Two to eight players each command a cannon on a hilly landscape. In turn, each sets an angle and a "
         "power and fires; shells fly under gravity and the wind, and blast craters in the ground and in "
@@ -227,6 +220,18 @@ def _fibs_note_html():
 
 
 
+async def read_geometry(core, hosted):
+    """{(type/ver, rules): GEO's lines} for every ruleset of a game whose module draws rulesets (rules_html)."""
+    out = {}
+    for g in hosted or ():
+        m = games.get(g["key"])
+        if m is not None and hasattr(m, "rules_html"):
+            data, final = await core.req("GEO %s %s" % (g["key"], g["rules"]))
+            if final.startswith("OK"):
+                out[(g["key"], g["rules"])] = data
+    return out
+
+
 def game_page_path(gtype):
     """A game's own page: /games/reversi.htm."""
     return "/games/%s.htm" % gtype
@@ -273,10 +278,42 @@ def heading_anchor(text):
     return re.sub(r"[^\w\- ]", "", text.lower(), flags=re.ASCII).strip().replace(" ", "-")
 
 
-def game_page(gtype, hosted=None, nav=None):
+def ruleset_board(m, rules, lines):
+    """The empty board of a ruleset, drawn by its game's module from the ruleset's static geometry (GEO's
+    lines), as a Board of BOARDS."""
+    v = m.parse_view(["V %s 0" % m.KEY] + list(lines))
+    return BOARDS.render(board_key(m.board_image, "rules:" + rules, -1, None, view_digest(v)),
+                         lambda: m.board_image(v, -1, None))
+
+
+def ruleset_board_path(gtype, rules):
+    """The picture of a ruleset's empty board: /games/gridwords/standard.gif."""
+    return "/games/%s/%s.gif" % (gtype, rules)
+
+
+def rulesets_html(gtype, hosted, geometry):
+    """For a game whose module shows its rulesets (rules_html): each ruleset this server has, in GAM's order,
+    from its static geometry (geometry: {(type/ver, rules): GEO's lines}), with the picture of its board."""
+    m = games.by_type().get(gtype)
+    if m is None or not hasattr(m, "rules_html"):
+        return ""
+    out = []
+    for g in hosted or ():
+        lines = (geometry or {}).get((g["key"], g["rules"]))
+        if g["key"] == m.KEY and lines:
+            name = "%s rules" % games.rules_name(m.KEY, g["rules"])
+            b = ruleset_board(m, g["rules"], lines)
+            img = '<img src="%s" width="%d" height="%d" alt="The board of the %s">' % (
+                ruleset_board_path(gtype, g["rules"]), b.w, b.h, esc(name))
+            out.append(m.rules_html(name, lines, img))
+    return "".join(x for x in out if x)
+
+
+def game_page(gtype, hosted=None, nav=None, geometry=None):
     """/games/<type>.htm: one game: players, its status here, its type spec and protocol chapter on the docs
-    site, what the game is, the rules and options played here, and where the docs list the programs that
-    play it. None for an unknown game."""
+    site, what the game is, the rules and options played here (with each ruleset's own board and tiles for
+    a game whose module draws them), and where the docs list the programs that play it. None for an unknown
+    game."""
     r = next((r for r in game_rows(hosted) if r["type"] == gtype), None)
     if r is None or not game_about(gtype):
         return None
@@ -296,7 +333,7 @@ def game_page(gtype, hosted=None, nav=None):
             p("<br>\n".join("<b>%s:</b> %s" % kv for kv in facts), 2) +
             p(esc(about)) +
             h2("rules", "Rules and options here" if r["status"] == "playable" else "Rules and options") +
-            ul(esc(x) for x in rules) +
+            ul(esc(x) for x in rules) + rulesets_html(gtype, hosted, geometry) +
             (_fibs_note_html() if gtype == "backgammon" else "") +
             h2("frontends", "Programs that play it") + programs +
             p("%s | %s" % (a("/welcome.htm#%s" % gtype, "All games"), a("/lobby.htm", "Play")), 2))
@@ -1604,6 +1641,7 @@ class Web:
         self.auth_seen = (("password", "Password", "password"), 0.0)
         self.motd_seen = []
         self.games_seen = None      # the core's GAM list, refreshed with the auth info; None until known
+        self.geometry_seen = {}     # {(type/ver, rules): GEO's lines} for the games whose pages draw rulesets
         self.protocols_seen = None  # the core's PRL list: [(key, port, name, description)]; None until known
         self.protocols_when = 0.0
         self.scores_seen = False    # the core shows its leaderboard (TOP answers OK; scores.show on)
@@ -1752,6 +1790,7 @@ class Web:
                 gdata, final = await core.req("GAM")
                 if final.startswith("OK"):
                     self.games_seen = parse_games(gdata)
+                    self.geometry_seen = await read_geometry(core, self.games_seen)
                 await self.read_protocols(core)
                 _, final = await core.req("TOP 1")      # the leaderboard is shown (scores.show): link to it
                 self.scores_seen = final.startswith("OK")
@@ -1848,9 +1887,19 @@ class Web:
                 return respond(304, b"", "image/gif", extra="Cache-Control: max-age=86400\r\n")
             return respond(200, SITE_IMAGES.get(path) or IMAGES[path], "image/gif",
                            extra="Cache-Control: max-age=86400\r\nLast-Modified: %s\r\n" % STARTED)
+        if path.startswith("/games/") and path.endswith(".gif"):         # a ruleset's board
+            await self.refresh_info()
+            parts = path[len("/games/"):-len(".gif")].split("/")
+            m = games.by_type().get(parts[0]) if len(parts) == 2 else None
+            lines = self.geometry_seen.get((m.KEY, parts[1])) if m else None
+            if lines:
+                return respond(200, ruleset_board(m, parts[1], lines).gif, "image/gif",
+                               extra="Cache-Control: max-age=3600\r\n")
+            return notice("Not found", "Not found", status=404)
         if path.startswith("/games/"):
             await self.refresh_info()
-            got = (game_page(path[len("/games/"):-len(".htm")], self.games_seen, self.visitor_nav(req, None))
+            got = (game_page(path[len("/games/"):-len(".htm")], self.games_seen, self.visitor_nav(req, None),
+                             self.geometry_seen)
                    if path.endswith(".htm") else None)
             if got:
                 return got

@@ -146,7 +146,7 @@ class Lobby(Base):
         self.assertEqual(await self.says(ann, "/open Grid_Words"), "Your table 1 is open: anyone can join it. "
                          "/close closes it.")
         t = self.srv.tables["1"]
-        self.assertEqual((t.type, t.rules, t.seats[0]), ("gridwords", "english", "ann"))
+        self.assertEqual((t.type, t.rules, t.seats[0]), ("gridwords", "standard", "ann"))
         self.assertIn("Table 1: ann waits for a player. Type /join 1 to sit down.", await self.says(bob, "/list"))
         self.assertEqual(await self.says(bob, "/join ann"), "You sat down at table 1 with ann.")
         self.assertEqual(t.status, "playing")
@@ -292,7 +292,7 @@ class InAGame(Base):
 
     async def test_pass_asks_first(self):
         ann, bob = await self.player("ann"), await self.player("bob")
-        tid = await self.game(ann, bob, "gridwords english")
+        tid = await self.game(ann, bob, "gridwords standard")
         self.assertEqual(await self.cmd(ann, "%s /pass" % tid),
                          ["DLG pass %s" % tid, "INF Pass your turn? You play nothing this turn.", "OK"])
         self.assertFalse(any(e.startswith("PASS") for e in await self.events(ann, tid)))
