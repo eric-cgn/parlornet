@@ -22,7 +22,7 @@ It answers under /play/ only:
 It speaks plain HTTP and is meant to sit behind a reverse proxy that terminates TLS (deploy/README.md):
 
 - --public-url (the setting play.public_url, PARLOR_PLAY_URL) is the address players open, such as
-  https://parlornet.org/play/. The WebSocket's Origin must then be that URL's origin, the cookie is Secure
+  https://games.example.org/play/. The WebSocket's Origin must then be that URL's origin, the cookie is Secure
   when it is https, and the port declared to the core is that URL's port. Without it, the Origin must name
   the host and port of the Host header, as a page loaded straight from this port does.
 - --proxies (play.proxies, PARLOR_PLAY_PROXIES) lists the proxies' addresses or networks. For a request from
@@ -38,7 +38,7 @@ PARLOR_PLAY_PUSH_CONTACT: the operator's mailto: or https: address, which push s
 directory (--data, PARLOR_PLAY_DATA) for the subscriptions and the VAPID key; without any of them they are off.
 
     python3 -m adapters.playserver --core 127.0.0.1:6590 --key /data/frontends/play.key --port 6513 \\
-        --host 0.0.0.0 --public-url https://parlornet.org/play/ --proxies 172.30.4.1 --data /data/play \\
+        --host 0.0.0.0 --public-url https://games.example.org/play/ --proxies 172.30.4.1 --data /data/play \\
         --push-contact mailto:operator@example.org
 """
 import argparse

@@ -729,7 +729,7 @@ class Admin:
                 await self.count(g, tag)
             elif tag == "Web names":
                 v = await ui.inputbox("Web names", "The names the web pages answer to, comma-separated, like "
-                                      "parlornet.org:6500,www.parlornet.org:6500. A redirect for any other name "
+                                      "games.example.org:6500,www.games.example.org:6500. A redirect for any other name "
                                       "goes to the first. Empty: any. Takes effect when the container restarts.",
                                       g["settings"].get("web.hosts", ""), maxlen=200)
                 if v is not None:
