@@ -825,15 +825,13 @@ class Catalog(unittest.TestCase):
 
     def test_install_publishes_play_on_loopback_unless_asked(self):
         import subprocess
-        with open(os.path.join(ROOT, "deploy", "install.sh")) as f:
-            line = next(l.strip() for l in f if "6513:6513" in l).rstrip("\\").strip()
-        for env, want in (({}, "-p 127.0.0.1:6513:6513"), ({"PARLOR_PLAY_OPEN": "1"}, "-p 6513:6513")):
-            out = subprocess.run(["sh", "-eu", "-c", "echo " + line], capture_output=True, text=True,
-                                 env=dict(env, PATH=os.environ.get("PATH", "/usr/bin:/bin"))).stdout.strip()
-            self.assertEqual(out, want)
+        from test_remote_extensions import install_args, published
+        self.assertIn("127.0.0.1:6513:6513", published(install_args()[0]))
+        self.assertIn("6513:6513", published(install_args(PARLOR_PLAY_OPEN="1")[0]))
         with open(os.path.join(ROOT, "deploy", "install.sh")) as f:
             text = f.read()
-        loop = text[text.index("$(for v in"):text.index("done)") + 5]
+        start = text.index("$(for v in")
+        loop = text[start:text.index("done)", start) + 5]
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PARLOR_PLAY_URL": "https://games.example.org/play/",
                "PARLOR_PLAY_PROXIES": "172.30.4.1"}
         out = subprocess.run(["sh", "-eu", "-c", "echo " + loop], env=env, capture_output=True, text=True).stdout

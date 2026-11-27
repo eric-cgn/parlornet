@@ -15,7 +15,7 @@ Players, tables and settings live in `/srv/parlornet` on the host, so a restart 
 
 ![What install.sh runs: the players' programs, the reverse proxy for ParlorNet Play, and the processes in the container](../static/img/diagram-parlor.gif)
 
-The script reads `PARLOR_NAME`, `PARLOR_AUTH`, `PARLOR_SIGNUP`, `PARLOR_WEB_HOSTS`, `PARLOR_WEB_URL`, `PARLOR_WEB_PROXIES`, `PARLOR_PLAY_URL`, `PARLOR_PLAY_PROXIES` and `PARLOR_PLAY_OPEN` from its environment. The comments at the top of the script explain each one. Settings you would rather keep out of the environment, such as the SMTP relay's password, go in `/etc/parlornet/settings.conf`. Make that file readable only by uid 10042 (`chown 10042 settings.conf; chmod 400 settings.conf`). If the file exists, the script mounts it into the container.
+The script reads `PARLOR_NAME`, `PARLOR_AUTH`, `PARLOR_SIGNUP`, `PARLOR_ADAPTERS`, `PARLOR_WEB_HOSTS`, `PARLOR_WEB_URL`, `PARLOR_WEB_PROXIES`, `PARLOR_PLAY_URL`, `PARLOR_PLAY_PROXIES` and `PARLOR_PLAY_OPEN` from its environment. `PARLOR_PUBLISH_IP` publishes the players' ports on one address of the host instead of every address. A proxy on the host then reaches the web site at that address rather than at 127.0.0.1. The comments at the top of the script explain each one. Settings you would rather keep out of the environment, such as the SMTP relay's password, go in `/etc/parlornet/settings.conf`. Make that file readable only by uid 10042 (`chown 10042 settings.conf; chmod 400 settings.conf`). If the file exists, the script mounts it into the container.
 
 With `PARLOR_SIGNUP=email`, signing up mails each new player a temporary password, so the server needs an SMTP relay. [The open internet](../README.md#the-open-internet) in the main README shows how to set one. The first sign-in with the temporary password confirms the account and asks the player to choose a password of their own. An account that nobody signs into within 24 hours is deleted.
 
@@ -116,6 +116,49 @@ Until you set an admin password, every start prints a one-time setup password in
 
 `install-split.sh` is an optional alternative that runs each server process in a container of its own, under its own uid and with only its own key. It uses the same image and the same ports. The Containment part of [docs/security-design.md](../docs/security-design.md#containment) explains the trade-offs, and the comments at the top of the script describe its networks and options.
 
+## Server extensions on another host
+
+A parlor can run some of its server extensions on a second host, against the core on the first. The extension channel then crosses from one host to the other. It is TLS 1.3 with a pre-shared key for each extension, the same as inside the container, but it should still cross only a private link between the hosts, such as WireGuard or a private network. The core treats an extension on another host exactly like one in its own container.
+
+In this example, the front host runs the web site (6500), telnet (6502) and ParlorNet Play (6513). The back host runs the core and every other extension. The back host's address on the private link is 10.0.0.1. Players reach the back host at 192.0.2.10 and the front host at 192.0.2.20. Build or load the same image on both hosts.
+
+On the back host, run `install.sh` like this:
+
+```sh
+sudo PARLOR_NAME=games.example.org PARLOR_AUTH=password PARLOR_SIGNUP=email \
+    PARLOR_ADAPTERS=ios,fibs,outland,doom,gamemaster,netsprocket,batnav,awale,networdz,netluff,icds,worthy,rscards,admin,bot \
+    PARLOR_PUBLISH_IP=192.0.2.10 PARLOR_FRONTEND_PUBLISH=10.0.0.1 PARLOR_REMOTE_EXTENSIONS=web,telnet,play \
+    sh deploy/install.sh parlornet:1
+```
+
+`PARLOR_ADAPTERS` leaves out the three extensions that run on the front host. If you saved a list in the admin menus' Adapters screen, that list wins, so turn the three off there as well. `PARLOR_PUBLISH_IP` keeps the players' ports off the link. `PARLOR_FRONTEND_PUBLISH` publishes the extension channel, 6590, on the link's address and nowhere else. Inside the container the core then listens for extensions on every address (`PARLOR_FRONTEND_HOST=0.0.0.0`), and the extensions in the container still connect to it over loopback. The admin socket stays inside the container. Docker can publish a port on the link's address only while the link is up, so bring the link up before Docker starts, for example by ordering `wg-quick@wg0` before `docker.service`.
+
+`PARLOR_REMOTE_EXTENSIONS` enrolls a key for each extension that runs on the other host, and it keeps any key that is already enrolled. The script puts a copy of each key in `/srv/parlornet-keys` and prints their names. Only root can read them. Copy them over SSH to `/srv/parlornet-keys` on the front host, and keep them readable only by root there too. After you rotate a key with `docker exec parlornet python -m parlord.frontends --keys /data/frontends rotate web`, run `install.sh` again to refresh the copy, copy it again, and run `install-extensions.sh` again on the front host.
+
+On the front host, run `install-extensions.sh` with the core's address on the link and the names of the extensions:
+
+```sh
+sudo PARLOR_CORE=10.0.0.1:6590 PARLOR_PUBLISH_IP=192.0.2.20 \
+    PARLOR_WEB_URL=https://games.example.org/ PARLOR_WEB_PROXIES=172.30.6.1 \
+    PARLOR_PLAY_URL=https://games.example.org/play/ PARLOR_PLAY_PROXIES=172.30.6.1 \
+    PARLOR_PLAY_PUSH_CONTACT=mailto:ops@example.org \
+    sh deploy/install-extensions.sh parlornet:1 web telnet play
+```
+
+Each extension runs in a container of its own, under its own uid, with its own key mounted read-only. The containers have the same limits as those of `install-split.sh`, and they use no host networking. They share a Docker network named `parlor-ext`, with the subnet 172.30.6.0/24, and they cannot reach each other on it. Its gateway, 172.30.6.1, is the address the containers see for a proxy on the front host, so it goes in `PARLOR_WEB_PROXIES` and `PARLOR_PLAY_PROXIES`. ParlorNet Play is published on the front host's `127.0.0.1:6513`, for the TLS proxy, so the nginx configuration above works there for Play. Because of `PARLOR_PUBLISH_IP`, the `location /` for the web site passes to `http://192.0.2.20:6500` instead. Play keeps its push subscriptions and its VAPID key in `/srv/parlornet-extensions/play`. The script takes `PARLOR_WEB_HOSTS` and `PARLOR_PLAY_OPEN` as `install.sh` does. The admin menus' values for the web and Play settings reach only the extensions in the core's container, so give them to this script.
+
+Running `install-extensions.sh` again replaces its containers and keeps the data. It also removes the container of any extension it ran before that you no longer name. The comments at the top of the script list its other settings.
+
+The sign-in mail names the web and telnet ports at `PARLOR_NAME`, so that name should reach the front host in this example. Players who use the back host's ports need its own address, or a name of its own.
+
 ## Memory
 
-With sixteen server extensions, the core and the bot, the container uses about 245 MB at rest, and more with every game loaded. The limit is 448 MB. Each server process holds about 20 MB of its own, and ParlorNet Play needs no more than telnet. The plugin host that runs the games starts with the first game. Once no game is being played, it stops after `plugins.idle` seconds, 600 by default. `docker stats parlornet` shows the current figure.
+With every server extension on, the core and the bot, the container uses about 400 MiB at rest on linux/amd64, and more with every game loaded. Each server process holds about 20 MiB of its own, and ParlorNet Play needs no more than telnet. The plugin host that runs the games starts with the first game. Once no game is being played, it stops after `plugins.idle` seconds, 600 by default. `docker stats parlornet` shows the current figure.
+
+The container's memory limit is 448 MiB unless you set `PARLOR_MEMORY`, which `install.sh` gives to Docker as `--memory`. `PARLOR_MEMORY_SWAP` goes to `--memory-swap`, the limit on memory and swap together, and it must be at least `PARLOR_MEMORY`. Without it, Docker uses its own default. On a host that runs nothing but the parlor, give the container nearly all of the host's memory and keep a small reserve, so that the host can still be reached over SSH when the container is full. On a host with 2 GiB, for example:
+
+```sh
+sudo PARLOR_MEMORY=1792m PARLOR_MEMORY_SWAP=1792m sh deploy/install.sh parlornet:1
+```
+
+`install-extensions.sh` takes the same two settings and gives them to each of its containers. Its default limit is 96 MiB a container.

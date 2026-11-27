@@ -1,6 +1,6 @@
 """Starts ParlorNet in its container: the adapters the admin panel turned on
 (adapters/catalog.py, the bot among them), the admin adapter, and parlord with its frontend
-channel on 127.0.0.1:6590 and its admin socket on 127.0.0.1:6599 (both TLS
+channel on 127.0.0.1:6590 (or PARLOR_FRONTEND_HOST) and its admin socket on 127.0.0.1:6599 (both TLS
 1.3 with a pre-shared key per frontend; docs/security-design.md). Each
 adapter gets its own key in /data/frontends, made here at first start (the
 admin adapter's with the admin role). Their output goes to the container
@@ -36,6 +36,10 @@ Environment (all optional):
                        password mailed to the player; with sign-in password); by default the sign-in
                        method's own (none, password)
     PARLOR_ADAPTERS    frontends until the admin panel sets them, e.g. web,telnet,admin (all installed)
+    PARLOR_FRONTEND_HOST  the address the core's extension channel (6590) listens on in the container:
+                       127.0.0.1 (the default), or 0.0.0.0 so that Docker can publish it for server
+                       extensions on another host (deploy/README.md). The extensions started here connect
+                       to 127.0.0.1 either way
     PARLOR_ADMIN=1     start the admin adapter even if the admin panel turned it off
     PARLOR_SETTINGS    key=value file for secrets such as email.smtp_password
                        (/run/parlornet/settings.conf if it is there)
@@ -205,10 +209,7 @@ def prepare(per_user=False):
                 frontends.share_key(path, f[:-4], KEYS)
             else:
                 os.chmod(path, 0o600)
-    chosen = stored("adapters.enabled")
-    if chosen is None:
-        chosen = env("PARLOR_ADAPTERS") or ",".join(catalog.default_enabled())
-    names = catalog.parse(chosen)
+    names = catalog.chosen(stored("adapters.enabled"))
     if env("PARLOR_ADMIN") == "1" and "admin" not in names:
         names.append("admin")
     play_dir = os.path.join(data, "play")
@@ -388,7 +389,8 @@ def main():
                          "--core", "127.0.0.1:%d" % FRONTEND_PORT, "--key", key] + extra)
     core = ["parlord", "--host", "0.0.0.0", "--port", str(CORE_PORT), "--db", DB,
             "--name", env("PARLOR_NAME") or "parlornet", "--auth", env("PARLOR_AUTH") or "password",
-            "--frontend-host", "127.0.0.1", "--frontend-port", str(FRONTEND_PORT), "--keys", KEYS,
+            "--frontend-host", env("PARLOR_FRONTEND_HOST") or "127.0.0.1", "--frontend-port", str(FRONTEND_PORT),
+            "--keys", KEYS,
             "--admin-port", str(ADMIN_SOCKET), "--admin-telnet", "6510"]
     if env("PARLOR_SIGNUP"):
         core += ["--signup", env("PARLOR_SIGNUP")]
