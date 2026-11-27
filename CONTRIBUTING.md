@@ -1,6 +1,8 @@
 # Contributing to ParlorNet
 
-Contributions are welcome: a new client, a fix to a client's page, a game, a frontend, a test, or a correction to the docs. The guides for each are in the docs: [Adding a game](docs/games-howto.md), [Client pages](docs/clients/README.md) (adding a client, ratings and screenshots), and the protocol references in [docs/protocols.md](docs/protocols.md) and [docs/protocol.md](docs/protocol.md).
+Contributions are welcome. You can add a new client, fix a client's page, write a frontend, add a test or correct the docs. [Client pages](docs/clients/README.md) explains how to add a client, its ratings and its screenshots. The protocol references are [docs/protocols.md](docs/protocols.md) and [docs/protocol.md](docs/protocol.md).
+
+The main project isn't taking new games. [Adding a game](docs/games-howto.md) still shows how to add a game to a parlor of your own or to a fork.
 
 ParlorNet's own software for period machines lives in repositories of its own, with its own build: the rulebooks for GameMaster and their installer in [eric-cgn/parlornet-gamemaster](https://github.com/eric-cgn/parlornet-gamemaster), Eclipse 68k Fix in [eric-cgn/parlornet-eclipse-fix](https://github.com/eric-cgn/parlornet-eclipse-fix), and ParlorNet's own programs for 8-bit computers in [eric-cgn/parlornet-8bit](https://github.com/eric-cgn/parlornet-8bit). Changes to those programs go there; their pages on the docs site, and the server's side of what they speak, stay here. The guidance below applies to them too.
 

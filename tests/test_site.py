@@ -605,14 +605,24 @@ class MotdGap(unittest.TestCase):
         self.assertNotIn("<br>\n<h2>", page[:page.index('<a name="signin">') + 30])   # no message of the day: no extra line
 
 
+def contrast(a, b):
+    """The WCAG contrast ratio of two colors (#RRGGBB), from 1 to 21."""
+    def lum(c):
+        ch = [int(c[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        r, g, b = (v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in ch)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
 class Palette(unittest.TestCase):
     """The frame's colors are web-safe, and no text in a colored cell is light (Netscape 2 and IE 2 show
     font colors but not cell colors, so light text there would be white on white). The docs site's palette is
-    greyscale, so a reader can tell the two sites apart."""
+    all blues, so a reader can tell the two sites apart, and its text and links read on its page, bar and tint."""
 
     def test_colours(self):
         from adapters import webstyle as S
-        for palette in (S.GREEN, S.GREY):
+        for palette in (S.GREEN, S.DOCS_BLUE):
             for c in palette:
                 self.assertRegex(c, r"^#(?:[0369CF]{2}){3}$")
                 self.assertTrue(all(int(c[i:i + 2], 16) % 0x33 == 0 for i in (1, 3, 5)), c)
@@ -627,7 +637,13 @@ class Palette(unittest.TestCase):
             for colour in re.findall(r'<td[^>]*bgcolor="(#[0-9A-F]{6})"[^>]*>[^<&]*<font', page):
                 self.assertNotEqual(colour, palette.edge)       # no text on the edge color
             self.assertEqual(set(re.findall(r'(?:bgcolor|color)="(#[0-9A-F]{6})"', page)) - set(palette), set())
-        self.assertTrue(all(c[1:3] == c[3:5] == c[5:7] for c in S.GREY))     # every grey is a grey
+        blue = S.DOCS_BLUE
+        for c in set(blue) - {blue.paper}:                                    # every color but white is a blue
+            r, g, b = (int(c[i:i + 2], 16) for i in (1, 3, 5))
+            self.assertTrue(b > r and b >= g, c)
+        for fg in (blue.ink, blue.heading, blue.link, blue.vlink, blue.alink):
+            for bg in (blue.paper, blue.bar, blue.tint):
+                self.assertGreaterEqual(contrast(fg, bg), 4.5, (fg, bg))      # WCAG AA for body text
         self.assertIs(S.colors(), S.GREEN)                                    # using() puts it back
         self.assertEqual(S.emblem_gif(__import__("adapters.web", fromlist=["make_gif"]).make_gif)[13:16],
                          bytes([0x00, 0x66, 0x33]))                           # the game server's emblem is green

@@ -17,7 +17,7 @@ The site serves every ParlorNet server alike. Its pages, from the site's root:
                             (docsite/gamerulebooks.py)
     download/, img/         the downloads of the patcher and the rulebooks' installer, and their READMEs (from
                             the releases pinned in docsite/downloads.json, docsite/downloads.py), the
-                            patcher's screenshot, and the site's emblem
+                            patcher's screenshot, the site's emblem and its external-link icon
     running.html            running a server of your own: the README's "Run your own parlor" section and
                             deploy/README.md (docsite/running.py)
     docs.html               the docs in groups, with a finder
@@ -33,8 +33,9 @@ in static/img/, the picture on the site; to any other file of the repository, a 
 home on GitHub; to http://docs.parlornet.org/..., a link within the site. Every page is built in the web site's
 frame (adapters/webstyle.py), HTML 3.2 as on the game server, under the site's own name, ParlorNet Docs, with
 its own navigation and footer, and links relative to the page, so the site works from any address or a folder.
-Its pages are in the greyscale palette (webstyle.GREY), so a reader can tell them from the green game server's
-pages when moving between the two. The navigation bar starts with a link back to the main site, HOME_URL.
+Its pages are in a light blue palette (webstyle.DOCS_BLUE), so a reader can tell them from the green game server's
+pages when moving between the two. The navigation bar starts with a link back to the main site, HOME_URL, with the
+external-link icon after it, in the site's own blue.
 
 The finders: on index.html and docs.html, a script writes a box (and, on the Clients page, platform and
 processor menus) that hides the rows that do not match. A browser without the script, or without the DOM
@@ -61,7 +62,7 @@ OUT = os.path.join(ROOT, "build", "docs-site")
 CNAME = "docs.parlornet.org"
 HOME_URL = "http://parlornet.org/"      # the main site, first in the navigation bar: plain HTTP for old browsers
 NAME = "ParlorNet Docs"                 # the site's name, in the masthead and every page's title
-PALETTE = S.GREY
+PALETTE = S.DOCS_BLUE
 HOME = C.FRONTENDS_PAGE                 # the site's home page, the Clients page: the one page with no breadcrumb
 MARKER = ".parlornet-docs"          # in a folder this tool wrote, so it may empty it before writing again
 GITHUB_BLOB = PROJECT_URL + "/blob/main/"
@@ -178,8 +179,8 @@ def frame(title, body, path, current=None, head_extra="", refresh=None):
     """A page of the site at path, its title after the site's name ("ParlorNet Docs: Clients"), with its
     breadcrumb line under the navigation bar. current: the navigation bar's entry it is part of (menu_of)."""
     menu = menu_of(path, current)
-    return S.frame("%s: %s" % (NAME, title), body, nav=S.nav_html(NAV, menu), foot=FOOT, head_extra=head_extra,
-                   refresh=refresh, name=NAME, crumbs=breadcrumb(path, title, menu))
+    return S.frame("%s: %s" % (NAME, title), body, nav=S.nav_html(NAV, menu, (HOME_URL,)), foot=FOOT,
+                   head_extra=head_extra, refresh=refresh, name=NAME, crumbs=breadcrumb(path, title, menu))
 
 
 # ---- the finders ------------------------------------------------------------------------------------
@@ -428,6 +429,7 @@ def files():
         shown.update(re.findall(r'<img src="/(img/[^"]+)"', html))
     from adapters.web import make_gif
     out[S.EMBLEM.lstrip("/")] = S.emblem_gif(make_gif, PALETTE)
+    out[S.EXTERNAL.lstrip("/")] = S.external_gif(PALETTE)
     out.update(eclipse.files())
     out.update(rulebook.files())
     out.update(gamerulebooks.files())
