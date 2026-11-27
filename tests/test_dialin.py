@@ -143,6 +143,29 @@ class Calls:
         c.send(b"TIM\r")
         self.assertIn(b"\rTIM 0 ", await c.until(b"OK\r"))
 
+    async def ending(self, opening, eol):
+        """The opening sent after the header, in a packet of its own: the greeting comes within a second, ending
+        with the connection's line ending, as it does on 6501. A bare CR or LF waits the 250 ms for a second
+        byte, and no longer."""
+        c = await self.call(header())
+        await asyncio.sleep(0.05)
+        began = asyncio.get_running_loop().time()
+        c.send(opening)
+        got = await c.until(eol, secs=1.0)
+        self.assertLess(asyncio.get_running_loop().time() - began, 1.0)
+        self.assertTrue(got.startswith(b"PARLORNET/1 test "), got)
+        self.assertTrue(got.endswith(eol), got)
+        self.assertEqual(self.newest().eol, eol)
+
+    async def test_bare_cr(self):
+        await self.ending(b"PARLORNET/1\r", b"\r")
+
+    async def test_cr_lf(self):
+        await self.ending(b"PARLORNET/1\r\n", b"\r\n")
+
+    async def test_bare_lf(self):
+        await self.ending(b"PARLORNET/1\n", b"\n")
+
     async def telnet_signin(self, c, name="ann"):
         """Through the title page and the login: the session's lobby."""
         await c.until("Press Enter", secs=self.WINDOW + 2)
