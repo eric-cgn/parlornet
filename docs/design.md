@@ -263,7 +263,7 @@ At the first sign-in on telnet's full screen or the 8-bit program, a player who 
 
 ### 3. The lobby
 
-The lobby lists, in this order, your games with the ones where it's your turn first, your invitations, the open tables waiting for a player, and the tutorial. Its sentence says what matters most, as in "It's your turn at table 12." or "You have no games yet. Press N to open a table."
+The lobby lists, in this order, your games with the ones where it's your turn first, your invitations, the open tables waiting for a player, and the tutorial. Among the open tables, those where a person waits come first, then the bot's open tables, one for each two-player game (docs/bot.md, Open tables). Its sentence says what matters most, as in "It's your turn at table 12." or "You have no games yet. Press N to open a table."
 
 | What you can do | How |
 |---|---|

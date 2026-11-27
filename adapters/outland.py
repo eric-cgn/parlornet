@@ -693,7 +693,7 @@ class Hub:
     def open_table_of(self, name):
         k = name.lower()
         return next((t for t in self.tables if t["status"] == "open" and t["filled"] == 1
-                     and [n.lower() for n in t["names"]] == [k]), None)
+                     and [n.lower() for n in t["names"]] == [k] and not botflag.bot_waits(t)), None)
 
     def table(self, tid):
         return next((t for t in self.tables if t["id"] == tid), None)

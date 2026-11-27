@@ -647,10 +647,16 @@ var PN = (function () {
     });
     return tabs;
   }
+  // the order of the other tables: those where a person waits, then the bot's open tables (an open public table where
+  // only bots sit, docs/bot.md), then the games being played
+  function rank(t) {
+    if (t.status !== "open") return 2;
+    return t.vis === "public" && t.filled > 0 && t.bots.length === t.filled ? 1 : 0;
+  }
   function renderTables(lines) {
     var box = clear($("tables"));
     var tabs = parseTabs(lines);
-    tabs.sort(function (a, b) { return (b.names.indexOf(S.me) >= 0) - (a.names.indexOf(S.me) >= 0) || a.id - b.id; });
+    tabs.sort(function (a, b) { return (b.names.indexOf(S.me) >= 0) - (a.names.indexOf(S.me) >= 0) || rank(a) - rank(b) || a.id - b.id; });
     var more = lines.filter(function (l) { return /^MORE \d+$/.test(l); }).map(function (l) { return +l.slice(5); })[0];
     $("tables-note").textContent = tabs.length ? tabs.length + " open or playing" + (more ? ", " + more + " more not listed" : "")
                                                : "";

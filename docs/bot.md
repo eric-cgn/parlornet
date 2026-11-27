@@ -1,6 +1,6 @@
 # The bot
 
-The bot is a player anyone can invite to a table, so a player who is alone on a server can still play every game. It plays one simple strategy per game: good enough to beat a player who moves at random, easy enough to beat with some thought.
+The bot is a player anyone can invite to a table, so a player who is alone on a server can still play every game. It also keeps an open table of every two-player game, so a player can sit down and start a game at once. It plays one simple strategy per game: good enough to beat a player who moves at random, easy enough to beat with some thought.
 
 ## What it is
 
@@ -21,18 +21,40 @@ The bot uses the extension channel rather than the public port because there it 
     python -m parlord.frontends --keys /data/frontends add bot      # on the server
     python3.13 -m bot --core HOST:6590 --key bot.key                  # where the bot runs
 
-Options: `--names` (the bot names to play as, default all four), `--cap` (tables at once for each name, default 20), `--think` (seconds before each turn, default `0.5,2`), `--pace` (least seconds between two requests on one connection, default 0.12), `--poll` (seconds between looks for invitations, default 2), `--gridwords-secs` (Grid Words search time a turn, default 1).
+Options: `--names` (the bot names to play as, default all four), `--cap` (tables at once for each name, default 20), `--no-open-tables` (keep no open tables, below), `--think` (seconds before each turn, default `0.5,2`), `--pace` (least seconds between two requests on one connection, default 0.12), `--poll` (seconds between looks for invitations, default 2), `--gridwords-secs` (Grid Words search time a turn, default 1).
 
 ## How it plays a table
 
-- **It joins only when invited.** Every bot name looks at its invitations (`IVL`) every 2 seconds and sits down (`JON`) at each table it is invited to. It never sits down uninvited, never invites anyone, and never opens a table.
+- **It joins other tables only when invited.** Every bot name looks at its invitations (`IVL`) every 2 seconds and sits down (`JON`) at each table it is invited to. It never sits down at another player's table uninvited, and it never invites anyone. The only tables it opens are its open tables (below).
 - **Talk**: one line when it sits down ("Hello! I am the bot, a simple player. Good luck!") and "Good game!" at the end.
 - **Pace**: a pause of 0.5 to 2 seconds before each turn, well inside any turn clock (at least a minute). It waits for the other players with `WAT`, never by polling quickly, and keeps under the core's rate limit of 10 requests a second on each connection.
-- **Load**: at most 20 tables at once for each bot name; an invitation over that is declined (`UNV`). The server's own limits for players (games played at once, open tables waited at, players signed in) do not apply to bots.
+- **Load**: at most 20 tables at once for each bot name; an invitation over that is declined (`UNV`). Its open tables don't count while they wait for a player. The server's own limits for players (games played at once, open tables waited at, players signed in) do not apply to bots.
 - **Leaving**: it stops playing a table when the game is over (by its end, a resignation, the clock or the operator), when the people at an open table have all stood up (it stands up too, so the table goes), or when its seat has left a game the others play on. If the people go away during a game, their clocks run out and the game ends.
 - **Resigning**: it never resigns, and plays every game to its end. It accepts a resignation offered in Backgammon and answers draw offers in Checkers.
-- **After a restart** it finds the tables where its names are seated (`LST`) and goes on playing them.
+- **After a restart** it finds the tables where its names are seated (`LST`) and goes on playing them. It sits back down at its open tables to wait, as Open tables below says.
 - **Memory**: one process for all four names. The Grid Words word list is read once, when the first Grid Words turn needs it, into the plugin's own compact Lexicon (about 1.5 MB). See Memory below.
+
+## Open tables
+
+The bot keeps one open table of every two-player game the server offers: Reversi, Backgammon, Checkers, Five in a Row, Mancala and Naval Combat. A player who wants a game against the bot can sit down at one and start at once, without choosing anything. Games for more than two players get no open table, and players invite the bot to those as before.
+
+- **The table.** The bot makes it with `NEW type rules` and nothing more, so it has the game's default rules (the first ruleset `GAM` lists), the server's default time per turn (`server.turn_default`, a day unless the operator changed it) and two seats. It is public. The bot keeps the table data `bot open` with it (`TDS`, docs/protocol.md) and sits in seat 0.
+- **A player sits down.** The table has two seats, so the game starts when a player sits down. The bot takes the mark off (`TDD`), greets the player and plays the game as at any other table. At the same moment it opens the next table of that game, so a game has one open table at all times and never two. When two players try to sit at one table together, the core seats one of them. The other gets `ERR CLOSED` and can sit at the new table a moment later.
+- **Keeping the count.** The bot looks at every table (`LST all`) every 2 seconds (`--poll`), and at once when a player sits at one of its open tables or one goes away. One of its open tables is an open public table that carries the mark and where only bots sit. Each look opens a table for every game that has none. When the operator turns a game off in the admin menus (`games.off`), the bot stands up from that game's table, and the table goes. When a game is turned on, its table appears with the next look. When the operator ends an open table, or the server removes one because nothing happened there for `games.open_hours`, the next look opens a new one. If a look finds two tables of one game, it keeps the older one and stands up from the other. Only a bot stopped halfway through making a table can leave two.
+- **Restarts.** The open tables are kept in the core's database like any other table, so they stay through a restart of the core or the bot. The bot finds them by their mark and sits back down to wait, without opening new ones. A marked table nobody sits at yet, which a bot stopped between `NEW` and `JON` leaves, is taken up the same way.
+- **Several bot names.** The name `bot` sits at every open table while it plays fewer than `--cap` games, and `bot1`, then `bot2` and `bot3`, take over after that. Only the bot process that plays the name `bot` keeps open tables. A second bot process with other names (`--names bot2,bot3`) never opens one, so two processes can't open a table of the same game twice. `--no-open-tables` turns open tables off, and the bot then stands up from any it finds after a restart.
+
+The lobbies list them with the other open tables, as tables where the bot waits for a player, and each one is joined in one step. They come after the tables where a person waits and before the games being played, so they never push a person's table out of sight. The lobby doesn't mention the bot otherwise (docs/design.md, The lobby).
+
+- **Web and ParlorNet Play**: a row for each, with "bot (bot)" in its seat and a Join link or button. Joining sits you down, and the game starts.
+- **Telnet**: a line under Other tables with `/join` and the table's number in the plain lobby, and a row under Other tables in the menu lobby, where Enter sits you down.
+- **ParlorNet for 8-bit computers**: a line under "Waiting for a player", with a Join button.
+- **Chat consoles** (the shared chat commands of docs/chat-commands.md, and the command lines of the web, telnet and Play): `/list` shows them with the other open tables, and `/join` with the table's number sits you down. `/join bot` sits you at the bot's open table of the game the console plays. Where the bot waits at tables of several games, it names them with their numbers. A console that plays only some rules of a game, as batnav and Awale do, leaves out the tables it can't play.
+- **RSCARDS** leaves them out of its Other tables box, which has three rows, because the Bot button beside each game plays the bot.
+- **GameMaster**: the ParlorNet rulebook's All games tab lists them after the tables where a person waits.
+- **FIBS**: `join bot` sits you at the bot's Backgammon table.
+
+Inviting the bot works as before. Play the bot, `/invite bot`, `match bot` in IOS and ICDS, a challenge to the bot in Outland and Bot in GameMaster's Opponent menu still make a table of the player's own, with the settings they chose, and the bot sits down there. A command that looks for a table where a named player waits passes over the bot's open tables, and so does GameMaster's "anyone".
 
 ## Each game's strategy
 
@@ -52,6 +74,8 @@ The bot rebuilds the game's state from its view and runs the game's own rules co
 | Rummy Tile Classic | It plays from its own rack only and never rearranges the table: the combination of runs and groups (a joker filling a gap) that puts down the most tiles, before its first meld only once they reach 30 points; after the first meld it also lays tiles off onto the table's sets. Then `END`, which draws when it played nothing. |
 
 ## Inviting it
+
+Inviting the bot makes a table of your own, so you choose the rules, the time per turn and, in a game for more than two, the number of players. Open tables, above, says how to sit down at a table where the bot already waits.
 
 - **Web**: in the lobby, check **Play the bot** beside Start a game: the table is made, you sit down and a bot is invited to every other seat. At an open table of yours, **Invite the bot** invites one more.
 - **Telnet**: `new reversi bot` (any game, players and time as usual: `new rummytile 4p 1h bot`) makes the table with bots in the other seats. At an open table of yours, type `bot`; the waiting box says so.
@@ -73,4 +97,4 @@ The container has a 448 MB limit (256 MB at first, 320 MB once the bot came, 448
 
 ## Tests
 
-`tests/test_bot.py` checks that no person signs in as a bot under any sign-in method and that the bot's key signs in as nothing else; that each strategy beats a random player (seeded, both seats); a whole game of every game against a random player over a real server, with the bot's greeting and last words and no move refused; three bots at a table of four (Rummy Tile Classic, Cannon Fire); the invitations from the web, telnet and the native protocol; that it never joins uninvited, follows the people out of an open table and leaves when a turn clock ends the game; and its memory.
+`tests/test_bot_open.py` checks the open tables, with a core and the bot in one process, and it watches every change the core saves so it can fail the moment a game has two. It checks one table of every two-player game with the defaults and none for the others, a player sitting down and the next table opening, two players racing for one table, a game turned off and on, a table the operator ends and one the idle limit removes, a restart of the bot and of the core, tables left by a bot stopped halfway, the names sharing the tables, and that `/invite bot` still makes the player's own table. `tests/test_bot.py` checks that no person signs in as a bot under any sign-in method and that the bot's key signs in as nothing else; that each strategy beats a random player (seeded, both seats); a whole game of every game against a random player over a real server, with the bot's greeting and last words and no move refused; three bots at a table of four (Rummy Tile Classic, Cannon Fire); the invitations from the web, telnet and the native protocol; that it never joins uninvited, follows the people out of an open table and leaves when a turn clock ends the game; and its memory.

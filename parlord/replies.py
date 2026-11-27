@@ -35,7 +35,8 @@ def parse_games(lines):
 
 def parse_tables(lines):
     """TAB lines -> list of dicts ("vis" is "public" or "private"). "clients": {seat: what its player plays
-    with} from the CLIENT lines after a TAB line (LST clients), {} without them."""
+    with} from the CLIENT lines after a TAB line (LST clients), {} without them. "bots": the seats held by
+    bots (bot=)."""
     out = []
     for l in lines:
         p = l.split()
@@ -48,12 +49,20 @@ def parse_tables(lines):
             seated = p[6].split(",")
             turn = next((int(f[5:]) for f in p[7:] if f.startswith("turn=") and f[5:].isdigit()), 0)
             vis = next((f[4:] for f in p[7:] if f.startswith("vis=")), "public")
+            held = next((f[4:] for f in p[7:] if f.startswith("bot=")), "")
             out.append({"id": p[1], "key": p[2], "rules": p[3], "filled": int(filled),
                         "seats": int(seats), "status": p[5], "seated": seated,
                         "names": [n for n in seated if n != "-"],
                         "seat_of": {n: i for i, n in enumerate(seated) if n != "-"}, "turn": turn, "vis": vis,
-                        "clients": {}})
+                        "clients": {}, "bots": {int(x) for x in held.split(",") if x.isdigit()}})
     return out
+
+
+def bot_waits(t):
+    """Whether a parsed table is one of the bot's open tables (docs/bot.md, Open tables): an open public
+    table where at least one player sits and every one of them is a bot."""
+    return (t["status"] == "open" and t["vis"] == "public" and t["filled"] > 0
+            and len(t.get("bots") or ()) == t["filled"])
 
 
 def parse_invites(lines):

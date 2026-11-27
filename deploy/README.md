@@ -2,7 +2,7 @@
 
 The scripts in `deploy/` install a ParlorNet server that stays up on a Linux host with Docker. They run the same image as the single `docker run` in the main README's [Run your own parlor](../README.md#run-your-own-parlor), with tighter limits.
 
-To install, get the source from https://github.com/eric-cgn/parlornet and build the image. You can build it on the host, or build it elsewhere and load it on the host. Then copy the scripts to the host and run one of them as root:
+To install, get the source from https://github.com/eric-cgn/parlornet and build the image. You can build it on the host, or build it elsewhere and load it on the host. You can also pull a release's image from GitHub's container registry. Its name is `ghcr.io/eric-cgn/parlornet:<version>`, and the release's `IMAGE-DIGEST` file names it by its digest. Then copy the scripts to the host and run one of them as root:
 
 ```sh
 docker build --platform linux/amd64 -t parlornet:1 .

@@ -443,6 +443,7 @@ A table may carry a little data that server extensions need, such as which clien
 
 - Only the core and server extensions set it. `TDS` and `TDD` are for the extension channel only, and so is reading it with `TDL`, which is also refused over the WebSocket, so a player's own program never sets or reads it.
 - A key is 1 to 8 of `[a-z0-9_-]`, in any case (kept in lower case); a value is the rest of the line, 1 to 56 printable ASCII characters, so `TDS table key value` fits the line. At most 16 keys a table, besides the core's own.
+- The bot keeps `bot open` with each of its open tables, the tables it keeps for players to join, and takes it off when a player sits down (docs/bot.md, Open tables).
 - The core keeps one key itself, `integrity`, which holds the mark of a table marked integrity=false (below). It is longer than any key `TDS` and `TDD` take, so no extension sets or forgets it there. The table's options and its game state stay the authority on how a game is played; this data only helps extensions along.
 - A request acts on a table the signed-in player may see. Never for secrets: it is kept in the clear.
 

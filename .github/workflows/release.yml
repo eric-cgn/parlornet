@@ -1,8 +1,9 @@
 # Every push to main: if VERSION names a version with no release yet, run the whole test suite (the fast tests
-# and the slow ones, tests/speed.py), build the Docker image, tag the commit v<version> and publish a GitHub
-# Release of the source. No image is published: each parlor builds its own from the source (README.md, "Run
-# your own parlor"). A push that keeps the version does nothing. Run it by hand on main to release a version
-# whose push did not run it.
+# and the slow ones, tests/speed.py), build the linux/amd64 Docker image, push it to GitHub's container registry
+# as ghcr.io/<owner>/<repository>:<version>, tag the commit v<version> and publish a GitHub Release of the
+# source. The release carries a file named IMAGE-DIGEST that holds the image's name and digest, so a parlor can
+# pull exactly the image that was built from the tag. A push that keeps the version does nothing. Run it by
+# hand on main to release a version whose push did not run it.
 name: Release
 
 on:
@@ -20,6 +21,7 @@ jobs:
     timeout-minutes: 45   # the whole suite, slow tests too, takes about a quarter of an hour
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - id: version
@@ -48,7 +50,32 @@ jobs:
         run: python3 -m unittest discover -s tests
       - name: Docker image
         if: steps.version.outputs.new == 'yes'
-        run: docker build -t parlornet .
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$image:$VERSION" .
+      - name: Push the image
+        if: steps.version.outputs.new == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$VERSION" | tee "$RUNNER_TEMP/push.log"
+          # The digest that docker push reports, or else the one the registry gives for the tag
+          digest=$(grep -Eo 'digest: sha256:[0-9a-f]{64}' "$RUNNER_TEMP/push.log" | tail -1 | cut -d' ' -f2 || true)
+          [ -n "$digest" ] || digest=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$IMAGE:$VERSION")
+          docker logout ghcr.io
+          if ! echo "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}'; then
+            echo "::error::The registry gave no digest for $IMAGE:$VERSION"
+            exit 1
+          fi
+          echo "$IMAGE@$digest" > "$RUNNER_TEMP/IMAGE-DIGEST"
+          echo "IMAGE_REF=$IMAGE@$digest" >> "$GITHUB_ENV"
+          echo "The image is $IMAGE:$VERSION, which is $IMAGE@$digest"
       - name: Release
         if: steps.version.outputs.new == 'yes'
         env:
@@ -56,9 +83,15 @@ jobs:
         run: |
           notes="$RUNNER_TEMP/notes.md"
           {
-            echo "ParlorNet $VERSION: the server (parlord), its server extensions, the game plugins and the bot, as"
-            echo "source. No image is published. Build one from the source with \`docker build -t parlornet .\` and run it"
-            echo "as README.md shows under \"Run your own parlor\". The clients for each game and each kind of computer, the"
-            echo "protocols and the docs are on the docs site, http://docs.parlornet.org/."
+            echo "This is ParlorNet $VERSION. It has the server (parlord), its server extensions, the game plugins and"
+            echo "the bot, as source and as a Docker image for linux/amd64. The image is \`$IMAGE:$VERSION\`. The file"
+            echo "IMAGE-DIGEST names it by its digest, so this command pulls exactly the image built from this release:"
+            echo
+            echo "    docker pull $IMAGE_REF"
+            echo
+            echo "You can also build the image from the source with \`docker build -t parlornet .\`. Either way, run it as"
+            echo "README.md shows under \"Run your own parlor\". The docs site, http://docs.parlornet.org/, has the clients"
+            echo "for each game and each kind of computer, the protocols and the docs."
           } > "$notes"
-          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "ParlorNet $VERSION" --notes-file "$notes"
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "ParlorNet $VERSION" --notes-file "$notes" \
+            "$RUNNER_TEMP/IMAGE-DIGEST"

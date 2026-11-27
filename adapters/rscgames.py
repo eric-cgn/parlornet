@@ -178,6 +178,8 @@ class Lobby:
             low = [n.lower() for n in t["seated"]]
             if me in low:
                 mine.append(t)
+            elif botflag.bot_waits(t):
+                continue        # the bot's open tables: the Bot button beside each game plays the bot
             elif t["vis"] != "private" and (t["status"] == "playing" or t["filled"] < t["seats"]):
                 opens.append(t)
         rows = []
