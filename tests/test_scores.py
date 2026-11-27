@@ -11,9 +11,9 @@ import sys
 import tempfile
 import time
 import unittest
-from urllib.parse import parse_qs, urlsplit
 
 from test_adapters import Browser, Stack
+from test_adapters import query_of  # noqa: E402
 from test_core import ROOT
 import test_profiles_web as TPW
 from test_table_notes import Notes
@@ -117,7 +117,7 @@ class Scoring(Helpers):
                            ("draw 12 -4 12 -20", ("ann", "cy"))):
             with self.subTest(end=end):
                 ps = [await self.player(n) for n in names]
-                t = await self.table("gridwords", *ps, opts="english players=4")
+                t = await self.table("gridwords", *ps, opts="standard players=4")
                 self.srv.event(t, "END " + end)
                 self.assertEqual(self.scored(t.id), {n: (2, "draw") if n in share else (1, "loss") for n in names})
 
@@ -327,7 +327,7 @@ class WebAndTelnet(Stack):
         cls.ann, cls.bob = Browser(cls.web_port), Browser(cls.web_port)
         cls.ann.login("ann", "ann-Pass-word")
         cls.bob.login("bob", "bob-Pass-word")
-        tid = parse_qs(urlsplit(cls.ann.act("/new.htm?g=reversi%2F1&turn=1h")[1]).query)["t"][0]
+        tid = query_of(cls.ann.act("/new.htm?g=reversi%2F1&turn=1h")[1])["t"][0]
         cls.bob.act("/join.htm?t=%s" % tid)
         cls.bob.act("/resign.htm?t=%s&sure=1" % tid)
 

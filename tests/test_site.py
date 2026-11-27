@@ -9,9 +9,9 @@ import re
 import tempfile
 import unittest
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, urlsplit
 
 from test_adapters import Browser, Stack, plain
+from test_adapters import query_of  # noqa: E402
 
 # HTML 3.2's elements and attributes, with the extensions the site allows: BGCOLOR on TR, TD and TH (and on
 # TABLE, which only a game's own board markup uses), FONT FACE and COLOR. No STYLE, CLASS or ID anywhere.
@@ -127,7 +127,7 @@ class Site(Stack):
         cls.tables = {}
         for key in re.findall(r'<input type="hidden" name="g" value="([^"]+)">', lobby):
             st, loc, _, _ = cls.act("/new.htm?g=%s&turn=1h" % key.replace("/", "%2F"))
-            tid = parse_qs(urlsplit(loc).query)["t"][0]
+            tid = query_of(loc)["t"][0]
             cls.bob.act("/join.htm?t=%s" % tid)
             cls.tables[key] = tid
 
@@ -238,12 +238,70 @@ class Site(Stack):
             masthead, content, footer = text(page[page.index("<body"):top]), text(page[top:bottom]), text(page[bottom:])
             self.assertTrue(masthead.startswith("ParlorNet"), name)
             self.assertTrue(masthead.endswith(("Sign In", "Sign Out")), (name, masthead))
+            crumbs = re.match(r"</table>\n<p>(.*?)</p>\n", page[top:], re.S)      # the breadcrumb line first
+            if crumbs:
+                content = content[len(text(crumbs.group(1))):].strip()
             h1 = text(re.search(r"<h1>(.*?)</h1>", page, re.S).group(1))
             self.assertTrue(content.startswith(h1), (name, content[:80]))
             at = len(h1)
             for h in re.findall(r"<h2>(.*?)</h2>", page, re.S):
                 at = content.index(text(h), at)
             self.assertTrue(footer.startswith("Server:"), name)
+
+    @staticmethod
+    def crumbs(page):
+        """The breadcrumb line under the masthead: [(href, label)], href None for the page itself; None
+        without one."""
+        page = plain(page)
+        m = re.match(r"<p>(.*?)</p>\n", page[page.index("</table>\n") + len("</table>\n"):], re.S)
+        if not m:
+            return None
+        return [(a.group(1).replace("&amp;", "&"), a.group(2)) if a else (None, step)
+                for step in m.group(1).split(" &gt; ") for a in [re.match(r'<a href="([^"]*)">(.*)</a>\Z', step)]]
+
+    def test_breadcrumbs(self):
+        """Every page but the welcome page has the breadcrumb line under the navigation bar: the pages above it,
+        each a link, then its own name."""
+        pages = {**self.public_pages(), **self.signed_in_pages(), **self.other_pages()}
+        for name, page in pages.items():
+            steps = self.crumbs(page)
+            if name == "/welcome.htm":
+                self.assertIsNone(steps)
+                continue
+            self.assertTrue(steps and len(steps) >= 2, name)
+            self.assertEqual([h is None for h, _ in steps], [False] * (len(steps) - 1) + [True], name)
+            self.assertIn(steps[0][1], ("Welcome", "Lobby"), name)
+            self.assertTrue(steps[0][0].startswith(("/welcome.htm", "/lobby.htm")), name)
+        self.assertEqual(self.crumbs(pages["/games/reversi.htm"]),
+                         [("/welcome.htm", "Welcome"), ("/welcome.htm#games", "Games"), (None, "Reversi")])
+        tid = self.tables["reversi/1"]
+        steps = self.crumbs(pages["/table.htm reversi/1"])
+        self.assertEqual(steps[1:], [(None, "Table %s" % tid)])
+        self.assertEqual(steps[0][1], "Lobby")
+        self.assertRegex(steps[0][0], r"^/lobby\.htm\?x=[0-9a-f]+")
+        self.assertEqual([l for _, l in self.crumbs(self.ann.get("/player.htm")[3])], ["Lobby", "Your profile"])
+        self.assertEqual([l for _, l in self.crumbs(pages["/player.htm"])], ["Lobby", "bob"])
+        self.assertEqual([l for _, l in self.crumbs(pages["/lobby.htm"])], ["Welcome", "Lobby"])
+        self.assertEqual([l for _, l in self.crumbs(pages["/resign.htm"])], ["Lobby", "Table %s" % tid, "Resign"])
+        self.assertEqual(self.crumbs(pages["/credits.htm"])[1:],
+                         [("/welcome.htm#machines", "Play from your Computer"), (None, "Picture credits")])
+        self.assertEqual(self.crumbs(pages["sign-in page"]), [("/welcome.htm", "Welcome"), (None, "Sign in")])
+
+    def test_links_work_in_a_browser_that_sends_them_as_written(self):
+        """Mosaic 2.0.1 sends a link's &amp; as it is written. The site's links separate their fields with ;,
+        so they hold no &amp;, and following one as written works."""
+        page = self.ann.get("/lobby.htm")[3]
+        hrefs = re.findall(r'href="(/[^"]+)"', page)
+        self.assertTrue([h for h in hrefs if ";" in h])
+        self.assertFalse([h for h in hrefs if "&" in h])
+        tid = self.tables["reversi/1"]
+        watch = [h for h in re.findall(r'href="(/table\.htm[^"]+)"', self.bob.get("/lobby.htm")[3])
+                 if "t=%s;" % tid in h + ";"][0]
+        st, _, _, body = self.bob.get(watch)
+        self.assertEqual(st, 200)
+        self.assertIn("table %s" % tid, body)
+        st, _, _, body = self.bob.get(watch.replace(";", "&"))        # & works as well
+        self.assertIn("table %s" % tid, body)
 
     def test_byte_budgets(self):
         for path, page in self.public_pages().items():
@@ -547,14 +605,24 @@ class MotdGap(unittest.TestCase):
         self.assertNotIn("<br>\n<h2>", page[:page.index('<a name="signin">') + 30])   # no message of the day: no extra line
 
 
+def contrast(a, b):
+    """The WCAG contrast ratio of two colors (#RRGGBB), from 1 to 21."""
+    def lum(c):
+        ch = [int(c[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        r, g, b = (v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in ch)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    hi, lo = sorted((lum(a), lum(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
 class Palette(unittest.TestCase):
     """The frame's colors are web-safe, and no text in a colored cell is light (Netscape 2 and IE 2 show
     font colors but not cell colors, so light text there would be white on white). The docs site's palette is
-    greyscale, so a reader can tell the two sites apart."""
+    all blues, so a reader can tell the two sites apart, and its text and links read on its page, bar and tint."""
 
     def test_colours(self):
         from adapters import webstyle as S
-        for palette in (S.GREEN, S.GREY):
+        for palette in (S.GREEN, S.DOCS_BLUE):
             for c in palette:
                 self.assertRegex(c, r"^#(?:[0369CF]{2}){3}$")
                 self.assertTrue(all(int(c[i:i + 2], 16) % 0x33 == 0 for i in (1, 3, 5)), c)
@@ -569,7 +637,13 @@ class Palette(unittest.TestCase):
             for colour in re.findall(r'<td[^>]*bgcolor="(#[0-9A-F]{6})"[^>]*>[^<&]*<font', page):
                 self.assertNotEqual(colour, palette.edge)       # no text on the edge color
             self.assertEqual(set(re.findall(r'(?:bgcolor|color)="(#[0-9A-F]{6})"', page)) - set(palette), set())
-        self.assertTrue(all(c[1:3] == c[3:5] == c[5:7] for c in S.GREY))     # every grey is a grey
+        blue = S.DOCS_BLUE
+        for c in set(blue) - {blue.paper}:                                    # every color but white is a blue
+            r, g, b = (int(c[i:i + 2], 16) for i in (1, 3, 5))
+            self.assertTrue(b > r and b >= g, c)
+        for fg in (blue.ink, blue.heading, blue.link, blue.vlink, blue.alink):
+            for bg in (blue.paper, blue.bar, blue.tint):
+                self.assertGreaterEqual(contrast(fg, bg), 4.5, (fg, bg))      # WCAG AA for body text
         self.assertIs(S.colors(), S.GREEN)                                    # using() puts it back
         self.assertEqual(S.emblem_gif(__import__("adapters.web", fromlist=["make_gif"]).make_gif)[13:16],
                          bytes([0x00, 0x66, 0x33]))                           # the game server's emblem is green

@@ -3,7 +3,8 @@
 
 Speaks the plugin protocol of docs/plugins.md: one JSON object per line on
 stdin, one JSON reply per line on stdout. Pure functions of their arguments
-(and of the word list); the state is opaque to the server.
+(and of the word list and the rulesets, read at start); the state is opaque to
+the server.
 
 The word list is the operator's choice: a text file, one word per line, named
 by the environment setting GRIDWORDS_WORDS, else words.txt next to this file.
@@ -27,53 +28,188 @@ SIZE = 15
 CENTRE = (8, 8)
 RACK = 7
 FULL_RACK_BONUS = 50
-
-# letter: (points, tiles in the set); "_" is the blank
-TILES = {
-    "A": (1, 9), "B": (3, 2), "C": (3, 2), "D": (2, 4), "E": (1, 12), "F": (4, 2), "G": (2, 3),
-    "H": (4, 2), "I": (1, 9), "J": (8, 1), "K": (5, 1), "L": (1, 4), "M": (3, 2), "N": (1, 6),
-    "O": (1, 8), "P": (3, 2), "Q": (10, 1), "R": (1, 6), "S": (1, 4), "T": (1, 6), "U": (1, 4),
-    "V": (4, 2), "W": (4, 2), "X": (8, 1), "Y": (4, 2), "Z": (10, 1), "_": (0, 2),
-}
-VALUES = {k: v for k, (v, _) in TILES.items()}
-
-
-def _premiums():
-    """The standard 15x15 layout: one eighth of the board, mirrored."""
-    eighth = {
-        "TW": [(1, 1), (8, 1)],
-        "DW": [(2, 2), (3, 3), (4, 4), (5, 5), (8, 8)],
-        "TL": [(6, 2), (6, 6)],
-        "DL": [(4, 1), (7, 3), (8, 4), (7, 7)],
-    }
-    out = {}
-    for kind, squares in eighth.items():
-        for x, y in squares:
-            for a, b in ((x, y), (y, x)):
-                for px in (a, SIZE + 1 - a):
-                    for py in (b, SIZE + 1 - b):
-                        out[(px, py)] = kind
-    return out
-
-
-PREMIUM = _premiums()
+LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ_"     # "_" is the blank
 WORDS_ENV = "GRIDWORDS_WORDS"
 DEFAULT_WORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "words.txt")
 
-# The rulesets. Both play the standard board, tiles and scoring above; they differ only in when a game
-# with no word played for a while ends. "idle" is the number of turns in a row without a word played (passes
-# and exchanges) that ends the game: None means two full rounds (twice the number of players), and a number
-# means that many turns whatever the number of players. classic follows club and tournament play, where six
-# scoreless turns in a row end the game (the convention of the period's crossword-game servers).
-RULESETS = {
-    "english": {"idle": None},
-    "classic": {"idle": 6},
-}
+# ---- the rulesets ------------------------------------------------------------------
+# A ruleset is a rules id of gridwords/1, the word every table has from NEW type rules, and its data: what each
+# letter is worth, how many of each are in the bag, the bonus squares of the 15 by 15 board, and how many turns
+# in a row without a word played end the game. standard is the plugin's own (rules/standard.json beside this
+# file) and the default. An operator adds others as files in the site directory,
+# <site>/rules/gridwords/<id>.json, in the same format (docs/types/gridwords-1.md, Rulesets). The plugin reads
+# them once, when it starts. A file it can't use is left out, and the core logs why (INFO's "log").
+
+BUILT_IN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules")
+DEFAULT = "standard"
+SITE_ENV = "PARLOR_SITE"
+DEFAULT_SITE = "/run/parlornet/site"
+RULES_ID_RE = re.compile(r"^[a-z][a-z0-9]{0,11}\Z")
+SQUARES = {".": None, "d": "DL", "t": "TL", "D": "DW", "T": "TW"}
+KIND_CHAR = {k: c for c, k in SQUARES.items() if k}
+MAX_POINTS = 10             # a letter's points: 0 to 10
+TILES_MIN, TILES_MAX = 60, 200      # tiles in the bag, blanks included
+IDLE_MIN, IDLE_MAX = 2, 20
+ABOUT_MAX = 300
+FILE_MAX = 16 * 1024
+KEYS = ("about", "symmetric", "tiles", "board", "idle")
+
+
+class Ruleset:
+    """A ruleset's data. tiles {letter: (points, count)}, "_" the blank; values {letter: points}; premium
+    {(x, y): "TW" | "DW" | "TL" | "DL"}; idle: the turns in a row without a word played that end the game, or
+    None for two full rounds (twice the number of players)."""
+
+    def __init__(self, name, tiles, premium, idle=None, about="", symmetric=False):
+        self.name, self.tiles, self.premium, self.idle = name, tiles, premium, idle
+        self.about, self.symmetric = about, symmetric
+        self.values = {c: v for c, (v, _) in tiles.items()}
+
+    def idle_limit(self, np):
+        return self.idle if self.idle else 2 * np
+
+
+def mirrors(x, y):
+    """The eight squares a square stands for under the board's symmetry: both axes and both diagonals."""
+    out = set()
+    for a, b in ((x, y), (y, x)):
+        for px in (a, SIZE + 1 - a):
+            for py in (b, SIZE + 1 - b):
+                out.add((px, py))
+    return out
+
+
+def parse_ruleset(name, data):
+    """A ruleset file's JSON -> Ruleset. Raises ValueError with the reason, a sentence, when it isn't one."""
+    if not isinstance(data, dict):
+        raise ValueError("The file is not a JSON object.")
+    extra = sorted(set(data) - set(KEYS))
+    if extra:
+        raise ValueError("The file has keys the format doesn't know: %s." % ", ".join(extra))
+    tiles = data.get("tiles")
+    if not isinstance(tiles, dict) or sorted(tiles) != sorted(LETTERS):
+        raise ValueError("tiles must give every letter A to Z and _ for the blank, and nothing else.")
+    out = {}
+    for c in LETTERS:
+        t = tiles[c]
+        if not (isinstance(t, list) and len(t) == 2 and all(type(n) is int for n in t)):
+            raise ValueError("tiles gives %s as [points, count], two whole numbers." % c)
+        points, count = t
+        if not 0 <= points <= MAX_POINTS:
+            raise ValueError("%s is worth %d points, and a letter is worth 0 to %d." % (c, points, MAX_POINTS))
+        if not 0 <= count <= TILES_MAX:
+            raise ValueError("The bag can't hold %d of %s." % (count, c))
+        out[c] = (points, count)
+    if out["_"][0] != 0:
+        raise ValueError("A blank is worth 0 points.")
+    total = sum(n for _, n in out.values())
+    if not TILES_MIN <= total <= TILES_MAX:
+        raise ValueError("The bag holds %d tiles, and it must hold %d to %d." % (total, TILES_MIN, TILES_MAX))
+    board = data.get("board")
+    if not (isinstance(board, list) and len(board) == SIZE
+            and all(isinstance(r, str) and len(r) == SIZE for r in board)):
+        raise ValueError("board must be %d rows of %d squares." % (SIZE, SIZE))
+    premium = {}
+    for y, row in enumerate(board, 1):
+        for x, c in enumerate(row, 1):
+            if c not in SQUARES:
+                raise ValueError("Row %d has %r, and a square is one of . d t D T." % (y, c))
+            if SQUARES[c]:
+                premium[(x, y)] = SQUARES[c]
+    symmetric = data.get("symmetric", False)
+    if not isinstance(symmetric, bool):
+        raise ValueError("symmetric is true or false.")
+    if symmetric:
+        for (x, y), kind in sorted(premium.items()):
+            for m in sorted(mirrors(x, y)):
+                if premium.get(m) != kind:
+                    raise ValueError("The board says it is symmetric, but %s%d and %s%d differ." % (
+                        chr(96 + x), y, chr(96 + m[0]), m[1]))
+    idle = data.get("idle")
+    if idle is not None and not (type(idle) is int and IDLE_MIN <= idle <= IDLE_MAX):
+        raise ValueError("idle is a number of turns from %d to %d." % (IDLE_MIN, IDLE_MAX))
+    about = data.get("about", "")
+    if not (isinstance(about, str) and len(about) <= ABOUT_MAX and about.isascii() and about.isprintable()):
+        raise ValueError("about is plain text of up to %d characters." % ABOUT_MAX)
+    return Ruleset(name, out, premium, idle, about, symmetric)
+
+
+def read_ruleset(path):
+    """A ruleset file -> Ruleset, named by the file. Raises ValueError with the reason."""
+    name = os.path.basename(path)[:-len(".json")]
+    if not RULES_ID_RE.match(name):
+        raise ValueError("A rules id is a lower-case letter and then up to 11 lower-case letters or digits.")
+    try:
+        if os.path.getsize(path) > FILE_MAX:
+            raise ValueError("The file is larger than %d KB." % (FILE_MAX // 1024))
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, UnicodeDecodeError) as e:
+        raise ValueError("The file can't be read: %s." % e)
+    except json.JSONDecodeError as e:
+        raise ValueError("The file is not JSON: %s." % e)
+    return parse_ruleset(name, data)
+
+
+def site_rules_dir():
+    return os.path.join(os.environ.get(SITE_ENV) or DEFAULT_SITE, "rules", "gridwords")
+
+
+def load_rulesets(site_dir=None):
+    """({rules id: Ruleset}, [log lines]): standard first, then the site directory's rulesets by id. A site
+    file that is not a ruleset, or that takes standard's id, is left out with a line saying why."""
+    rulesets = {DEFAULT: read_ruleset(os.path.join(BUILT_IN, DEFAULT + ".json"))}
+    log = []
+    site_dir = site_dir or site_rules_dir()
+    try:
+        names = sorted(os.listdir(site_dir))
+    except OSError:
+        names = []
+    for f in names:
+        if not f.endswith(".json"):
+            continue
+        path = os.path.join(site_dir, f)
+        try:
+            rs = read_ruleset(path)
+            if rs.name in rulesets:
+                raise ValueError("%s is the plugin's own ruleset." % rs.name)
+        except ValueError as e:
+            log.append("ruleset %s left out: %s" % (path, e))
+            continue
+        rulesets[rs.name] = rs
+        log.append("ruleset %s added from %s" % (rs.name, path))
+    return rulesets, log
+
+
+RULESETS, RULES_LOG = load_rulesets()
+
+
+def ruleset(rules):
+    """The Ruleset of a rules id (none given: standard). Raises Illegal when this server doesn't have it."""
+    rs = RULESETS.get(rules or DEFAULT)
+    if rs is None:
+        raise Illegal("this server has no Grid Words ruleset %s" % rules)
+    return rs
+
+
+def from_geometry(lines):
+    """A table's static geometry (its PRM and TIL lines, docs/types/gridwords-1.md) -> Ruleset, for a program
+    that sees a table only through its view, as the bot does. idle is not in the geometry and stays None."""
+    tiles, premium = {}, {}
+    for l in lines:
+        f = l.split()
+        if f[:1] == ["PRM"] and len(f) >= 2:
+            for i in range(2, len(f) - 1, 2):
+                premium[(int(f[i]), int(f[i + 1]))] = f[1]
+        elif f[:1] == ["TIL"] and len(f) == 4:
+            tiles[f[1]] = (int(f[2]), int(f[3]))
+    return Ruleset("", tiles, premium)
+
 
 INFO = {
     "type": "gridwords", "ver": 1, "name": "Grid Words",
     "rules": list(RULESETS), "min": 2, "max": 4, "flags": ["nomoves"],
-    "options": [],
+    "options": [], "geometry": True, "log": RULES_LOG,
 }
 
 # A view request may carry "open": true, which the core sends for a server extension whose program receives the bag
@@ -83,8 +219,7 @@ INFO = {
 
 def idle_limit(rules, np):
     """The turns in a row without a word played that end a game of np players under these rules."""
-    idle = RULESETS.get(rules or "english", RULESETS["english"])["idle"]
-    return idle if idle else 2 * np
+    return ruleset(rules).idle_limit(np)
 
 
 class Illegal(Exception):
@@ -226,14 +361,14 @@ def parse_letters(text):
     return out if out and not blank else None
 
 
-def rack_value(rack):
-    return sum(VALUES[c] for c in rack)
+def rack_value(rack, rs):
+    return sum(rs.values.get(c, 0) for c in rack)
 
 
-def evaluate(st, seat, x, y, d, text, words):
-    """Check a play and score it. words is the word list (None: do not check
-    words). -> {"score", "words", "placed", "rack", "cells", "full"}; raises
-    Illegal with the reason."""
+def evaluate(st, seat, x, y, d, text, words, rs=None):
+    """Check a play and score it with the ruleset rs (None: standard). words is the word list (None: do not
+    check words). -> {"score", "words", "placed", "rack", "cells", "full"}; raises Illegal with the reason."""
+    rs = rs or RULESETS[DEFAULT]
     letters = parse_letters(text)
     if not letters:
         raise Illegal("letters are A-Z, with _ before a blank's letter")
@@ -299,9 +434,9 @@ def evaluate(st, seat, x, y, d, text, words):
             cx, cy = sx + wdx * i, sy + wdy * i
             c = at(new, cx, cy)
             word += c
-            v = 0 if c.islower() else VALUES[c]
+            v = 0 if c.islower() else rs.values.get(c, 0)
             if (cx, cy) in fresh:
-                kind = PREMIUM.get((cx, cy))
+                kind = rs.premium.get((cx, cy))
                 v *= {"DL": 2, "TL": 3}.get(kind, 1)
                 mult *= {"DW": 2, "TW": 3}.get(kind, 1)
             points += v
@@ -325,10 +460,10 @@ def result_text(st):
     return ("win %d %s" % (leaders[0], tally)) if len(leaders) == 1 else "draw %s" % tally
 
 
-def finish(st, events, out_seat=None):
+def finish(st, events, rs, out_seat=None):
     """The game ends: every rack's points come off its owner's score; a player
     who went out gains the total of the others' racks."""
-    left = [rack_value(r) for r in st["racks"]]
+    left = [rack_value(r, rs) for r in st["racks"]]
     for s in range(st["np"]):
         adj = -left[s] + (sum(left) if s == out_seat else 0)
         st["scores"][s] += adj
@@ -366,14 +501,15 @@ def op_new(req):
     n = req.get("players")
     if not isinstance(n, int) or not 2 <= n <= 4:
         return {"error": "two to four players"}
-    if req.get("rules", "english") not in INFO["rules"]:
+    rs = RULESETS.get(req.get("rules") or DEFAULT)
+    if rs is None:
         return {"error": "the rulesets are: %s" % " ".join(INFO["rules"])}
     if req.get("options"):
         return {"error": "no options for this game"}
     if not load_words():
         return {"error": "this server has no word list for Grid Words yet"}
     seed = int(req.get("seed") or 0)
-    bag = [c for c, (_, count) in sorted(TILES.items()) for _ in range(count)]
+    bag = [c for c, (_, count) in sorted(rs.tiles.items()) for _ in range(count)]
     random.Random(seed).shuffle(bag)
     bag = "".join(bag)
     racks = []
@@ -385,19 +521,32 @@ def op_new(req):
     return {"state": st, "events": ["TURN 0"]}
 
 
-def geometry():
+def geometry(rs):
+    """A ruleset's static geometry: the board, its center, its bonus squares and its tiles."""
     out = ["BRD %d %d" % (SIZE, SIZE), "CTR %d %d" % CENTRE]
     for kind in ("TW", "DW", "TL", "DL"):
-        squares = sorted(((y, x) for (x, y), k in PREMIUM.items() if k == kind))
+        squares = sorted(((y, x) for (x, y), k in rs.premium.items() if k == kind))
         pairs = ["%d %d" % (x, y) for y, x in squares]
         for i in range(0, len(pairs), 10):
             out.append("PRM %s %s" % (kind, " ".join(pairs[i:i + 10])))
-    out += ["TIL %s %d %d" % (c, v, k) for c, (v, k) in sorted(TILES.items())]
+    out += ["TIL %s %d %d" % (c, v, k) for c, (v, k) in sorted(rs.tiles.items())]
     return out
+
+
+def op_geometry(req):
+    """The static geometry of a ruleset without a game: for a table still waiting for players, and for GEO."""
+    rs = RULESETS.get(req.get("rules") or DEFAULT)
+    if rs is None:
+        return {"error": "this server has no Grid Words ruleset %s" % req.get("rules")}
+    return {"geometry": geometry(rs)}
 
 
 def op_view(req):
     st, seat = req["state"], req.get("seat", -1)
+    try:
+        rs = ruleset(req.get("rules"))
+    except Illegal as e:
+        return {"error": str(e)}
     triples = ["%d %d %s" % (i % SIZE + 1, i // SIZE + 1, c) for i, c in enumerate(st["cells"]) if c != "."]
     wire = ["X " + " ".join(triples[i:i + 9]) for i in range(0, len(triples), 9)]
     if 0 <= seat < st["np"]:
@@ -424,7 +573,7 @@ def op_view(req):
             "scores": st["scores"], "turn": -1 if st["over"] else st["turn"], "last": st["last"]}
     if 0 <= seat < st["np"]:
         data["rack"] = st["racks"][seat]
-    return {"wire": wire, "geometry": geometry(), "status": status, "data": data}
+    return {"wire": wire, "geometry": geometry(rs), "status": status, "data": data}
 
 
 def op_moves(req):
@@ -447,31 +596,31 @@ def op_apply(req):
     if not check and seat != st["turn"]:
         return {"error": "not your turn"}
     verb = move[0].upper() if move else ""
-    limit = idle_limit(req.get("rules"), st["np"])
     try:
+        rs = ruleset(req.get("rules"))
         if verb == "PLAY":
-            return play(st, seat, move, check, req.get("rules"))
+            return play(st, seat, move, check, rs)
         if verb == "EXCH":
-            return exchange(st, seat, move, check, limit)
+            return exchange(st, seat, move, check, rs)
         if verb == "PASS" and len(move) == 1:
             if check:
                 return {"info": "0"}
             st = copy_state(st)
             events = ["PASS %d" % seat]
-            return idle_turn(st, events, limit)
+            return idle_turn(st, events, rs)
     except Illegal as e:
         return {"error": str(e)}
     return {"error": "a move is PLAY x y H|V letters, EXCH letters or PASS"}
 
 
-def play(st, seat, move, check, rules=None):
+def play(st, seat, move, check, rs):
     if len(move) != 5 or not move[1].isdigit() or not move[2].isdigit() or move[3].upper() not in ("H", "V"):
         raise Illegal("PLAY x y H|V letters, like PLAY 8 8 H WORD")
     words = load_words()
     if not words:
         raise Illegal("this server has no word list")
     x, y, d = int(move[1]), int(move[2]), move[3].upper()
-    r = evaluate(st, seat, x, y, d, move[4], words)
+    r = evaluate(st, seat, x, y, d, move[4], words, rs)
     if check:
         info = str(r["score"])
         for w in r["words"]:
@@ -493,13 +642,13 @@ def play(st, seat, move, check, rules=None):
     if k:
         events.append("DRAW %d %d" % (seat, k))
     if not rack and not st["bag"]:
-        finish(st, events, out_seat=seat)
+        finish(st, events, rs, out_seat=seat)
         return {"state": st, "events": events, "end": st["result"]}
     next_turn(st, events)
     return {"state": st, "events": events}
 
 
-def exchange(st, seat, move, check, limit=None):
+def exchange(st, seat, move, check, rs):
     if len(move) != 2 or not all(c == "_" or "A" <= c <= "Z" for c in move[1].upper()) or len(move[1]) > RACK:
         raise Illegal("EXCH letters, like EXCH QV_ (_ is a blank)")
     give = move[1].upper()
@@ -519,15 +668,15 @@ def exchange(st, seat, move, check, limit=None):
     st["bag"] = "".join(bag)
     st["shuffles"] += 1
     st["racks"][seat] = rack
-    return idle_turn(st, ["EXCH %d %d" % (seat, len(give))], limit)
+    return idle_turn(st, ["EXCH %d %d" % (seat, len(give))], rs)
 
 
-def idle_turn(st, events, limit=None):
-    """A pass or an exchange. limit turns in a row without a word played end the game (by default two
-    full rounds; idle_limit gives each ruleset's)."""
+def idle_turn(st, events, rs):
+    """A pass or an exchange. The ruleset's idle limit of turns in a row without a word played ends the
+    game (Ruleset.idle_limit)."""
     st["idle"] += 1
-    if st["idle"] >= (limit or 2 * st["np"]):
-        finish(st, events)
+    if st["idle"] >= rs.idle_limit(st["np"]):
+        finish(st, events, rs)
         return {"state": st, "events": events, "end": st["result"]}
     next_turn(st, events)
     return {"state": st, "events": events}
@@ -664,14 +813,14 @@ def as_sentence(reason):
     return reason[:1].upper() + reason[1:].rstrip(".") + "."
 
 
-def check_sentence(st, seat, play):
+def check_sentence(st, seat, play, rs):
     """What a play would score, or why it can't be played, worked out with the game's own rules."""
     words = load_words()
     if not words:
         return "This server has no word list for Grid Words."
     word = play[4].replace("_", "")
     try:
-        r = evaluate(st, seat, int(play[1]), int(play[2]), play[3], play[4], words)
+        r = evaluate(st, seat, int(play[1]), int(play[2]), play[3], play[4], words, rs)
     except Illegal as e:
         return "%s can't be played there. %s" % (word, as_sentence(str(e)))
     text = "%s would score %d" % (listed([w.upper() for w in r["words"]]), r["score"])
@@ -697,7 +846,11 @@ def op_typed(req):
             play = typed_play(st, words[1:])
         except Refused as e:
             return {"say": str(e)}
-        return {"say": check_sentence(st, seat, play)} if play else {"error": CHECK_HINT}
+        try:
+            rs = ruleset(req.get("rules"))
+        except Illegal as e:
+            return {"error": as_sentence(str(e))}
+        return {"say": check_sentence(st, seat, play, rs)} if play else {"error": CHECK_HINT}
     refused = None
     if low == ["pass"]:
         reply = {"move": ["PASS"], "ask": "pass", "what": "pass"}
@@ -720,7 +873,7 @@ def op_typed(req):
 
 
 OPS = {"info": op_info, "new": op_new, "view": op_view, "moves": op_moves, "apply": op_apply,
-       "result": op_result, "say": op_say, "typed": op_typed}
+       "result": op_result, "say": op_say, "typed": op_typed, "geometry": op_geometry}
 
 
 def main():

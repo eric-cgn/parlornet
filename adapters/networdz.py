@@ -53,8 +53,10 @@ in a line", 15 "Tiles are not connected", 16 "Word must cover center square", 18
 others), except codes 1 to 5, its system errors, which stop it.
 
 Tiles. A tile's number is its place in the configuration's tile set: the blanks first, then each letter as many
-times as the set has it. The parlor plays the standard set, so the Networdz player loads the ParlorNet
-configuration (PARLOR.CFG, on the client's page): the standard board, the 100 tiles and their points, racks of 7.
+times as the set has it. Networdz draws its board and scores its plays from the configuration its player loads,
+so the extension plays only tables of one ruleset, standard (RULES), and the Networdz player loads the ParlorNet
+configuration (PARLOR.CFG, on the client's page), which is standard's board, its 100 tiles and their points, and
+racks of 7 (plugins/gridwords/rules/standard.json). On a server without standard there is no Grid Words here.
 Each guest's game keeps its own numbering of the table's tiles (Tiles): where each one is, on the board, on a
 rack or in the bag. The extension reads the whole table with VUE O, which the core answers with every rack and
 the bag only for a table marked integrity=false; the extension marks each table where a Networdz guest sits
@@ -98,6 +100,8 @@ import argparse
 import asyncio
 import collections
 import itertools
+import json
+import os
 import random
 import re
 import sys
@@ -113,7 +117,9 @@ CLIENT_NAME = BY_ID["networdz"].name        # "Networdz 2.0"
 MACHINE = "Windows"                         # Networdz is a Windows program (3.1 or later)
 PROTOCOL = ("NETWORDZ", "Networdz, for Networdz 2.0 on Windows", "Grid Words for Networdz 2.0 on Windows")
 GRID = "gridwords/1"
-RULES = "classic"
+RULES = "standard"          # the only ruleset whose board and tiles PARLOR.CFG describes
+STANDARD = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "plugins", "gridwords",
+                        "rules", RULES + ".json")
 REASON = "a Networdz program receives the bag and all racks"     # INT: why the table is marked integrity=false
 VOICE = "ParlorNet"                         # the name the parlor's own chat lines come under
 MAX_SESSIONS = 40
@@ -152,8 +158,16 @@ REASONS = [("not in the word list: ", NOT_LISTED), ("must join the words", NOT_C
 M_WORD = 5                  # letters of the word M carries
 TAIL = bytes.fromhex("e0156d011916e0")      # M's last seven bytes, as a stock host sends them
 
-# The ParlorNet configuration's tile set in Networdz's order: the blanks, then each letter (G.STD_TIL).
-TILESET = "_" * G.STD_TIL["_"][1] + "".join(c * G.STD_TIL[c][1] for c in sorted(G.STD_TIL) if c != "_")
+
+
+def tileset(tiles):
+    """A ruleset's tiles {letter: [points, count]} -> its tile set in Networdz's order: the blanks, then each
+    letter as many times as the bag has it."""
+    return "_" * tiles["_"][1] + "".join(c * tiles[c][1] for c in sorted(tiles) if c != "_")
+
+
+with open(STANDARD, encoding="utf-8") as _f:
+    TILESET = tileset(json.load(_f)["tiles"])      # the ParlorNet configuration's tile set
 
 
 def u16(v):
@@ -1146,7 +1160,7 @@ class Console(chatcmd.Console):
 
     def __init__(self, g):
         self.g = g
-        super().__init__(g.say, g.req, lambda: g.name, COMMANDS, kinds=[GRID], label="Grid Words",
+        super().__init__(g.say, g.req, lambda: g.name, COMMANDS, kinds=[GRID], rules=[RULES], label="Grid Words",
                          new="%s turn=%s" % (RULES, g.svc.turn), notes=NOTES,
                          handlers={"quit": g.do_quit, "signin": g.do_signin, "open": self.do_open},
                          seated=g.seated, current=lambda: g.tid if g.started and not g.over else None)

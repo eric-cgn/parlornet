@@ -44,4 +44,7 @@ Both lobbies take the [chat commands](../chat-commands.md). `/list` shows your g
 
 ## Screenshots
 
-None yet.
+![The Outland TCP Tool settings with the parlor's address and port 6506](../../static/img/outland-connection-settings.gif "In Connection Settings, the Outland TCP Tool takes the parlor's address and port 6506.")
+![The Outland Services list with Backgammon and Reversi in black and the other games grayed out](../../static/img/outland-outland-services.gif "After signing in, the Outland Services window lists Backgammon and Reversi.")
+![Outland's Backgammon board with red and cream checkers on wooden points, at a third of its size](../../static/img/outland-backgammon.gif "A game of Outland Backgammon against the bot, a move after the opening roll.")
+![The Private Chat window saying the opponent is bot, the player is red and the match is to 1 point, with a greeting from each side](../../static/img/outland-private-chat.gif "The Private Chat window names your opponent and color and carries the chat.")

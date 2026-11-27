@@ -34,9 +34,11 @@ The message window takes the [shared chat commands](../chat-commands.md): `/invi
 - In the X and GTK clients your password stays in the Send Message field: press End, then Ctrl-U to clear it. The X client's message pane wraps at 49 characters.
 - The Windows client shows one message at a time in its status line, so the parlor sends it whole sentences. It has connected and signed in under Wine 1.0 on Linux, where its board editor put some squares in the wrong place; no game has been finished with it yet.
 - On a password parlor the name typed in the client only labels the connection; you play as the name you sign in with.
+- `nbtclient` and `gbnclient` crash at start when the `LOGNAME` environment variable isn't set, because they take the player's name from it. A normal login sets it, so this matters only when a script or a container starts the client.
 
 ## Screenshots
 
-![The X client in a game against the bot](../../static/img/batnav-xbtclient.gif)
-![The ncurses client in a game against the bot](../../static/img/batnav-nbtclient.gif)
-![The GTK client of 0.60 in a game against the bot](../../static/img/batnav-gbnclient.gif)
+![The ncurses client with a fleet placed on Your board and the line Signed in as bob](../../static/img/batnav-ncurses-fleet.gif "The ncurses client of 0.50 signs bob in by the name it was started with, and his fleet is placed on Your board.")
+![The GTK client's view of the bot's board, with hits and misses marked in the top rows](../../static/img/batnav-gtk-shots.gif "In the GTK client of 0.60, ann's shots at the bot's fleet are marked on the bot's board.")
+![The GTK client's own board, with ann's ships and the bot's hits on them](../../static/img/batnav-gtk-own-board.gif "Ann's own board shows her ships and where the bot has hit them.")
+![The GTK client's Game Over picture, a crossed-out ship](../../static/img/batnav-gtk-game-over.gif "When the bot sinks the last ship, the GTK client shows its Game Over picture.")

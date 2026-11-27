@@ -13,7 +13,7 @@ import secrets
 import sys
 import time
 
-from . import DOCS_URL, PROJECT_URL, allowance, bots, commands, frontends, native
+from . import DOCS_URL, PROJECT_URL, allowance, bots, commands, frontends, native, sitetext
 from .accounts import KEY_LABEL_LEN, STEP_KINDS, Accounts, Player, as_ip, source_key  # noqa: F401  (Player: for code that imports it from here)
 from .store import Store
 
@@ -25,8 +25,12 @@ SRC_RE = re.compile(r"^[0-9A-Fa-f:.]{2,45}\Z")       # an IPv4 or IPv6 address (
 PREF_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+\Z")   # and at most Limits.pref_key_len
 NATIVE_NS = ":native"     # the public port's namespace for PRF: never an extension's key name (no colon there)
 PREF_SHARED = {"play": "web"}  # extensions whose PRF data is kept under another's name (pref_ns)
-SIGNIN_VERBS = ("HELO", "USER", "REG", "AUT", "SES", "CAN", "SRC", "BYE", "MOTD", "GAM",  # before signing in
-                "PRO", "PRD", "PRL", "NFY", "CLI", "TOP", "TIM", "PAG", "CNT")
+SIGNIN_VERBS = ("HELO", "USER", "REG", "AUT", "SES", "CAN", "SRC", "BYE", "MOTD", "GAM", "GEO",  # before signing in
+                "PRO", "PRD", "PRL", "NFY", "CLI", "TOP", "TIM", "PAG", "CNT", "DIA")
+# The dial-in extension (adapters/dialin.py): the key name of the one server extension that may say what a call
+# is with DIA (docs/protocol.md, Dial-in gateways), and the call's text fields that DIA takes from it.
+DIALIN_EXTENSION = "dialin"
+DIAL_TEXT = ("caller", "dialed", "modulation", "rate")
 # What a client says it is (CLI; docs/protocol.md, Clients and machines): the program and the machine. The
 # words of CLI and of the TRX lines of a turn (TRN, FEED), and the words of the profile (PFL).
 CLAIM_FIELDS = ("PROG", "MACH")
@@ -46,7 +50,7 @@ NATIVE_PROTOCOL = ("PARLORNET/%d" % VERSION, "ParlorNet protocol (PARLORNET/%d)"
 # Why an invitation ended, the last word of its UNINVITE event (docs/protocol.md, Invitations).
 UNINVITE_WHY = ("declined", "withdrawn", "expired", "started", "left")
 # The requests that are the player's own activity (docs/accounts.md, Who is online): what a player does.
-# Looking (LST, IVL, WHO, VUE, SIN, WAT, SEE, GAM, MOTD, TIM, PRF GET and LST) is what frontends also do on their
+# Looking (LST, IVL, WHO, VUE, SIN, WAT, SEE, GAM, GEO, MOTD, TIM, PRF GET and LST) is what frontends also do on their
 # own, every few seconds, so it never counts; a frontend reports the commands a player types that need no
 # other request with ACT. Signing in counts as well.
 ACTIVE_VERBS = frozenset(("ACT", "CMD", "NEW", "JON", "LVE", "INV", "UNV", "RES", "MOV", "CHK", "UND", "END", "CHT",
@@ -212,7 +216,6 @@ def parse_duration(text):
 
 MOTD_WIDTH = MAXLINE - 2 - len("MOTD ")       # 73: "MOTD text" fits the 80-byte line with its CR LF
 MOTD_LINES = 20                               # a 24-line terminal shows the whole message with the login prompt
-MOTD_MARKER = "{contribute}"                  # replaced by site.contribute_url; its line is left out once cleared
 
 
 def wrap(lines, width=76):
@@ -465,6 +468,9 @@ class Session:
         self.told = set()
         self.grace = None
         self.notes = []
+        # The dial-in extension's DIA NATIVE: the gateway's address, and the connection is the public port's
+        # from here on (Server.serve_public).
+        self.handoff = None
 
     def allow(self):
         now = time.time()
@@ -563,14 +569,22 @@ class Server:
         url = url if url.endswith("/") else url + "/"
         return url if len("DOC " + url) <= MAXLINE - 2 else ""
 
+    def site_values(self):
+        """The placeholders' values for the operator's texts (parlord/sitetext.py): the server's name, the
+        ports the extensions declared, web.public_url and play.public_url (the settings, else PARLOR_WEB_URL and
+        PARLOR_PLAY_URL), the docs site and the contribute address."""
+        def url(key, var):
+            return self.settings.get(key) or os.environ.get(var, "")
+        return sitetext.values(self.name, [(k, port) for k, port, _, _ in self.protocol_list()],
+                               url("web.public_url", "PARLOR_WEB_URL"), url("play.public_url", "PARLOR_PLAY_URL"),
+                               self.docs_url(), self.contribute_url())
+
     def motd_lines(self):
-        """The message of the day as every frontend shows it: {contribute} replaced by the contribute URL,
-        or, when the operator cleared it, every line holding the marker left out; then cut to lines of at most
-        MOTD_WIDTH characters, at most MOTD_LINES of them, without trailing blank lines."""
-        url = self.contribute_url()
-        if any(c in url for c in " \t\r\n") or not all(" " < c <= "~" for c in url):
-            url = ""
-        lines = [l.replace(MOTD_MARKER, url) for l in self.motd().split("\n") if url or MOTD_MARKER not in l]
+        """The message of the day as every frontend shows it: its placeholders filled in (sitetext), and every
+        line that holds one with no value left out, such as {contribute} once the operator cleared it; then
+        cut to lines of at most MOTD_WIDTH characters, at most MOTD_LINES of them, without trailing blank
+        lines."""
+        lines = sitetext.expand_lines(self.motd().split("\n"), self.site_values(), "the message of the day")
         out = wrap(lines, MOTD_WIDTH)
         while out and not out[-1]:
             out.pop()
@@ -712,6 +726,9 @@ class Server:
                 print("parlord: plugin %s gave no usable info; not offered" % name, file=sys.stderr, flush=True)
                 continue
             p.info = info
+            for note in info.get("log") or []:      # what the plugin wants the operator to read, such as a
+                if isinstance(note, str):           # file of its own that it left out, and why
+                    print("parlord: plugin %s: %s" % (name, note[:300]), file=sys.stderr, flush=True)
             self.plugins["%s/%d" % (info["type"], info["ver"])] = p
         await host.close()
 
@@ -1088,6 +1105,8 @@ class Server:
         self.frontend_count[name] = self.frontend_count.get(name, 0) + 1
         try:
             await self.serve_conn(reader, writer, sess)
+            if sess.handoff is not None:        # a call the dial-in extension hands over (DIA NATIVE)
+                await self.serve_public(reader, writer, sess.handoff)
         finally:
             self.frontend_conns.discard(sess)
             self.frontend_count[name] -= 1
@@ -1097,21 +1116,27 @@ class Server:
     async def handle(self, reader, writer):
         """The public port: plain text for 8-bit clients. The client sends PARLORNET/1 first, whose line
         ending sets the connection's (parlord/native.py); then the greeting."""
+        peer = writer.get_extra_info("peername")
+        await self.serve_public(reader, writer, peer[0] if peer else None)
+
+    async def serve_public(self, reader, writer, addr):
+        """A connection of the public port from addr: one to 6501 itself, or a call the dial-in extension
+        hands over with DIA NATIVE, from the gateway at addr. Both are read the same way, the PROXY header
+        that a listed gateway may send first, then the opening."""
         if self.conns >= Limits.max_conns:
             writer.write(b"ERR BUSY server is full\r\n")
             writer.close()
             return
         self.conns += 1
         try:
-            peer = writer.get_extra_info("peername")
             lines = native.Lines(reader, MAXLINE)
             loop = asyncio.get_running_loop()
             until = loop.time() + Limits.first_line_secs
             head = None
             try:
                 # a dial-in gateway's PROXY header first, then the opening, in the same 20 seconds
-                head = await lines.proxy(Limits.first_line_secs,
-                                         self.allowance.trusted(as_ip(peer[0]) if peer else None))
+                gateway = self.allowance.trusted(as_ip(addr) if addr else None)
+                head = await lines.proxy(Limits.first_line_secs, gateway)
                 eol = await lines.start(until - loop.time(), Limits.ending_secs)
             except asyncio.TimeoutError:
                 eol = None
@@ -1123,7 +1148,7 @@ class Server:
                 writer.close()
                 return
             call = head if head is not None and not head.local else None      # a call the gateway carries
-            source = call.src if call and call.src else peer[0] if peer else None
+            source = call.src if call and call.src else addr
             sess = Session(writer, source=source_key(source), eol=eol)
             if call:
                 sess.cls, sess.call = allowance.DIALIN, call.call
@@ -1148,17 +1173,17 @@ class Server:
                 good = True
                 timed = None            # the time allowance's next check, when it comes before the idle limits
                 try:
+                    wait = Limits.idle_secs
+                    if lines is not None and not sess.player:     # nobody sits at the sign-in for long
+                        wait = min(wait, max(0.0, sess.signed_out + Limits.signin_secs - time.monotonic()))
+                    due = self.time_due(sess) if sess.meter is not None else None
+                    if due is not None and due < wait:
+                        wait = timed = due
                     if lines is not None:
-                        wait = Limits.idle_secs
-                        if not sess.player:     # nobody sits at the sign-in for long
-                            wait = min(wait, max(0.0, sess.signed_out + Limits.signin_secs - time.monotonic()))
-                        due = self.time_due(sess) if sess.meter is not None else None
-                        if due is not None and due < wait:
-                            wait = timed = due
                         got = await lines.line(wait)
                         raw, good = got if got is not None else (b"", True)     # b"": the end of input
                     else:
-                        raw = await asyncio.wait_for(reader.readline(), Limits.idle_secs)
+                        raw = await asyncio.wait_for(reader.readline(), wait)
                 except asyncio.TimeoutError:
                     if timed is not None:
                         continue
@@ -1202,8 +1227,14 @@ class Server:
                     out = [err("INTERNAL", "")]
                 if sess.meter is not None:
                     self.time_signed(sess)
-                await self.reply(sess, ["INF " + n for n in sess.notes] + out)
-                sess.notes = []
+                # The time allowance's notices go in front of the next reply. On the extension channel they wait
+                # for the next TIM, so that a server extension knows them from the lines of other replies.
+                notes = sess.notes if lines is not None or line.split()[0].upper() == "TIM" else []
+                await self.reply(sess, ["INF " + n for n in notes] + out)
+                if notes:
+                    sess.notes = []
+                if sess.handoff is not None:
+                    break
         except (ConnectionError, OSError):
             pass
         finally:
@@ -1217,7 +1248,8 @@ class Server:
                 self.save_player(sess.player)
             self.accounts.connection_closed(sess)
             try:
-                writer.close()
+                if sess.handoff is None:        # a handed-over call goes on as the public port's
+                    writer.close()
             except Exception:
                 pass
 
@@ -1371,6 +1403,53 @@ class Server:
         if len(args) != 1 or not SRC_RE.match(args[0]) or source_key(args[0]) is None:
             return [err("SYNTAX", "SRC address")]
         sess.source = source_key(args[0])
+        return [ok()]
+
+    async def cmd_dia(self, sess, args, line):
+        """DIA (the dial-in extension only, before signing in; docs/protocol.md, Dial-in gateways): what a call
+        that a dial-in gateway carries to the extension is. The gateway's address is the one the extension's
+        connection came from, and the core believes it only when it is in dialin.gateways.
+            DIA addr              OK when addr is a listed gateway, else ERR GATEWAY
+            DIA addr prior        this connection carries a call from the gateway at addr, up for prior
+                                  seconds: the dial-in class, metered. The per-address limits count addr,
+                                  or the source the header named, which SRC gives after it
+            DIA field text        the call's caller, dialed, modulation or rate, after the call
+            DIA NATIVE addr       after the OK, the connection is the public port's, from the gateway at
+                                  addr: the extension passes on the caller's bytes, the PROXY header first"""
+        if sess.frontend != DIALIN_EXTENSION:
+            return [err("NOTFRONTEND", "DIA is only for the dial-in extension")]
+        if sess.player or sess.pending:
+            return [err("STATE", "DIA comes before HELO")]
+        word = args[0].lower() if args else ""
+        if word in DIAL_TEXT:
+            if sess.cls != allowance.DIALIN:
+                return [err("STATE", "DIA addr prior comes first")]
+            parts = line.strip().split(None, 2)
+            text = parts[2] if len(parts) > 2 else ""
+            sess.call[word] = "".join(c for c in text if " " <= c <= "~")[:native.TLV_TEXT]
+            return [ok()]
+        if word == "native":
+            if len(args) != 2 or as_ip(args[1]) is None:
+                return [err("SYNTAX", "DIA NATIVE addr")]
+            if sess.cls != allowance.DEFAULT or sess.meter is not None:
+                return [err("STATE", "this connection carries a call already")]
+            sess.handoff = args[1]
+            return [ok()]
+        ip = as_ip(args[0]) if args else None
+        if ip is None or len(args) not in (1, 2):
+            return [err("SYNTAX", "DIA addr [prior], DIA field text or DIA NATIVE addr")]
+        if not self.allowance.trusted(ip):
+            return [err("GATEWAY", "not a dial-in gateway")]
+        if len(args) == 1:
+            return [ok()]
+        prior = args[1]
+        if not prior.isdigit():
+            return [err("SYNTAX", "DIA addr prior")]
+        if sess.cls != allowance.DEFAULT or sess.meter is not None:
+            return [err("STATE", "this connection carries a call already")]
+        sess.cls, sess.call = allowance.DIALIN, {}
+        sess.source = source_key(args[0])
+        sess.meter = self.allowance.open(allowance.DIALIN, int(prior[:9]))
         return [ok()]
 
     async def cmd_ses(self, sess, args, line):
@@ -1594,6 +1673,29 @@ class Server:
                 out.append(("GAM %s %s %s %d %d %s" % (key, rules, i["name"].replace(" ", "_"),
                                                          i["min"], i["max"], flags)).rstrip())
         return out + [ok()]
+
+    async def cmd_geo(self, sess, args, line):
+        """GEO type rules: the static geometry of a ruleset without a table, as VUE's flag G gives it at a
+        table of that ruleset (docs/protocol.md). Nothing but OK for a game that has none."""
+        if len(args) != 2:
+            return [err("SYNTAX", "GEO type/ver rules")]
+        key = args[0] if "/" in args[0] else args[0] + "/1"
+        plugin = self.plugins.get(key)
+        offered = self.offered()
+        if plugin is None or not any(o.startswith(key + ":") for o in offered):
+            return [err("NOGAME", "this server does not host that game")]
+        if "%s:%s" % (key, args[1]) not in offered:
+            return [err("NORULES", "unknown ruleset")]
+        return await self.static_geometry(plugin, args[1], plugin.info["min"], {}) + [ok()]
+
+    async def static_geometry(self, plugin, rules, players, options):
+        """A ruleset's static geometry from a plugin whose info has "geometry": true (docs/plugins.md), else
+        none: [] too when the plugin gives an error."""
+        if not plugin.info.get("geometry"):
+            return []
+        r = await plugin.call({"op": "geometry", "rules": rules, "players": players, "options": options})
+        lines = r.get("geometry") if isinstance(r, dict) and "error" not in r else None
+        return [l for l in lines if isinstance(l, str)] if isinstance(lines, list) else []
 
     LST_SYNTAX = "LST [open|playing] [mine] [game=type] [player=name] [table=id]"   # [clients]: no room
 
@@ -2018,6 +2120,8 @@ class Server:
         flags = "".join(args[1:]).upper()
         out = ["V %s/%d %d" % (t.type, t.ver, t.seq)]
         if t.state is None:
+            if "G" in flags:            # a game with static geometry gives it before the game starts too
+                out += await self.static_geometry(t.plugin, t.rules, len(t.seats), t.options)
             out.append("S Waiting for players")
         else:
             call = {"op": "view", "rules": t.rules, "state": t.state, "seat": seat}

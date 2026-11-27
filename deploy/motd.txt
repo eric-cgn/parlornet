@@ -13,7 +13,5 @@
 | by telnet, or use New account on    |
 | the web. We email you a password.   |
 +-------------------------------------+
-Run your own server or contribute:
-{contribute}
 Server setting: deploy/motd.txt,
-last changed 2026-11-22.
+last changed 2026-11-27.

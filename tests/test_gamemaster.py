@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 import procs
 from test_adapters import Client, WebPlayers
+from test_adapters import query_of  # noqa: E402
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 
 sys.path.insert(0, ROOT)
@@ -52,6 +53,30 @@ class Parts(unittest.TestCase):
         rb = GM.RULEBOOKS["Othello [RHS]"]
         for version, oldest, ok in ((0x20, 0x20, True), (0x30, 0x20, True), (0x30, 0x30, False), (0x10, 0x10, False)):
             self.assertEqual(rb.takes(GM.CallRecord(GM.CallRecord.build(rb.rb_id, version, oldest, 0))), ok)
+
+    def test_grid_words_plays_every_ruleset(self):
+        """The Grid Words rulebook is sent the table's own board and letter values, so it plays every Grid Words
+        ruleset, and the lobby knows all of them by the rulebook's own (standard). Other rulebooks play only
+        theirs."""
+        for rules in ("standard", "classic", "mine"):
+            self.assertEqual(GM.game_of("gridwords/1", rules), "Grid Words")
+            self.assertEqual(GM.lobby_rules("gridwords/1", rules), "standard")
+        self.assertEqual(GM.game_of("mancala/1", "kalah"), "Mancala")
+        self.assertIsNone(GM.game_of("mancala/1", "oware"))
+        self.assertIsNone(GM.lobby_rules("mancala/1", "oware"))
+        self.assertIsNone(GM.game_of("chess/1", "standard"))
+
+    def test_grid_words_board_lines(self):
+        """SQ: the 225 squares row by row (. d t D T), and LV: the points of A to Z, from the view's PRM and TIL
+        lines. None without them."""
+        geo = ["BRD 15 15", "CTR 8 8", "PRM TW 1 1 15 15", "PRM DW 8 8", "PRM TL 2 1", "PRM DL 1 2",
+               "TIL A 1 9", "TIL Q 9 1", "TIL _ 0 2", "X 8 8 A"]
+        sq, lv = GM.geometry_lines(geo)
+        self.assertEqual(sq, "SQ T" + "t" + "." * 13 + "d" + "." * 14 + "." * 15 * 5 + "." * 7 + "D" + "." * 7 +
+                         "." * 15 * 6 + "." * 14 + "T")
+        self.assertEqual(len(sq), 3 + 225)
+        self.assertEqual(lv, "LV 1 " + "0 " * 15 + "9 " + "0 " * 8 + "0")
+        self.assertEqual(GM.geometry_lines(["X 8 8 A", "W 0"]), [])
 
     def test_messages_and_address(self):
         """Pascal strings: the length, then ~ (GameMaster's own) or # (the rulebook's), then the text. The
@@ -966,7 +991,7 @@ class WithAServer(WebPlayers, unittest.TestCase):
         w = Native(self.core, "tungw")
         self.addCleanup(w.close)
         tab = self.gm_table(w, "tungw", "gridwords/1")
-        self.assertEqual((tab["seated"], tab["rules"]), (["tungw", "bot"], "classic"))
+        self.assertEqual((tab["seated"], tab["rules"]), (["tungw", "bot"], "standard"))
         state = {}
 
         def told():
@@ -975,6 +1000,7 @@ class WithAServer(WebPlayers, unittest.TestCase):
                 got = gw.read()
                 self.assertEqual(got[1].split()[0], verb, got)
                 state[verb] = got[1][2:]
+        self.assertEqual(self.board_data(gw), self.standard_board())     # the table's board, once at the start
         told()
         rack = state["K"]
         self.assertEqual((len(rack), state["S"], state["B"]), (7, "0 0", "86"))
@@ -1367,6 +1393,17 @@ class WithAServer(WebPlayers, unittest.TestCase):
         self.assertEqual(g.expect(GM.PLAY_IT_SAM), [])
         return t, g
 
+    def board_data(self, g):
+        """SQ and LV, the Grid Words board and letter values sent before the position or the first K."""
+        return [g.read()[1], g.read()[1]]
+
+    @staticmethod
+    def standard_board():
+        """SQ and LV of the standard ruleset, as the extension makes them from its geometry."""
+        from bot.rules import plugin
+        P = plugin("gridwords")
+        return GM.geometry_lines(P.geometry(P.RULESETS["standard"]))
+
     def position(self, g):
         """POS ... POE, the first thing after ~Play it Sam -> its lines."""
         got = g.read()
@@ -1413,7 +1450,7 @@ class WithAServer(WebPlayers, unittest.TestCase):
         tel.until("Press Enter")
         c.send("\r\n")
         tel.until("Your tables")
-        c.send("invite bot gridwords classic 2p 1h\r\n")
+        c.send("invite bot gridwords standard 2p 1h\r\n")
         tab = self.gm_table(w, "gwback", "gridwords/1")
         tid = tab["id"]
         w.until_event(tid, r" START")
@@ -1436,6 +1473,7 @@ class WithAServer(WebPlayers, unittest.TestCase):
         want = self.grid_words_position(view)
         self.assertGreater(225 - want[1].count("."), len(word) - 1)
         t, gw = self.resumed("gwback", "Grid Words [ParlorNet]", b"PNgw", bytes(260), tid)
+        self.assertEqual(self.board_data(gw), self.standard_board())
         self.assertEqual(self.position(gw), want)
         self.assertEqual(self.record(w, tid), before)  # nothing changed at the table
         self.assertEqual(self.gm_table(w, "gwback", "gridwords/1")["seated"], ["gwback", "bot"])
@@ -1454,13 +1492,11 @@ class WithAServer(WebPlayers, unittest.TestCase):
         self.assertEqual(tab["status"], "playing")
         self.assertFalse([l for l in w.req("SIN %s 0" % tid) if " END " in l])
 
-    def test_english_grid_words_from_telnet_listed_and_resumed(self):
-        """Grid Words tables made on the web or by telnet have the english ruleset, which plays as classic in
-        everything the rulebook shows (only the parlor's count of scoreless turns that end a game differs). A
-        game started by telnet against the bot is listed in TBL's Your games under the rulebook's ruleset and
-        taken up through the tunnel with the exact position; an open english table and an invitation to one
-        reach the lobby the same way. A Mancala table of oware, which plays differently, is neither listed,
-        taken up nor joined."""
+    def test_grid_words_from_telnet_listed_and_resumed(self):
+        """A Grid Words game started by telnet against the bot is listed in TBL's Your games under the
+        rulebook's ruleset and taken up through the tunnel with the table's board and values and the exact
+        position. An open table and an invitation to one reach the lobby the same way. A Mancala table of oware,
+        which plays differently, is neither listed, taken up nor joined."""
         from test_matrix import typed
         w = Native(self.core, "gweng")
         self.addCleanup(w.close)
@@ -1472,10 +1508,10 @@ class WithAServer(WebPlayers, unittest.TestCase):
         tel.until("Press Enter")
         c.send("\r\n")
         tel.until("Your tables")
-        c.send("invite bot gridwords english 2p 1h\r\n")
+        c.send("invite bot gridwords standard 2p 1h\r\n")
         tab = self.gm_table(w, "gweng", "gridwords/1")
         tid = tab["id"]
-        self.assertEqual(tab["rules"], "english")
+        self.assertEqual(tab["rules"], "standard")
         w.until_event(tid, r" START")
         from bot.rules import plugin
         words = plugin("gridwords").load_words()
@@ -1488,25 +1524,26 @@ class WithAServer(WebPlayers, unittest.TestCase):
         w.until_event(tid, r" PLAY 0 ")
         view = self.my_turn(w, tid, 0)                  # the bot has played too
         before = self.record(w, tid)
-        # another player's open english table, with an invitation to it, and an open oware table
+        # another player's open Grid Words table, with an invitation to it, and an open oware table
         o = Native(self.core, "gwhost")
         self.addCleanup(o.close)
-        inv = o.req("NEW gridwords english turn=1h")[-1].split()[1]
+        inv = o.req("NEW gridwords standard turn=1h")[-1].split()[1]
         o.req("JON %s 0" % inv)
         self.assertTrue(o.req("INV %s gweng 1" % inv)[-1].startswith("OK"))
         oware = o.req("NEW mancala oware turn=1h")[-1].split()[1]
         o.req("JON %s 0" % oware)
         t = self.tunnel("gweng")
         lines = t.req("TBL")
-        self.assertIn("YG %s gridwords/1 classic 0 0 bot" % tid, lines)
-        self.assertIn("WG %s gridwords/1 classic gwhost" % inv, lines)
+        self.assertIn("YG %s gridwords/1 standard 0 0 bot" % tid, lines)
+        self.assertIn("WG %s gridwords/1 standard gwhost" % inv, lines)
         self.assertFalse([l for l in lines if l.split()[1:2] == [oware]], lines)
-        self.assertTrue([l for l in t.req("IVL") if l.startswith("IVT %s gridwords/1 classic gwhost " % inv)])
+        self.assertTrue([l for l in t.req("IVL") if l.startswith("IVT %s gridwords/1 standard gwhost " % inv)])
         gw = TunnelGame(t, 1, 2, "@%s" % tid)          # Resume in Your games
         self.assertEqual(gw.call("Grid Words [ParlorNet]", 0x0110, 0x0100, parlor_state(b"PNgw", bytes(260))),
                          GM.SEND_GAME)
         self.assertEqual(gw.expect(GM.JUST_A_MOMENT), [])
         self.assertEqual(gw.expect(GM.PLAY_IT_SAM), [])
+        self.assertEqual(self.board_data(gw), self.standard_board())
         self.assertEqual(self.position(gw), self.grid_words_position(view))
         self.assertEqual(self.record(w, tid), before)  # nothing changed at the table
         gw.send("M PASS")
@@ -1643,7 +1680,7 @@ class WithAServer(WebPlayers, unittest.TestCase):
         played the GameMaster player cannot take it up; no table changes."""
         w = Native(self.core, "gwthree")
         self.addCleanup(w.close)
-        final = w.req("NEW gridwords/1 english players=3 turn=1h vis=public")[-1]
+        final = w.req("NEW gridwords/1 standard players=3 turn=1h vis=public")[-1]
         self.assertTrue(final.startswith("OK "), final)
         tid = final.split()[1]
         self.assertTrue(w.req("JON %s 0" % tid)[-1].startswith("OK"))
@@ -1851,10 +1888,9 @@ class WithAServer(WebPlayers, unittest.TestCase):
 
     def web_othello_table(self, name, invite):
         """A web player's Othello table (they sit at seat 0), with the GameMaster player invited."""
-        from urllib.parse import parse_qs, urlsplit
         self.web_login(name)
         loc = self.web_get("/new.htm?g=reversi%%2F1&turn=1h&vis=private&n=%s" % name)[1]
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         st, _, body = self.web_get("/invite.htm?t=%s&who=%s&n=%s" % (tid, invite, name))
         self.assertEqual(st, 302, body[-300:])
         return tid

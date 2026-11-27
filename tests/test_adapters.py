@@ -19,6 +19,12 @@ from procs import owned, spawn  # noqa: E402,F401  (the extension tests import s
 from speed import slow  # noqa: E402
 
 
+def query_of(url):
+    """A link's fields, {name: [values]}: the web site separates them with ; (adapters/web.py, url), and takes &
+    as well."""
+    return parse_qs(urlsplit(url).query.replace(";", "&"))
+
+
 def plain(html):
     """A page without its FONT tags (the site's faces and sizes), for checks on the markup around the text."""
     return re.sub(r"</?font[^>]*>", "", html)
@@ -150,7 +156,7 @@ class Browser:
 
     def keep(self):
         """The session and action fields this browser's links carry (x=, and s= without cookies)."""
-        q = parse_qs(urlsplit(self.link(r"[?&]x=")).query)
+        q = query_of(self.link(r"[?&;]x="))
         return "&".join("%s=%s" % (k, q[k][0]) for k in ("x", "s") if k in q)
 
     def act(self, path):
@@ -202,13 +208,13 @@ class WebPlayers:
             self.browsers = {}
         b = Browser(self.web)
         b.login(name, name + "-Pass-word")
-        b.x = parse_qs(urlsplit(b.link(r"[?&]x=")).query)["x"][0]
+        b.x = query_of(b.link(r"[?&;]x="))["x"][0]
         self.browsers[name] = b
         return name + "-Pass-word"
 
     def web_get(self, path):
         u = urlsplit(path)
-        q = parse_qs(u.query)
+        q = parse_qs(u.query.replace(";", "&"))
         name = q.pop("n", [None])[0]
         if name:                    # a player's request; a link from their last page goes with them
             b = self.last_browser = self.browsers[name]
@@ -285,13 +291,13 @@ class Web(Stack):
         self.assertEqual(statuses(None)["Reversi"], "playable")      # core not reached yet: static list
         for name, gtype, _, _ in W.GAMES[2:]:
             self.assertEqual(statuses(None)[name], "playable" if gtype in built else "planned")
-        s = statuses(["GAM reversi/1 standard Reversi 2 2", "GAM gridwords/1 english Grid_Words 2 4 nomoves",
+        s = statuses(["GAM reversi/1 standard Reversi 2 2", "GAM gridwords/1 standard Grid_Words 2 4 nomoves",
                       "GAM go/1 standard Go 2 2"])
         self.assertEqual((s["Reversi"], s["Grid Words"], s["Go"]), ("playable", "playable", "playable"))
         self.assertEqual(s["Backgammon"], "not on this server")
         for name, gtype, _, _ in W.GAMES[3:]:
             self.assertEqual(s[name], "not on this server" if gtype in built else "planned")
-        page = plain(W.games_html(parse_games(["GAM gridwords/1 english Grid_Words 2 4 nomoves"])))
+        page = plain(W.games_html(parse_games(["GAM gridwords/1 standard Grid_Words 2 4 nomoves"])))
         self.assertIn('<td align="center">2-4</td><td>playable</td>', page)
 
     def test_games_page(self):
@@ -366,7 +372,7 @@ class Web(Stack):
         b = br["wanda"]
         st, loc, _, _ = b.act("/new.htm?g=reversi%2F1")
         self.assertEqual(st, 302)
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         st, loc, _, body = br["walt"].act("/join.htm?t=%s" % tid)
         self.assertEqual(st, 302)
         for _ in range(90):
@@ -393,7 +399,7 @@ class Web(Stack):
         credential or, with cookies, the session id."""
         sid = b.jar.get("pn")
         for u in b.urls:
-            q = parse_qs(urlsplit(u).query)
+            q = query_of(u)
             self.assertNotIn("k", q, u)
             self.assertNotIn("n", q, u)
             if b.cookies:
@@ -481,7 +487,7 @@ class Web(Stack):
         st, _, _, body = b.login("cora", "Cora-secret")
         self.assertIn("You are <b>cora</b>", body)
         lobby = b.link(r"/lobby\.htm")
-        sid = parse_qs(urlsplit(lobby).query)["s"][0]                  # the session rides in links
+        sid = query_of(lobby)["s"][0]                  # the session rides in links
         self.assertRegex(sid, r"^[A-Za-z0-9_-]{22}$")
         st, loc, _, _ = b.act("/new.htm?g=reversi%2F1")
         self.assertEqual(st, 302)
@@ -534,7 +540,7 @@ class Web(Stack):
         b = self.browser()
         b.login("rita", "rita-Pass-word")
         st, loc, _, _ = b.act("/new.htm?g=reversi%2F1")
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         base = "/table.htm?t=%s" % tid
         body = b.get(base)[3]
         self.assertIn('content="5;URL=', body)            # default, waiting for a player
@@ -558,7 +564,7 @@ class Web(Stack):
             b.login(who, who + "-Pass-word")
         self.assertIn("Start a game of Backgammon", br["bea"].body)
         st, loc, _, _ = br["bea"].act("/new.htm?g=backgammon%2F1&turn=1h")
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         br["bob"].act("/join.htm?t=%s" % tid)
         played = 0
         for _ in range(12):
@@ -592,7 +598,7 @@ class Web(Stack):
         self.assertNotIn("Invitations for you", body)
         st, loc, _, _ = br["pia"].act("/new.htm?g=reversi%2F1&turn=1h&vis=private")
         self.assertEqual(st, 302)
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         body = br["pia"].get("/table.htm?t=%s&r=0" % tid)[3]
         self.assertIn("This table is private", body)
         self.assertIn('<form action="/invite.htm" method="get">', body)
@@ -615,7 +621,7 @@ class Web(Stack):
         m = re.search(r'href="(/join\.htm\?[^"]+)"><b>Join</b>', inv)
         st, loc, _, _ = br["quin"].get(m.group(1).replace("&amp;", "&"))
         self.assertEqual(st, 302)
-        self.assertEqual(parse_qs(urlsplit(loc).query)["t"], [tid])
+        self.assertEqual(query_of(loc)["t"], [tid])
         body = br["quin"].go(loc)[3]
         self.assertIn("/board.gif?", body)                            # the game has started
         self.assertNotIn("Invitations for you", br["quin"].get("/lobby.htm")[3])
@@ -679,7 +685,7 @@ class NewTableWeb(Stack):
             self.assertTrue(f.rstrip().endswith('value="Start a game of %s"></td></tr>\n</table>' % name), name)
         st, loc, _, _ = nia.act("/new.htm?g=mancala%2F1&ru=oware&turn=1h")
         self.assertEqual(st, 302)
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         st, loc, _, _ = nia.act("/new.htm?g=rummytile%2F1&np=3")
         self.assertEqual(st, 302)
         st, loc, _, _ = nia.act("/new.htm?g=navalcombat%2F1&ru=batnav")
@@ -923,7 +929,8 @@ class PasswordEmail(MailCapture, Stack):
         a.send(temp + "\r\n")
         a.until("New password")
         a.send("\r\n")
-        a.until("Your password is not chosen yet. Sign in again with the password from the email to choose it.")
+        a.until("Your password is not chosen yet. Sign in again with the password from the email\r\nto choose it.")
+        # cut at a space to fit 79 columns (telnet.say)
         a.until("Login")
         a.send("tod\r\n")
         a.until("Password (or press Enter")

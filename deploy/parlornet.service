@@ -1,0 +1,18 @@
+# Starts the parlor's Docker Compose project in /opt/parlornet at boot and stops it at shutdown.
+# deploy/setup.sh installs this unit as /etc/systemd/system/parlornet.service.
+[Unit]
+Description=ParlorNet game server
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/parlornet
+ExecStart=docker compose up -d
+ExecStop=docker compose down
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

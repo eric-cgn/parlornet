@@ -17,7 +17,7 @@ The site serves every ParlorNet server alike. Its pages, from the site's root:
                             (docsite/gamerulebooks.py)
     download/, img/         the downloads of the patcher and the rulebooks' installer, and their READMEs (from
                             the releases pinned in docsite/downloads.json, docsite/downloads.py), the
-                            patcher's screenshot, and the site's emblem
+                            patcher's screenshot, the site's emblem and its external-link icon
     running.html            running a server of your own: the README's "Run your own parlor" section and
                             deploy/README.md (docsite/running.py)
     docs.html               the docs in groups, with a finder
@@ -33,8 +33,9 @@ in static/img/, the picture on the site; to any other file of the repository, a 
 home on GitHub; to http://docs.parlornet.org/..., a link within the site. Every page is built in the web site's
 frame (adapters/webstyle.py), HTML 3.2 as on the game server, under the site's own name, ParlorNet Docs, with
 its own navigation and footer, and links relative to the page, so the site works from any address or a folder.
-Its pages are in the greyscale palette (webstyle.GREY), so a reader can tell them from the green game server's
-pages when moving between the two. The navigation bar starts with a link back to the main site, HOME_URL.
+Its pages are in a light blue palette (webstyle.DOCS_BLUE), so a reader can tell them from the green game server's
+pages when moving between the two. The navigation bar starts with a link back to the main site, HOME_URL, with the
+external-link icon after it, in the site's own blue.
 
 The finders: on index.html and docs.html, a script writes a box (and, on the Clients page, platform and
 processor menus) that hides the rows that do not match. A browser without the script, or without the DOM
@@ -61,7 +62,8 @@ OUT = os.path.join(ROOT, "build", "docs-site")
 CNAME = "docs.parlornet.org"
 HOME_URL = "http://parlornet.org/"      # the main site, first in the navigation bar: plain HTTP for old browsers
 NAME = "ParlorNet Docs"                 # the site's name, in the masthead and every page's title
-PALETTE = S.GREY
+PALETTE = S.DOCS_BLUE
+HOME = C.FRONTENDS_PAGE                 # the site's home page, the Clients page: the one page with no breadcrumb
 MARKER = ".parlornet-docs"          # in a folder this tool wrote, so it may empty it before writing again
 GITHUB_BLOB = PROJECT_URL + "/blob/main/"
 GITHUB_TREE = PROJECT_URL + "/tree/main/"
@@ -154,10 +156,31 @@ def doc_files():
     return dict(sorted(out.items()))
 
 
-def frame(title, body, current=None, head_extra="", refresh=None):
-    """A page of the site, its title after the site's name ("ParlorNet Docs: Clients")."""
-    return S.frame("%s: %s" % (NAME, title), body, nav=S.nav_html(NAV, current), foot=FOOT,
-                   head_extra=head_extra, refresh=refresh, name=NAME)
+def menu_of(path, current=None):
+    """The menu a page sits under: the navigation bar's entry it is part of (current), or for a page the bar
+    does not name, the docs index when that lists it (DOC_GROUPS). None for a page under no menu."""
+    if current:
+        return current
+    listed = {href for _, items in DOC_GROUPS for href, _, _ in items}
+    return "/docs.html" if path in listed else None
+
+
+def breadcrumb(path, title, current=None):
+    """The steps of the breadcrumb line above a page's title (webstyle.crumbs_html): its menu's entry in the
+    navigation bar, then the page itself ("Clients > GameMaster"). A page of the bar shows its own name alone,
+    and the home page (HOME) has none. The main site, first in the bar, is never part of it."""
+    if path == HOME:
+        return None
+    menu = menu_of(path, current)
+    return ([(menu, dict(NAV)[menu])] if menu and menu != path else []) + [(None, title)]
+
+
+def frame(title, body, path, current=None, head_extra="", refresh=None):
+    """A page of the site at path, its title after the site's name ("ParlorNet Docs: Clients"), with its
+    breadcrumb line under the navigation bar. current: the navigation bar's entry it is part of (menu_of)."""
+    menu = menu_of(path, current)
+    return S.frame("%s: %s" % (NAME, title), body, nav=S.nav_html(NAV, menu, (HOME_URL,)), foot=FOOT,
+                   head_extra=head_extra, refresh=refresh, name=NAME, crumbs=breadcrumb(path, title, menu))
 
 
 # ---- the finders ------------------------------------------------------------------------------------
@@ -313,7 +336,7 @@ def doc_page(path, md_file):
     fix = link_fixer(posixpath.dirname("docs/" + rel))
     body = to_html(md, fix, clientpages.figure)
     body += p(a(GITHUB_BLOB + "docs/" + rel + ".md", "This doc on GitHub"), 2)
-    return frame(doc_title(md, rel), body, "/docs.html")
+    return frame(doc_title(md, rel), body, path, "/docs.html")
 
 
 def docs_index(docs):
@@ -340,7 +363,7 @@ def docs_index(docs):
               "of your own and how to run a server. They are written in Markdown and kept in the docs folder of "
               "the source.") +
             finder(False) + "".join(out))
-    return frame("Docs", body, "/docs.html")
+    return frame("Docs", body, "/docs.html", "/docs.html")
 
 
 def pages():
@@ -353,25 +376,26 @@ def _pages():
     gs = games()
     docs = doc_files()
     out = {
-        "/index.html": frame("Clients", C.frontends_body(gs, finder(True)), "/index.html"),
-        "/protocols.html": frame("Protocols", protocols.protocols_body(gs), "/protocols.html"),
-        "/browsers.html": frame("Browsers", C.browsers_body(), "/browsers.html"),
-        "/telnet.html": frame("Telnet programs", C.telnet_body(), "/telnet.html"),
-        "/eclipse-68k-fix.html": frame("Eclipse 68k Fix", eclipse.eclipse_fix_body()),
-        rulebook.PAGE: frame("ParlorNet rulebook for GameMaster", rulebook.body()),
-        gamerulebooks.PAGE: frame("ParlorNet game rulebooks for GameMaster", gamerulebooks.body()),
+        "/index.html": frame("Clients", C.frontends_body(gs, finder(True)), "/index.html", "/index.html"),
+        "/protocols.html": frame("Protocols", protocols.protocols_body(gs), "/protocols.html", "/protocols.html"),
+        "/browsers.html": frame("Browsers", C.browsers_body(), "/browsers.html", "/browsers.html"),
+        "/telnet.html": frame("Telnet programs", C.telnet_body(), "/telnet.html", "/telnet.html"),
+        "/eclipse-68k-fix.html": frame("Eclipse 68k Fix", eclipse.eclipse_fix_body(), "/eclipse-68k-fix.html"),
+        rulebook.PAGE: frame("ParlorNet rulebook for GameMaster", rulebook.body(), rulebook.PAGE),
+        gamerulebooks.PAGE: frame("ParlorNet game rulebooks for GameMaster", gamerulebooks.body(),
+                                  gamerulebooks.PAGE),
         "/docs.html": docs_index(docs),
-        running.PAGE: frame(running.TITLE, running.body(link_fixer), running.PAGE),
+        running.PAGE: frame(running.TITLE, running.body(link_fixer), running.PAGE, running.PAGE),
         "/404.html": frame("Not found", h1("Not found") + p(
             "There is no page at this address. Try the %s, %s, %s or %s page."
             % (a("/index.html", "Clients"), a("/protocols.html", "Protocols"), a("/docs.html", "Docs"),
-               a(running.PAGE, running.TITLE)))),
+               a(running.PAGE, running.TITLE))), "/404.html"),
     }
     fix = link_fixer(clientpages.PAGES_REL)
     for c in C.EVERY:
-        out[c.href()] = frame(c.name, clientpages.client_body(c, fix), "/index.html")
+        out[c.href()] = frame(c.name, clientpages.client_body(c, fix), c.href(), "/index.html")
     for path, c in C.OLD_SETUP_PAGES.items():
-        out[path] = frame(c.name, clientpages.moved_body(c), "/index.html",
+        out[path] = frame(c.name, clientpages.moved_body(c), path, "/index.html",
                           refresh=(0, relative(path.lstrip("/"), c.href())))
     for path, md_file in docs.items():
         out[path] = doc_page(path, md_file)
@@ -405,6 +429,7 @@ def files():
         shown.update(re.findall(r'<img src="/(img/[^"]+)"', html))
     from adapters.web import make_gif
     out[S.EMBLEM.lstrip("/")] = S.emblem_gif(make_gif, PALETTE)
+    out[S.EXTERNAL.lstrip("/")] = S.external_gif(PALETTE)
     out.update(eclipse.files())
     out.update(rulebook.files())
     out.update(gamerulebooks.files())

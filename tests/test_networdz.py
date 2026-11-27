@@ -129,9 +129,47 @@ class Wire(unittest.TestCase):
         self.assertEqual((v["racks"], v["bagtiles"], v["turn"]), ({0: "AB", 1: ""}, "QZE", 1))
 
 
+class Rules(unittest.TestCase):
+    """Networdz draws the board and scores plays from the configuration its player loads, so the extension plays
+    only standard tables, and PARLOR.CFG on the client's page is standard's board and tiles."""
+
+    def test_the_client_page_configuration_is_standard(self):
+        with open(os.path.join(ROOT, "docs", "clients", "networdz.md")) as f:
+            page = f.read()
+        cfg = page[page.index("```\n[Board]") + 4:]
+        cfg = dict(l.split("=", 1) for l in cfg[:cfg.index("```")].splitlines() if "=" in l)
+        rs = P.RULESETS[A.RULES]
+        self.assertEqual(A.RULES, "standard")
+        board = [cfg["row %d" % y] for y in range(1, 16)]
+        kinds = {"T": "TW", "D": "DW", "t": "TL", "d": "DL", "C": "DW"}
+        self.assertEqual({(x, y): kinds[c] for y, row in enumerate(board, 1) for x, c in enumerate(row, 1)
+                          if c != "."}, rs.premium)
+        self.assertEqual(board[7][7], "C")
+        self.assertEqual(int(cfg["Blank Count"]), rs.tiles["_"][1])
+        for c in cfg["Letters"]:
+            self.assertEqual((int(cfg["%s Points" % c]), int(cfg["%s Tiles" % c])), rs.tiles[c], c)
+        self.assertEqual(A.TILESET, A.tileset({c: list(v) for c, v in rs.tiles.items()}))
+
+    def test_the_chat_lists_and_joins_only_standard_tables(self):
+        import asyncio
+        from parlord.commands import Console
+        lst = ["TAB 1 gridwords/1 standard 1/2 open ann,- turn=3600",
+               "TAB 2 gridwords/1 classic 1/2 open bob,- turn=3600",
+               "TAB 3 reversi/1 standard 1/2 open cy,- turn=3600"]
+
+        async def req(line):
+            return (lst, "OK") if line.startswith("LST") else ([], "OK")
+        c = Console(lambda lines: None, req, "dee", ["list", "join"], kinds=[A.GRID], rules=[A.RULES])
+        self.assertEqual([t["id"] for t in asyncio.run(c.tables())], ["1"])
+        self.assertTrue(c.plays({"key": A.GRID, "rules": "standard"}))
+        self.assertFalse(c.plays({"key": A.GRID, "rules": "classic"}))
+        every = Console(lambda lines: None, req, "dee", ["list"], kinds=[A.GRID])
+        self.assertEqual([t["id"] for t in asyncio.run(every.tables())], ["1", "2"])
+
+
 class Tiles(unittest.TestCase):
     def game(self, seed=1):
-        st = P.op_new({"players": 3, "options": {}, "seed": seed, "rules": "classic"})["state"]
+        st = P.op_new({"players": 3, "options": {}, "seed": seed, "rules": "standard"})["state"]
         racks = {s: r for s, r in enumerate(st["racks"])}
         return st, A.Tiles(racks, st["bag"], random.Random(seed))
 

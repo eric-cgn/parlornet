@@ -26,8 +26,9 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 BUDGETS = {"index.html": 60 * 1024, "browsers.html": 20 * 1024, "telnet.html": 18 * 1024,
            "protocols.html": 22 * 1024, "docs.html": 16 * 1024, "eclipse-68k-fix.html": 11 * 1024,
            "parlornet-rulebook.html": 9 * 1024, "gamemaster-rulebooks.html": 22 * 1024,
-           "running.html": 29 * 1024}
-CLIENT_BUDGET = 12 * 1024       # a client's page with its ratings (its screenshots come on top), an old setup address
+           "running.html": 43 * 1024}
+CLIENT_BUDGET = 12 * 1024 + 512    # a client's page with its ratings (its screenshots come on top), an old setup address
+GAME_GROWTH = 768                   # more for each game a client plays beyond four: its links and its ratings' lines
 DOC_GROWTH = (1.5, 2048)        # a rendered doc: at most its Markdown times this, plus this
 
 
@@ -129,7 +130,7 @@ class SiteWide(Built):
         from docsite import build
         from docsite import downloads
         for name in ("index.html", "protocols.html", "browsers.html", "telnet.html", "docs.html",
-                     "eclipse-68k-fix.html", "404.html", "img/parlor.gif",
+                     "eclipse-68k-fix.html", "404.html", "img/parlor.gif", "img/external.gif",
                      "img/eclipse-68k-fix.gif", "download/eclipse-68k-fix-readme.txt", ".nojekyll",
                      "parlornet-rulebook.html", "download/parlornet-rulebook-readme.txt",
                      "gamemaster-rulebooks.html", "download/gamemaster-rulebooks-readme.txt", "running.html",
@@ -154,6 +155,22 @@ class SiteWide(Built):
             self.assertFalse(p.endswith((".md", ".patch", ".py")), p)
         st = os.stat(os.path.join(self.out, "index.html"))
         self.assertGreater(st.st_size, 0)
+
+    def test_emblem_and_external_icon(self):
+        """The emblem and the external-link icon are drawn in the docs site's blues. The icon is the main site's
+        picture, EXTERNAL_ROWS, in the docs site's link color on a transparent background."""
+        from adapters import board, webstyle as S
+        from adapters.web import make_gif
+        self.assertEqual(self.files["img/parlor.gif"], S.emblem_gif(make_gif, S.DOCS_BLUE))
+        self.assertEqual(self.files["img/parlor.gif"][13:16], bytes.fromhex(S.DOCS_BLUE.edge[1:]))
+        data = self.files["img/external.gif"]
+        self.assertEqual(data, S.external_gif(S.DOCS_BLUE))
+        self.assertNotEqual(data, S.external_gif())                     # not the main site's copy
+        self.assertEqual((data[6], data[8]), (S.EXTERNAL_SIZE, S.EXTERNAL_SIZE))
+        self.assertIn(b"\x21\xf9\x04\x01", data)                         # index 0 is transparent
+        self.assertEqual(data[13:19], bytes([255, 255, 255]) + bytes.fromhex(S.DOCS_BLUE.link[1:]))
+        img = board.decode_gif(data)
+        self.assertEqual("".join("#" if v else "." for v in img.pixels), "".join(S.EXTERNAL_ROWS))
 
     def test_every_internal_link_resolves(self):
         """Every href and src that is not an absolute URL names a file of the site, and its fragment an
@@ -183,6 +200,7 @@ class SiteWide(Built):
         self.assertGreater(checked, 500)
 
     def test_every_page_is_html32_in_the_frame(self):
+        from adapters import webstyle as S
         for name, page in self.pages.items():
             c = check(page)
             self.assertEqual(c.problems, [], name)
@@ -196,15 +214,59 @@ class SiteWide(Built):
             self.assertRegex(page, r"<title>ParlorNet Docs: [^<]+</title>", name)
             self.assertIn("ParlorNet Docs covers every ParlorNet server.", page[-900:], name)
             nav = plain(page)[:plain(page).index("</table>")]
-            bar = nav[nav.rindex('<td bgcolor="#999999">'):]
+            bar = nav[nav.rindex('<td bgcolor="%s">' % S.DOCS_BLUE.bar):]
             labels = re.findall(r">([^<>|]+)</(?:a|b)>", bar)
             self.assertEqual(labels, ["ParlorNet", "Clients", "Protocols", "Browsers", "Telnet programs", "Docs",
                                       "Run a server", "Source"], name)
-            self.assertTrue(bar.startswith('<td bgcolor="#999999"><a href="http://parlornet.org/">ParlorNet</a> | '),
-                            name)       # the main site first, over plain HTTP
+            # The main site comes first, over plain HTTP, with the external-link icon after it, since it leaves
+            # the docs site. It is the only icon in the bar.
+            icon = '<img src="%simg/external.gif" width="9" height="9" alt="(external)">' % (
+                "/" if name == "404.html" else "../" * name.count("/"))
+            self.assertTrue(bar.startswith('<td bgcolor="%s"><a href="http://parlornet.org/">ParlorNet</a>&nbsp;%s | '
+                                           % (S.DOCS_BLUE.bar, icon)), name)
+            self.assertEqual(bar.count("<img "), 1, name)
+            # every color on the page is one of the palette's blues
+            self.assertEqual(set(re.findall(r'(?:bgcolor|color|link)="(#[0-9A-F]{6})"', page)) - set(S.DOCS_BLUE),
+                             set(), name)
             self.assertNotIn("Server: <b>", page, name)              # no server's name: it serves them all
 
+    def test_breadcrumbs(self):
+        """Every page but the home page starts, under the navigation bar and above its title, with the chain of
+        menus back up to it: its menu's entry as a link that lands on a page of the site, then its own name as
+        plain text, from the page's own title. A client's page is under Clients, a doc under Docs, and a page
+        of the bar shows its name alone. The main site is never part of it."""
+        from adapters import clients as C
+        from docsite import build
+        for name, page in self.pages.items():
+            body = self.content(page).lstrip("\n")
+            if name == "index.html":
+                self.assertTrue(body.startswith("<h1>"), name)
+                continue
+            m = re.match(r"<p>(.*?)</p>\n<h1>", body, re.S)
+            self.assertTrue(m, name)
+            parts = m.group(1).split(" &gt; ")
+            title = re.search(r"<title>ParlorNet Docs: ([^<]+)</title>", page).group(1)
+            self.assertEqual(parts[-1], title, name)
+            self.assertNotIn("<a ", parts[-1], name)
+            for part in parts[:-1]:
+                link = re.fullmatch(r'<a href="([^"#]+)">([^<]+)</a>', part)
+                self.assertTrue(link, (name, part))
+                self.assertNotIn(":", link.group(1), name)          # inside the site, never the main site
+                target = posixpath.normpath(posixpath.join(posixpath.dirname(name), link.group(1)))
+                self.assertIn(target, self.pages, (name, link.group(1)))
+            menus = [re.sub(r"<[^>]+>", "", x) for x in parts[:-1]]
+            if name.startswith(("clients/", "setup/")):
+                self.assertEqual(menus, ["Clients"], name)
+            elif name.startswith("docs/") or name in ("eclipse-68k-fix.html", "parlornet-rulebook.html",
+                                                      "gamemaster-rulebooks.html"):
+                self.assertEqual(menus, ["Docs"], name)
+            else:
+                self.assertEqual(menus, [], name)                   # a page of the bar, or Not found
+        self.assertIn('<p><font face="Geneva,Helvetica,Arial" size="2"><a href="../index.html">Clients</a> &gt; '
+                      'GameMaster</font></p>\n<h1>', self.pages["clients/gamemaster.html"])
+
     def test_byte_budgets(self):
+        from adapters import clients as C
         from docsite import build
         docs = build.doc_files()
         for name, page in self.pages.items():
@@ -214,7 +276,8 @@ class SiteWide(Built):
             elif name.startswith(("setup/", "clients/")):
                 # the screenshots come on top: their pictures and the paragraphs that hold them
                 shots = sum(len(s) for s in re.findall(r"<p><img .*?</p>\n", page, re.S))
-                self.assertLessEqual(size - shots, CLIENT_BUDGET, name)
+                c = C.BY_ID[name.split("/")[1][:-len(".html")]]
+                self.assertLessEqual(size - shots, CLIENT_BUDGET + GAME_GROWTH * max(0, len(c.games) - 4), name)
             elif name.startswith("docs/"):
                 md = os.path.getsize(docs["/" + name])
                 self.assertLessEqual(size, md * DOC_GROWTH[0] + DOC_GROWTH[1], name)
@@ -228,7 +291,8 @@ class SiteWide(Built):
             self.assertIn("<i>host</i>", page, name)
             self.assertFalse("(this server)" in page, name)
             if name != "eclipse-68k-fix.html":            # its bug report shows what happens to a name
-                self.assertFalse("parlornet.org" in self.content(page), name)     # the bar links the main site
+                # the bar links the main site, and ParlorNet's FTP site serves downloads, not games
+                self.assertFalse("parlornet.org" in self.content(page).replace("ftp.parlornet.org", ""), name)
         self.assertIn("<tt>telnet <i>host</i> 6502</tt>", self.pages["telnet.html"])
 
 
@@ -386,7 +450,7 @@ class ClientsPage(Built):
 
     @staticmethod
     def rows(section):
-        return re.findall(r'<tr(?: bgcolor="#CCCCCC")?><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td>'
+        return re.findall(r'<tr(?: bgcolor="#CCFFFF")?><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td>'
                           r'<td>(.*?)</td></tr>', section)
 
     def test_the_retro_window(self):
@@ -499,7 +563,7 @@ class ClientsPage(Built):
             u = urlsplit(href.replace("&amp;", "&"))
             self.assertEqual(u.path, "index.html")
             self.assertEqual(C.filter_values(parse_qs(u.query)), (plat, arch), label)
-            got = re.findall(r'<td(?: bgcolor="#999999")?><a href="([^"]+)">([NTW-])</a>((?:<img [^>]+>)*)</td>',
+            got = re.findall(r'<td(?: bgcolor="#99CCFF")?><a href="([^"]+)">([NTW-])</a>((?:<img [^>]+>)*)</td>',
                              cells)
             self.assertEqual(len(got), len(games), label)
             for (link, sym, icons), (_, gtype) in zip(got, games):
@@ -906,7 +970,10 @@ class ClientsData(unittest.TestCase):
                 if url:
                     self.assertNotRegex(url, r'[\s"<>]', url)
                     u = urlsplit(url)
-                    self.assertIn(u.scheme, ("http", "https"), url)
+                    # ParlorNet's own FTP site is the one FTP address: it serves the files players need
+                    self.assertIn(u.scheme, ("http", "https", "ftp") if url.startswith(C.FTP) else ("http", "https"),
+                                  url)
+                    self.assertEqual(kind == C.PARLORNET_FTP, url.startswith(C.FTP), url)
                     self.assertTrue(u.netloc, url)
             # the prose is on the client's page (docs/clients/<id>.md), not here
             self.assertFalse(c.setup or c.problems or c.works or c.lacks or c.extras, c.id)
@@ -1077,6 +1144,20 @@ class ClientPages(Built):
         for cid in clientpages.page_ids():
             self.assertEqual(clientpages.outline_problems(cid), [], cid)
 
+    def test_section_links_under_the_title(self):
+        """Under every client page's title, a row links to each of its section headings in order, Getting it
+        always among them, and each link lands on its heading's anchor."""
+        from adapters import clients as C
+        for c in C.EVERY:
+            page = self.pages[c.href().lstrip("/")]
+            after = page[page.index("</h1>") + len("</h1>\n"):]
+            row = after[:after.index("</p>")]
+            self.assertTrue(row.startswith("<p>"), c.id)
+            links = re.findall(r'<a href="#([a-z]+)">([^<]+)</a>', row)
+            heads = re.findall(r'<h2>(?:<a name="[a-z]+"></a>)*<a name="([a-z]+)">.*?>([^<>]+)</font></a></h2>', page)
+            self.assertEqual(links, heads, c.id)
+            self.assertIn(("get", "Getting it"), links, c.id)
+
     def test_every_page_has_known_quirks(self):
         """Every client says what is known to go wrong, or that nothing is known yet; the period clients that
         have been studied have real ones."""
@@ -1098,28 +1179,44 @@ class ClientPages(Built):
         self.assertIn("Your own double is refused", clientpages.section("outland", "Known quirks"))
 
     def test_screenshots(self):
-        """Every screenshot is a small GIF in static/img/ with a caption, shown with its size and ALT text."""
+        """Every screenshot is a small GIF in static/img/, under 200 pixels across, shown at its own size with its
+        ALT text and its caption under it. A page has three or four of them, or says "None yet.", and none
+        shows Grid Words."""
         from adapters import clients as C
         from docsite import clientpages
         seen = 0
         for c in C.EVERY:
             page = self.pages[c.href().lstrip("/")]
-            for caption, rel, site in clientpages.screenshots(c.id):
+            lines = [l.strip() for l in clientpages.section(c.id, "Screenshots").split("\n") if l.strip()]
+            shots = clientpages.screenshots(c.id)
+            if lines == ["None yet."]:
+                self.assertEqual(shots, [], c.id)
+                self.assertNotIn('<a name="screenshots">', page, c.id)
+                continue
+            self.assertEqual(len(shots), len(lines), c.id)          # every line is a picture
+            self.assertIn(len(shots), clientpages.SHOTS, c.id)
+            for alt, caption, rel, site in shots:
                 seen += 1
                 self.assertTrue(rel.startswith("static/img/") and rel.endswith(".gif"), rel)
+                # a client's own pictures, or a set the telnet programs, the period browsers or the current
+                # browsers share
+                self.assertRegex(rel, r"^static/img/(?:%s|telnet|web-1997|play)-[a-z0-9-]+\.gif$" % re.escape(c.id),
+                                 rel)
+                self.assertNotIn("gridwords", rel)
+                self.assertNotIn("grid words", (alt + caption).lower(), rel)
                 with open(os.path.join(ROOT, *rel.split("/")), "rb") as f:
                     data = f.read()
                 self.assertIn(data[:6], (b"GIF87a", b"GIF89a"), rel)
                 w, h = clientpages.gif_size(data)
+                self.assertLess(w, 200, rel)
                 self.assertLessEqual(w, clientpages.SHOT_WIDTH, rel)
                 self.assertLessEqual(len(data), clientpages.SHOT_BYTES, rel)
-                self.assertTrue(caption.strip(), rel)
+                self.assertTrue(alt.strip() and caption.strip(), rel)
                 self.assertEqual(self.files[site.lstrip("/")], data)
-                self.assertIn('<img src="../%s" width="%d" height="%d" alt="[%s]">'
-                              % (site.lstrip("/"), w, h, C.esc(caption)), page, rel)
+                self.assertIn('<img src="../%s" width="%d" height="%d" alt="[%s]"><br>\n' % (
+                    site.lstrip("/"), w, h, C.esc(alt)), page, rel)
+                self.assertIn(">%s</font></p>" % C.esc(caption), page, rel)
         self.assertGreaterEqual(seen, 6)
-        self.assertEqual(len(clientpages.screenshots("macfibs")), 3)
-        self.assertEqual(len(clientpages.screenshots("eclipse")), 3)
 
     def test_every_page_shows_and_explains_its_ratings(self):
         """Near the top of every client's page, before its facts and History: each rating with its icon (ALT

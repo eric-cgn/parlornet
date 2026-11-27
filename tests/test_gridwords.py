@@ -4,10 +4,14 @@ The plugin reads its word list from the file named by GRIDWORDS_WORDS. These tes
 their own (WORDS below) to a temporary file. RealWordList, at the end, runs only when the shipped list
 (plugins/gridwords/words.txt, ENABLE) is present, and plays against it."""
 import asyncio
+import contextlib
 import importlib.util
+import io
+import json
 import os
 import random
 import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -65,6 +69,19 @@ class WordList(unittest.TestCase):
         os.remove(self.path)
 
 
+def ruleset_data():
+    """standard's ruleset file as JSON data, a fresh copy to change."""
+    with open(os.path.join(ROOT, "plugins", "gridwords", "rules", "standard.json")) as f:
+        return json.load(f)
+
+
+def write_ruleset(folder, name, data):
+    path = os.path.join(folder, name + ".json")
+    with open(path, "w") as f:
+        f.write(data if isinstance(data, str) else json.dumps(data))
+    return path
+
+
 def new_state(players=2, seed=1, racks=None, bag=None):
     st = P.op_new({"players": players, "options": {}, "seed": seed})["state"]
     if racks is not None:
@@ -103,23 +120,31 @@ class Setup(WordList):
     def test_info_and_geometry(self):
         self.assertEqual((P.INFO["type"], P.INFO["min"], P.INFO["max"], P.INFO["flags"]),
                          ("gridwords", 2, 4, ["nomoves"]))
-        self.assertEqual(sum(n for _, n in P.TILES.values()), 100)
-        kinds = [k for k in P.PREMIUM.values()]
-        self.assertEqual([kinds.count(k) for k in ("TW", "DW", "TL", "DL")], [8, 17, 12, 24])
-        for (x, y), k in P.PREMIUM.items():     # the layout is symmetric both ways and across the diagonal
-            self.assertEqual(P.PREMIUM[(16 - x, y)], k)
-            self.assertEqual(P.PREMIUM[(y, x)], k)
-        self.assertEqual(P.PREMIUM[(8, 8)], "DW")
-        geo = P.geometry()
+        self.assertEqual(P.INFO["rules"], ["standard"])
+        rs = P.RULESETS["standard"]
+        self.assertEqual(sum(n for _, n in rs.tiles.values()), 100)
+        self.assertEqual(rs.tiles["_"], (0, 2))
+        kinds = [k for k in rs.premium.values()]
+        self.assertEqual([kinds.count(k) for k in ("TW", "DW", "TL", "DL")], [8, 13, 16, 24])
+        for (x, y), k in rs.premium.items():     # the layout is symmetric both ways and across the diagonal
+            self.assertEqual(rs.premium[(16 - x, y)], k)
+            self.assertEqual(rs.premium[(y, x)], k)
+        self.assertEqual(rs.premium[(8, 8)], "DW")
+        self.assertTrue(rs.symmetric)
+        self.assertIsNone(rs.idle)
+        geo = P.geometry(rs)
         self.assertEqual(geo[:2], ["BRD 15 15", "CTR 8 8"])
         self.assertIn("TIL _ 0 2", geo)
-        self.assertIn("TIL Q 10 1", geo)
+        self.assertIn("TIL Q %d %d" % rs.tiles["Q"], geo)
         self.assertTrue(all(len(l) <= 78 for l in geo))
-        # the frontend's fallback layout is the same as the server's
-        self.assertEqual(G.STD_PRM, P.PREMIUM)
-        self.assertEqual(G.STD_TIL, P.TILES)
+        self.assertEqual(P.op_geometry({"rules": "standard"}), {"geometry": geo})
+        self.assertEqual(P.op_geometry({}), {"geometry": geo})
+        self.assertIn("error", P.op_geometry({"rules": "klingon"}))
+        # the frontend draws what the geometry says, and so does the bot
         v = G.parse_view(["V gridwords/1 3"] + geo + ["W 0"])
-        self.assertEqual((v["prm"], v["til"], v["ctr"]), (P.PREMIUM, P.TILES, (8, 8)))
+        self.assertEqual((v["prm"], v["til"], v["ctr"]), (rs.premium, rs.tiles, (8, 8)))
+        back = P.from_geometry(geo)
+        self.assertEqual((back.premium, back.tiles, back.values), (rs.premium, rs.tiles, rs.values))
 
     def test_new_game(self):
         for n in (2, 3, 4):
@@ -129,14 +154,13 @@ class Setup(WordList):
             self.assertEqual([len(x) for x in st["racks"]], [7] * n)
             self.assertEqual(len(st["bag"]) + 7 * n, 100)
             self.assertEqual(sorted(st["bag"] + "".join(st["racks"])),
-                             sorted(c for c, (_, k) in P.TILES.items() for _ in range(k)))
+                             sorted(c for c, (_, k) in P.RULESETS["standard"].tiles.items() for _ in range(k)))
         self.assertEqual(P.op_new({"players": 2, "seed": 9})["state"], P.op_new({"players": 2, "seed": 9})["state"])
         self.assertIn("error", P.op_new({"players": 1, "seed": 1}))
         self.assertIn("error", P.op_new({"players": 5, "seed": 1}))
-        self.assertIn("state", P.op_new({"players": 2, "rules": "english", "seed": 1}))
-        self.assertIn("state", P.op_new({"players": 2, "rules": "classic", "seed": 1}))
+        self.assertIn("state", P.op_new({"players": 2, "rules": "standard", "seed": 1}))
         self.assertEqual(P.op_new({"players": 2, "rules": "klingon", "seed": 1}),
-                         {"error": "the rulesets are: english classic"})
+                         {"error": "the rulesets are: standard"})
 
     def test_no_word_list(self):
         os.environ[P.WORDS_ENV] = os.path.join(tempfile.gettempdir(), "no-such-gridwords-list.txt")
@@ -162,22 +186,125 @@ class Setup(WordList):
         self.assertEqual(P.op_moves({"state": st, "seat": 0}), {"check": True})
 
 
+class Rulesets(unittest.TestCase):
+    """standard is the plugin's own. An operator adds rulesets as <site>/rules/gridwords/<id>.json in the same
+    format, read when the plugin starts; a file the plugin can't use is left out with a log line."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        for f in os.listdir(self.dir):
+            os.remove(os.path.join(self.dir, f))
+        os.rmdir(self.dir)
+
+    def refused(self, data, why, name="mine"):
+        write_ruleset(self.dir, name, data)
+        rulesets, log = P.load_rulesets(self.dir)
+        self.assertEqual(list(rulesets), ["standard"])
+        self.assertEqual(len(log), 1)
+        self.assertIn("ruleset %s left out: " % os.path.join(self.dir, name + ".json"), log[0])
+        self.assertIn(why, log[0])
+        os.remove(os.path.join(self.dir, name + ".json"))
+
+    def test_a_site_ruleset_is_added_after_standard(self):
+        data = ruleset_data()
+        data["tiles"]["Q"] = [9, 1]
+        data["board"][0] = "D" + data["board"][0][1:-1] + "D"
+        data["symmetric"] = False
+        data["idle"] = 6
+        write_ruleset(self.dir, "zeta", data)
+        write_ruleset(self.dir, "alpha", ruleset_data())
+        with open(os.path.join(self.dir, "README.txt"), "w") as f:
+            f.write("not a ruleset")
+        rulesets, log = P.load_rulesets(self.dir)
+        self.assertEqual(list(rulesets), ["standard", "alpha", "zeta"])
+        self.assertEqual(log, ["ruleset alpha added from %s" % os.path.join(self.dir, "alpha.json"),
+                               "ruleset zeta added from %s" % os.path.join(self.dir, "zeta.json")])
+        z = rulesets["zeta"]
+        self.assertEqual((z.values["Q"], z.premium[(1, 1)], z.premium[(15, 1)], z.idle), (9, "DW", "DW", 6))
+        self.assertIn("TIL Q 9 1", P.geometry(z))
+        rulesets, log = P.load_rulesets(os.path.join(self.dir, "none"))        # no site directory: standard
+        self.assertEqual((list(rulesets), log), (["standard"], []))
+
+    def test_the_site_directory_comes_from_parlor_site(self):
+        with mock.patch.dict(os.environ, {P.SITE_ENV: "/srv/site"}):
+            self.assertEqual(P.site_rules_dir(), "/srv/site/rules/gridwords")
+        with mock.patch.dict(os.environ, {P.SITE_ENV: ""}):
+            self.assertEqual(P.site_rules_dir(), "/run/parlornet/site/rules/gridwords")
+
+    def test_a_bad_file_is_left_out_and_logged(self):
+        self.refused("{not json", "The file is not JSON")
+        self.refused([1, 2], "not a JSON object")
+        self.refused(dict(ruleset_data(), colour="red"), "keys the format doesn't know: colour")
+        self.refused(ruleset_data(), "standard is the plugin's own ruleset", name="standard")
+        self.refused(ruleset_data(), "A rules id is", name="Big")
+        self.refused(ruleset_data(), "A rules id is", name="waytoolongforanid")
+        d = ruleset_data()
+        del d["tiles"]["Q"]
+        self.refused(d, "every letter A to Z and _")
+        d = ruleset_data()
+        d["tiles"]["Q"] = [11, 1]
+        self.refused(d, "Q is worth 11 points, and a letter is worth 0 to 10.")
+        d = ruleset_data()
+        d["tiles"]["Q"] = ["10", 1]
+        self.refused(d, "tiles gives Q as [points, count]")
+        d = ruleset_data()
+        d["tiles"]["_"] = [1, 2]
+        self.refused(d, "A blank is worth 0 points.")
+        d = ruleset_data()
+        d["tiles"]["E"] = [1, 150]
+        self.refused(d, "The bag holds 239 tiles, and it must hold 60 to 200.")
+        d = ruleset_data()
+        d["board"] = d["board"][:14]
+        self.refused(d, "board must be 15 rows of 15 squares.")
+        d = ruleset_data()
+        d["board"][2] = "x" + d["board"][2][1:]
+        self.refused(d, "Row 3 has 'x', and a square is one of . d t D T.")
+        d = ruleset_data()
+        d["board"][0] = "D" + d["board"][0][1:]         # a1 differs from o1, and the file says it's symmetric
+        self.refused(d, "The board says it is symmetric, but a1 and a15 differ.")
+        self.refused(dict(ruleset_data(), idle=1), "idle is a number of turns from 2 to 20.")
+        self.refused(dict(ruleset_data(), symmetric="yes"), "symmetric is true or false.")
+        self.refused(dict(ruleset_data(), about="\u00e9t\u00e9"), "about is plain text")
+
+    def test_symmetry_is_checked_only_when_claimed(self):
+        d = ruleset_data()
+        d["board"][0] = "D" + d["board"][0][1:]
+        d["symmetric"] = False
+        write_ruleset(self.dir, "lopsided", d)
+        rulesets, log = P.load_rulesets(self.dir)
+        self.assertEqual(list(rulesets), ["standard", "lopsided"])
+
+    def test_standard_is_symmetric_and_has_100_tiles(self):
+        rs = P.read_ruleset(os.path.join(ROOT, "plugins", "gridwords", "rules", "standard.json"))
+        self.assertEqual(rs.name, "standard")
+        for (x, y), kind in rs.premium.items():
+            self.assertEqual({rs.premium.get(m) for m in P.mirrors(x, y)}, {kind})
+        self.assertEqual(sum(n for _, n in rs.tiles.values()), 100)
+
+    def test_a_table_of_a_ruleset_this_server_lost(self):
+        st = new_state()
+        self.assertEqual(P.op_view({"state": st, "seat": 0, "rules": "gone"}),
+                         {"error": "this server has no Grid Words ruleset gone"})
+
+
 class Scoring(WordList):
     def test_first_play_with_premiums(self):
         st = new_state(racks=["HELLOAB", "TTTTTTT"])
         self.assertEqual(apply(st, 0, "PLAY", "8", "8", "H", "HELLO", check=True), {"info": "18 HELLO"})
-        # h on a double letter (4,8), o on the center (a double word): (8 + 1 + 1 + 1 + 1) * 2
+        # h (3) on a triple letter (4,8), o on the center (a double word): (9 + 1 + 1 + 1 + 1) * 2
         r = apply(st, 0, "PLAY", "4", "8", "H", "hello")
-        self.assertEqual(r["events"][:3], ["PLAY 0 4 8 H HELLO 24", "X 4 8 H 5 8 E 6 8 L 7 8 L 8 8 O",
+        self.assertEqual(r["events"][:3], ["PLAY 0 4 8 H HELLO 26", "X 4 8 H 5 8 E 6 8 L 7 8 L 8 8 O",
                                            "DRAW 0 5"])
         self.assertEqual(r["events"][3], "TURN 1")
         st2 = r["state"]
-        self.assertEqual(st2["scores"], [24, 0])
+        self.assertEqual(st2["scores"], [26, 0])
         self.assertEqual(len(st2["racks"][0]), 7)
         self.assertEqual(st2["racks"][0][:2], "AB")
         self.assertEqual(len(st2["bag"]), 86 - 5)
-        self.assertEqual(st2["last"], [0, 4, 8, "H", "HELLO", 24])
-        self.assertIn("LAST 0 4 8 H HELLO 24", P.op_view({"state": st2, "seat": 1})["wire"])
+        self.assertEqual(st2["last"], [0, 4, 8, "H", "HELLO", 26])
+        self.assertIn("LAST 0 4 8 H HELLO 26", P.op_view({"state": st2, "seat": 1})["wire"])
         self.assertEqual(st["scores"], [0, 0])          # the state handed in is not changed
 
     def test_first_play_covers_the_centre(self):
@@ -225,10 +352,10 @@ class Scoring(WordList):
         self.assertIn("runs off the board", apply(st, 0, "PLAY", "14", "8", "H", "TOO")["error"])
 
     def test_premiums_count_only_for_new_tiles(self):
-        st = put(new_state(racks=["SXXXXXX", "TTTTTTT"]), 4, 8, "H", "HELLO")   # H on a double letter, O center
+        st = put(new_state(racks=["SXXXXXX", "TTTTTTT"]), 4, 8, "H", "HELLO")   # H on a triple letter, O center
         st["racks"][0] = "XAAAAAA"
-        r = apply(st, 0, "PLAY", "8", "8", "V", "OX", check=True)    # O old (no double word), X on h9 (plain)
-        self.assertEqual(r, {"info": "9 OX"})
+        r = apply(st, 0, "PLAY", "8", "8", "V", "OX", check=True)    # O old (no double word), X (7) on h9 (plain)
+        self.assertEqual(r, {"info": "8 OX"})
 
     def test_blanks(self):
         st = new_state(racks=["_ATXXXX", "TTTTTTT"])
@@ -252,8 +379,8 @@ class Scoring(WordList):
         self.assertIn("error", apply(st, 0, "PLAY", "8", "8", "H", "STONEAX", check=True))   # not a word
         write_words(WORDS + " stonexa", self.path)
         r = apply(st, 0, "PLAY", "2", "8", "H", "STONEXA", check=True)
-        # s b8, t c8, o d8 (double letter), n e8, e f8, x g8, a h8 (center: double word):
-        # (1 + 1 + 2 + 1 + 1 + 8 + 1) * 2 + 50
+        # s b8, t c8, o d8 (triple letter), n e8, e f8, x g8 (7), a h8 (center: double word):
+        # (1 + 1 + 3 + 1 + 1 + 7 + 1) * 2 + 50
         self.assertEqual(r, {"info": "80 STONEXA"})
 
     def test_turns_and_syntax(self):
@@ -297,37 +424,41 @@ class Turns(WordList):
             self.assertEqual(r["events"], ["PASS %d" % (i % 2), "TURN %d" % ((i + 1) % 2)])
             st = r["state"]
         r = apply(st, 1, "PASS")              # two full rounds without a word: the game ends
-        self.assertEqual(r["events"], ["PASS 1", "ADJ 0 -51 QAXXXXX", "ADJ 1 -7 EEEEEEE"])     # Q 10, A 1, X 8
-        self.assertEqual(r["end"], "win 1 -21/13")
-        self.assertEqual(r["state"]["scores"], [-21, 13])
-        self.assertEqual(P.op_result({"state": r["state"]}), {"over": True, "scores": [-21, 13]})
+        self.assertEqual(r["events"], ["PASS 1", "ADJ 0 -46 QAXXXXX", "ADJ 1 -7 EEEEEEE"])     # Q 10, A 1, X 7
+        self.assertEqual(r["end"], "win 1 -16/13")
+        self.assertEqual(r["state"]["scores"], [-16, 13])
+        self.assertEqual(P.op_result({"state": r["state"]}), {"over": True, "scores": [-16, 13]})
         self.assertEqual(apply(r["state"], 0, "PASS")["error"], "the game is over")
         v = P.op_view({"state": r["state"], "seat": 0})
         self.assertIn("W -1", v["wire"])
-        self.assertEqual(v["status"], "Game over: win 1 -21/13")
+        self.assertEqual(v["status"], "Game over: win 1 -16/13")
 
-    def test_classic_ends_after_six_scoreless_turns(self):
-        """classic: the standard board and tiles, and six turns in a row without a word end the game, however
-        many players there are (english: two full rounds)."""
-        for n, english in ((2, 4), (3, 6), (4, 8)):
-            self.assertEqual(P.idle_limit("classic", n), 6)
-            self.assertEqual(P.idle_limit("english", n), english)
-            self.assertEqual(P.idle_limit(None, n), english)
-        st = new_state(racks=["QAXXXXX", "EEEEEEE"])
-        events = []
-        for i in range(6):
-            r = P.op_apply({"state": st, "seat": st["turn"], "move": ["PASS"], "rules": "classic"})
-            events += r["events"]
-            st = r["state"]
-            self.assertEqual("end" in r, i == 5, i)
-        self.assertEqual(events[-3:], ["PASS 1", "ADJ 0 -51 QAXXXXX", "ADJ 1 -7 EEEEEEE"])
-        st = new_state(racks=["QVXAEIO", "TTTTTTT"])
-        for i in range(5):                      # exchanges count too
-            st = P.op_apply({"state": st, "seat": st["turn"], "move": ["EXCH", st["racks"][st["turn"]][0]],
-                             "rules": "classic"})["state"]
-        self.assertFalse(st["over"])
-        r = P.op_apply({"state": st, "seat": st["turn"], "move": ["PASS"], "rules": "classic"})
-        self.assertTrue(r["state"]["over"])
+    def test_a_ruleset_may_end_after_six_scoreless_turns(self):
+        """A ruleset with idle 6: six turns in a row without a word end the game, however many players there
+        are. standard has none: two full rounds."""
+        short = P.parse_ruleset("short", dict(ruleset_data(), idle=6))
+        with mock.patch.dict(P.RULESETS, {"short": short}):
+            for n, rounds in ((2, 4), (3, 6), (4, 8)):
+                self.assertEqual(P.idle_limit("short", n), 6)
+                self.assertEqual(P.idle_limit("standard", n), rounds)
+                self.assertEqual(P.idle_limit(None, n), rounds)
+            st = new_state(racks=["QAXXXXX", "EEEEEEE"])
+            events = []
+            for i in range(6):
+                r = P.op_apply({"state": st, "seat": st["turn"], "move": ["PASS"], "rules": "short"})
+                events += r["events"]
+                st = r["state"]
+                self.assertEqual("end" in r, i == 5, i)
+            self.assertEqual(events[-3:], ["PASS 1", "ADJ 0 -46 QAXXXXX", "ADJ 1 -7 EEEEEEE"])
+            st = new_state(racks=["QVXAEIO", "TTTTTTT"])
+            for i in range(5):                      # exchanges count too
+                st = P.op_apply({"state": st, "seat": st["turn"], "move": ["EXCH", st["racks"][st["turn"]][0]],
+                                 "rules": "short"})["state"]
+            self.assertFalse(st["over"])
+            r = P.op_apply({"state": st, "seat": st["turn"], "move": ["PASS"], "rules": "short"})
+            self.assertTrue(r["state"]["over"])
+        self.assertEqual(P.op_apply({"state": st, "seat": st["turn"], "move": ["PASS"], "rules": "short"}),
+                         {"error": "this server has no Grid Words ruleset short"})
 
     def test_a_word_played_resets_the_count(self):
         st = new_state(racks=["ATXXXXX", "EEEEEEE"])
@@ -344,14 +475,14 @@ class Turns(WordList):
     def test_going_out_ends_the_game(self):
         st = put(new_state(players=3, racks=["AT", "QZ", "E"], bag=""), 7, 8, "H", "C")
         st["scores"] = [10, 40, 12]
-        r = apply(st, 0, "PLAY", "7", "8", "H", "CAT")      # C old, A on the center (double word): (3 + 1 + 1) * 2
-        self.assertEqual(r["events"], ["PLAY 0 7 8 H CAT 10", "X 8 8 A 9 8 T", "ADJ 0 +21 -", "ADJ 1 -20 QZ",
+        r = apply(st, 0, "PLAY", "7", "8", "H", "CAT")      # C old, A on the center (double word): (2 + 1 + 1) * 2
+        self.assertEqual(r["events"], ["PLAY 0 7 8 H CAT 8", "X 8 8 A 9 8 T", "ADJ 0 +21 -", "ADJ 1 -20 QZ",
                                        "ADJ 2 -1 E"])
-        self.assertEqual(r["state"]["scores"], [41, 20, 11])
-        self.assertEqual(r["end"], "win 0 41/20/11")
+        self.assertEqual(r["state"]["scores"], [39, 20, 11])
+        self.assertEqual(r["end"], "win 0 39/20/11")
         # a tie at the top is a draw
         st = put(new_state(players=2, racks=["AT", "E"], bag=""), 7, 8, "H", "C")
-        st["scores"] = [0, 12]
+        st["scores"] = [2, 12]
         r = apply(st, 0, "PLAY", "7", "8", "H", "CAT")
         self.assertEqual((r["state"]["scores"], r["end"]), ([11, 11], "draw 11/11"))
 
@@ -384,7 +515,7 @@ class TheBagAndEveryRack(WordList):
     seated player's view also carries every rack and the bag in draw order; a watcher's never does."""
 
     def test_a_seated_view_shows_every_rack_and_the_bag_in_draw_order(self):
-        st = P.op_new({"players": 2, "options": {}, "seed": 3, "rules": "classic"})["state"]
+        st = P.op_new({"players": 2, "options": {}, "seed": 3, "rules": "standard"})["state"]
         wire = P.op_view({"state": st, "seat": 1, "open": True})["wire"]
         self.assertIn("RK 0 %s" % st["racks"][0], wire)
         self.assertIn("RK 1 %s" % st["racks"][1], wire)
@@ -396,7 +527,7 @@ class TheBagAndEveryRack(WordList):
                                                                            "open": True})["wire"]))
         # the next draw takes the first tiles of that order
         st["racks"][0] = "CATSXYZ"
-        r = P.op_apply({"state": st, "seat": 0, "move": ["PLAY", "8", "8", "H", "CAT"], "rules": "classic"})
+        r = P.op_apply({"state": st, "seat": 0, "move": ["PLAY", "8", "8", "H", "CAT"], "rules": "standard"})
         self.assertEqual(sorted(r["state"]["racks"][0]), sorted("SXYZ" + order[:3]))
 
     def test_no_table_options(self):
@@ -511,14 +642,71 @@ class CoreInProcess(WordList, unittest.IsolatedAsyncioTestCase):
         return c
 
 
+class SiteRulesets(CoreInProcess):
+    """A ruleset in the site directory is a rules id of its own: GAM lists it after standard, NEW makes tables of
+    it, and their geometry is its own, also while the table waits for players (VUE G) and without a table
+    (GEO). The core logs the plugin's lines about the files it read."""
+
+    async def asyncSetUp(self):
+        self.site = tempfile.mkdtemp()
+        folder = os.path.join(self.site, "rules", "gridwords")
+        os.makedirs(folder)
+        data = ruleset_data()
+        data["tiles"]["Q"] = [9, 1]
+        data["idle"] = 6
+        write_ruleset(folder, "mine", data)
+        write_ruleset(folder, "broken", "{")
+        old = os.environ.get(P.SITE_ENV)            # only this setting: tearDown puts the word list's back
+        os.environ[P.SITE_ENV] = self.site
+        self.addCleanup(lambda: os.environ.pop(P.SITE_ENV) if old is None else os.environ.update({P.SITE_ENV: old}))
+        self.addCleanup(shutil.rmtree, self.site)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            await super().asyncSetUp()
+        self.log = err.getvalue()
+
+    async def test_a_site_ruleset_is_a_rules_id(self):
+        self.assertIn("parlord: plugin gridwords: ruleset mine added from %s" % os.path.join(
+            self.site, "rules", "gridwords", "mine.json"), self.log)
+        self.assertIn("parlord: plugin gridwords: ruleset %s left out: The file is not JSON" % os.path.join(
+            self.site, "rules", "gridwords", "broken.json"), self.log)
+        a, b = await self.client("ann"), await self.client("bob")
+        gam = [l for l in await a.req("GAM") if l.startswith("GAM gridwords/1 ")]
+        self.assertEqual(gam, ["GAM gridwords/1 standard Grid_Words 2 4 nomoves",
+                               "GAM gridwords/1 mine Grid_Words 2 4 nomoves"])
+        geo = await a.req("GEO gridwords mine")
+        self.assertEqual(geo[-1], "OK")
+        self.assertIn("TIL Q 9 1", geo)
+        self.assertIn("TIL Q 10 1", await a.req("GEO gridwords/1 standard"))
+        self.assertEqual((await a.req("GEO gridwords broken"))[-1], "ERR NORULES unknown ruleset")
+        self.assertEqual((await a.req("GEO chess standard"))[-1], "ERR NOGAME this server does not host that game")
+        self.assertEqual(await a.req("GEO reversi standard"), ["OK"])       # a game with no static geometry
+        self.assertEqual((await a.req("GEO gridwords"))[-1], "ERR SYNTAX GEO type/ver rules")
+        tid = (await a.req("NEW gridwords mine turn=1h"))[-1].split()[1]
+        self.assertEqual((await a.req("JON " + tid))[-1], "OK 0")
+        waiting = await a.req("VUE %s G" % tid)             # waiting for a player: the geometry already
+        self.assertEqual(waiting[1:3], ["BRD 15 15", "CTR 8 8"])
+        self.assertIn("TIL Q 9 1", waiting)
+        self.assertEqual(waiting[-2:], ["S Waiting for players", "OK"])
+        self.assertNotIn("TIL Q 9 1", await a.req("VUE %s" % tid))
+        self.assertEqual((await b.req("JON " + tid))[-1], "OK 1")
+        self.assertIn("TIL Q 9 1", await a.req("VUE %s G" % tid))
+        for _ in range(5):                                  # idle 6: six passes end it, not four
+            seat = int(next(l for l in await a.req("VUE %s" % tid) if l.startswith("W ")).split()[1])
+            self.assertEqual((await (a if seat == 0 else b).req("MOV %s PASS" % tid))[-1], "OK")
+        self.assertIn("W 1", await a.req("VUE %s" % tid))
+        self.assertEqual((await b.req("MOV %s PASS" % tid))[-1], "OK")
+        self.assertIn("W -1", await a.req("VUE %s" % tid))
+
+
 class OverProtocol(CoreInProcess):
     @slow
     async def test_a_whole_game(self):
         words = P.load_words()
         a, b = await self.client("ann"), await self.client("bob")
-        self.assertIn("GAM gridwords/1 english Grid_Words 2 4 nomoves", await a.req("GAM"))
+        self.assertIn("GAM gridwords/1 standard Grid_Words 2 4 nomoves", await a.req("GAM"))
         self.seed_tables(2026)                # the table's seed, so the game is the same every time
-        tid = (await a.req("NEW gridwords english turn=1h"))[-1].split()[1]
+        tid = (await a.req("NEW gridwords standard turn=1h"))[-1].split()[1]
         self.assertEqual((await a.req("JON " + tid))[-1], "OK 0")
         self.assertEqual((await b.req("JON " + tid))[-1], "OK 1")
         seat = {0: a, 1: b}
@@ -581,12 +769,12 @@ class OverProtocol(CoreInProcess):
     async def test_four_seats(self):
         """players=n on NEW sets the seats (2 to 4); the game starts when the last one sits down."""
         cs = [await self.client(n) for n in ("cy", "di", "ed", "flo")]
-        self.assertIn("BADOPT", (await cs[0].req("NEW gridwords english players=5"))[-1])
-        tid = (await cs[0].req("NEW gridwords english players=4"))[-1].split()[1]
+        self.assertIn("BADOPT", (await cs[0].req("NEW gridwords standard players=5"))[-1])
+        tid = (await cs[0].req("NEW gridwords standard players=4"))[-1].split()[1]
         for i, c in enumerate(cs):
             self.assertEqual((await c.req("JON " + tid))[-1], "OK %d" % i)
         lst = await cs[0].req("LST")
-        want = "TAB %s gridwords/1 english 4/4 playing cy,di,ed,flo" % tid
+        want = "TAB %s gridwords/1 standard 4/4 playing cy,di,ed,flo" % tid
         self.assertTrue(any(l.startswith(want) for l in lst), lst)
         view = await cs[2].req("VUE %s T" % tid)
         self.assertEqual([l for l in view if l.startswith("K ")], ["K 0 7", "K 1 7", "K 2 7", "K 3 7"])
@@ -643,7 +831,7 @@ class WebForms(CoreInProcess):
         ann, bob = await self.browser("ann"), await self.browser("bob")
         a, b = await self.client("ann"), await self.client("bob")
         self.seed_tables(2026)                # the table's seed, so the game is the same every time
-        tid = (await a.req("NEW gridwords english turn=1h"))[-1].split()[1]
+        tid = (await a.req("NEW gridwords standard turn=1h"))[-1].split()[1]
         await a.req("JON " + tid)
         st, _ = await self.get(bob, "/join.htm?t=%s&%s" % (tid, await asyncio.to_thread(bob.keep)))
         self.assertEqual(st, 302)
@@ -805,7 +993,7 @@ class Web(WordList):
 
         def at(sq):                                                 # the top left of a board square, h10 -> ...
             return G.MARGIN + (ord(sq[0]) - 97) * G.CELL, G.MARGIN + (int(sq[1:]) - 1) * G.CELL
-        self.assertIn(("/img/gridwords/th.gif",) + at("d8"), used)  # tiles
+        self.assertIn(("/img/gridwords/th3.gif",) + at("d8"), used)  # tiles, with this table's values
         self.assertIn(("/img/gridwords/bt.gif",) + at("h10"), used)  # the blank on h10, as t
         self.assertIn(("/img/gridwords/stw.gif",) + at("a1"), used)  # premium squares
         self.assertIn(("/img/gridwords/sdl.gif",) + at("d1"), used)
@@ -813,7 +1001,8 @@ class Web(WordList):
         self.assertIn("<tt>H E L _ O A T</tt>", html)
         rack_y = G.MARGIN + 15 * G.CELL + G.RACK_GAP
         self.assertEqual([p for p, _, y in c.used if y == rack_y],
-                         [G.IMG + n for n in ("th.gif", "te.gif", "tl.gif", "blank.gif", "to.gif", "ta.gif", "tt.gif")])
+                         [G.IMG + n for n in ("th3.gif", "te1.gif", "tl1.gif", "blank.gif", "to1.gif", "ta1.gif",
+                                              "tt1.gif")])
         self.assertIn(("Your rack", 2, rack_y - 11), c.words)
         self.assertEqual(len(re.findall(r"<img ", html)), 1)        # the board, the rack in it: one image
         self.assertIn("Last play: bob, OAt at h8 down, 13 points", html)
@@ -824,8 +1013,8 @@ class Web(WordList):
         self.assertIn('value="EXCH "', html)
         hrefs = re.findall(r'href="([^"]+)"', html)
         moves = [h for h in hrefs if h.startswith("/move.htm")]
-        self.assertEqual(moves, ["/move.htm?s=%s&amp;x=%s&amp;t=3&amp;mv=PASS" % (SID, CSRF)])
-        sels = [re.search(r"sel=([^&]+)", h).group(1) for h in hrefs if "sel=" in h]
+        self.assertEqual(moves, ["/move.htm?s=%s;x=%s;t=3;mv=PASS" % (SID, CSRF)])
+        sels = [re.search(r"sel=([^&;]+)", h).group(1) for h in hrefs if "sel=" in h]
         self.assertEqual(len(sels), 225)                           # every square can start a word (map areas)
         self.assertEqual(html.count("<area "), 225)
         for s in sels:
@@ -983,17 +1172,38 @@ class Web(WordList):
         self.assertNotIn("<form", html)
         self.assertNotIn("/move.htm", html)
 
+    def test_the_game_page_shows_each_ruleset(self):
+        """/games/gridwords.htm shows each ruleset the server has, from its geometry (GEO): the letters' points
+        and counts, and a picture of its board at /games/gridwords/<rules>.gif."""
+        from adapters import web as W
+        from adapters.common import parse_games
+        mine = P.parse_ruleset("mine", dict(ruleset_data(), tiles=dict(ruleset_data()["tiles"], Q=[9, 1])))
+        hosted = parse_games(["GAM gridwords/1 standard Grid_Words 2 4 nomoves",
+                              "GAM gridwords/1 mine Grid_Words 2 4 nomoves"])
+        geo = {("gridwords/1", "standard"): P.geometry(P.RULESETS["standard"]),
+               ("gridwords/1", "mine"): P.geometry(mine)}
+        page = W.game_page("gridwords", hosted, None, geo).decode("latin-1")
+        self.assertLess(page.index("<b>Standard rules.</b> The bag holds 100 tiles"),
+                        page.index("<b>Mine rules.</b> The bag holds 100 tiles"))
+        self.assertIn('<img src="/games/gridwords/standard.gif"', page)
+        self.assertIn('<img src="/games/gridwords/mine.gif"', page)
+        self.assertIn("<tr><th align=\"left\">Points</th><td>1</td><td>3</td><td>2</td>", page)   # A B C
+        self.assertNotIn("Standard rules.", W.game_page("gridwords", hosted).decode("latin-1"))
+        b = W.ruleset_board(G, "mine", geo[("gridwords/1", "mine")])
+        self.assertEqual(b.gif[:3], b"GIF")
+        self.assertEqual((b.w, b.h), (W.ruleset_board(G, "standard", geo[("gridwords/1", "standard")]).w, b.h))
+
     def test_images(self):
         imgs = G.images()
         from adapters import palette as PAL
-        self.assertEqual(len(imgs), 6 + 2 + 26 * 2 + 1 + len(PAL.PRESETS))
+        self.assertEqual(len(imgs), 6 + 2 + 26 * (G.MAX_POINTS + 1) + 26 + 1 + len(PAL.PRESETS))
         for path, data in imgs.items():
             self.assertTrue(path.startswith("/img/gridwords/"))
             if "/pal-" in path:     # a preset's preview on the colors page: six squares in a row
                 self.assertEqual(data[6:10], bytes([145, 0, 25, 0]))
                 continue
             self.assertEqual(data[6:10], b"\x18\x00\x18\x00")   # 24 by 24
-        self.assertNotEqual(imgs["/img/gridwords/ta.gif"], imgs["/img/gridwords/ba.gif"])
+        self.assertNotEqual(imgs["/img/gridwords/ta1.gif"], imgs["/img/gridwords/ba.gif"])
 
 
 class Events(unittest.TestCase):
@@ -1124,7 +1334,7 @@ class Screens(WordList):
         st = midgame()
         text = plain_screen(self, G, view_lines(st, 0), 0)
         self.assertIn("Grid Words, table 3, with ABCDEFGHIJKL. You are abcdefghijkl.", text)
-        self.assertIn("\n  8 |3W  .  .  H  E  L  L  O  .  .  . 2L  .  . 3W |\n", text)
+        self.assertIn("\n  8 |3W  .  .  H  E  L  L  O  .  .  . 3L  .  . 3W |\n", text)
         self.assertIn("ABCDEFGHIJKL played OAt", text)
         self.assertIn("Your rack is H E L _ O A T.", text)
         self.assertIn("Your turn. Type a play, /pass or /exchange. > ", text)
@@ -1176,7 +1386,7 @@ class RealWordList(CoreInProcess):
         self.assertTrue(words.isdisjoint({"XQZ", "AAAA", "PARLORNETT"}))
         a, b = await self.client("ann"), await self.client("bob")
         self.seed_tables(2026)                # the table's seed, so the rack is the same every time
-        r = await a.req("NEW gridwords english")
+        r = await a.req("NEW gridwords standard")
         self.assertTrue(r[-1].startswith("OK "), r)
         tid = r[-1].split()[1]
         self.assertEqual((await a.req("JON " + tid))[-1], "OK 0")
@@ -1312,8 +1522,9 @@ class TelnetDrawing(WordList):
             self.assertIn("Press Space for page 2, or Esc to close.", shown)
             self.assertIn("P passes your turn, and X opens the command line to exchange tiles.", shown)
             self.assertIn("Grid Words help, page 2 of 2", shown)
-            self.assertIn("Letter values", shown)
-            self.assertIn("Q and Z are worth 10 points each.", shown)
+            self.assertIn("Q and Z are worth 10 points each.", shown)       # the table's own values
+            self.assertIn("X is worth 7 points.", shown)
+            self.assertIn("The bag starts with 100 tiles: A9 B2 C3 D4 E11", shown)
             self.assertIn("A blank is worth nothing. Type _E to lay a blank as an E.", shown)
             self.assertEqual(shown.count("Grid Words help, page 2 of 2"), 2 * shown.count("page 2 of 2") // 2)
         from game_checks import FakeIO, ScreenCore, session

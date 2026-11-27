@@ -20,8 +20,9 @@ User Kit and ParlorNet's own game rulebooks:
     Five in a Row [ParlorNet] 1.0.0
                                fiveinarow/1, ruleset freestyle (15 by 15)
     Grid Words [ParlorNet] 1.0.0
-                               gridwords/1, ruleset classic, two players; it also plays english
-                               tables made on the web or by telnet (Rulebook.accepts)
+                               gridwords/1, ruleset standard, two players; it also plays every other
+                               ruleset the server has, since the Mac draws the table's own board and
+                               values (Rulebook.accepts)
     Rummy Tile [ParlorNet] 1.0.0
                                rummytile/1, ruleset standard, two players
     Cannon Fire [ParlorNet] 1.0.0
@@ -83,19 +84,19 @@ ready (the OF lines of the salvo ruleset), and a ParlorNet player's salvo as its
 Done, after GameMaster's own Done. Requests to swap or restart are declined (~Dont Swap, ~Dont Restart).
 
 ParlorNet's own rulebooks (ParlorGame below; their rulebooks/common/rb.h) share a few messages, and the core
-decides every move: the Mac sends M and a whole move, the extension plays it at the table and answers A
-and the move, which the Mac shows only then, or R and the core's reason, which the Mac shows instead. The
-other player's move reaches the Mac as M, and the Mac answers A. D offers a draw, DY and DN answer an offer,
-G resigns, and E with the words of the core's END ends the game on the Mac. Checkers' moves are its squares
-joined by - for a step and x for jumps, as the core takes them (11-15, 15x22x31); Mancala's are a pit, 1 to 6,
-and a turn that goes on (a last seed in the mover's store) is sent as one M a move; Five in a Row's are a point
-(h8); Grid Words' are the core's own (PLAY 8 8 H WORD, EXCH, PASS), and the extension also sends the Mac's rack
-(K), the scores (S) and the bag (B), since the parlor deals; Rummy Tile's are each step of a staged turn as the
-core's token, and the Mac is sent the whole state (Z, ST, H, TP, P, C, I, W) after each; Cannon Fire's are FIRE
-angle power and MOVE L|R n, and the Mac is sent every shell's path and the state, since the core flies the
-shells; Backgammon's are roll, double, take, drop, accept, reject, or a whole turn of steps (13-9 9-4, bar-22,
-6-off), and the Mac is sent the state (BD ... W) after every change, since the core rolls the dice. A move the
-Mac makes before the table has started is played once it has.
+decides every move: the Mac sends M and a whole move, the extension plays it at the table and answers A and the
+move, which the Mac shows only then, or R and the core's reason, which the Mac shows instead. The other player's
+move reaches the Mac as M, and the Mac answers A. D offers a draw, DY and DN answer an offer, G resigns, and E
+with the words of the core's END ends the game on the Mac. Checkers' moves are its squares joined by - for a step
+and x for jumps, as the core takes them (11-15, 15x22x31); Mancala's are a pit, 1 to 6, and a turn that goes on (a
+last seed in the mover's store) is sent as one M a move; Five in a Row's are a point (h8); Grid Words' are the
+core's own (PLAY 8 8 H WORD, EXCH, PASS), and the extension also sends the table's bonus squares (SQ) and letter
+values (LV), the Mac's rack (K), the scores (S) and the bag (B), since the parlor deals; Rummy Tile's are each
+step of a staged turn as the core's token, and the Mac is sent the whole state (Z, ST, H, TP, P, C, I, W) after
+each; Cannon Fire's are FIRE angle power and MOVE L|R n, and the Mac is sent every shell's path and the state,
+since the core flies the shells; Backgammon's are roll, double, take, drop, accept, reject, or a whole turn of
+steps (13-9 9-4, bar-22, 6-off), and the Mac is sent the state (BD ... W) after every change, since the core rolls
+the dice. A move the Mac makes before the table has started is played once it has.
 
 The whole position, for a resumed table and whenever the Mac's board is behind: POS seat turn offer (the
 seat this Mac plays, the seat to move, a draw offer's seat + 1 or 0), the game's own lines, and POE, after
@@ -294,13 +295,25 @@ async def read_message(reader):
 
 # ---- the rulebooks ------------------------------------------------------------------------------------
 
+class EveryRuleset:
+    """Rulebook's also for a rulebook that is sent the table's own data and so plays every ruleset of its
+    game: every rules id is in it."""
+
+    def __contains__(self, rules):
+        return True
+
+
+EVERY = EveryRuleset()
+
+
 class Rulebook:
     def __init__(self, rb_id, version, key, rules, game, swaps=False, also=()):
         self.rb_id, self.version, self.key, self.rules, self.game = rb_id, version, key, rules, game
         self.swaps = swaps      # the rulebook swaps sides when asked: the caller can take the second seat
-        # the rulesets of tables it plays: its own, which its new tables have, and also those of tables made
-        # elsewhere that play the same game as far as the rulebook can tell (the parlor keeps the difference)
-        self.accepts = (rules,) + tuple(also)
+        # the rules ids of tables it plays: its own, which its new tables have and which the ParlorNet
+        # rulebook's lobby knows the game by, and also those of tables made elsewhere that it can play too
+        # (EVERY: all of them)
+        self.accepts = EVERY if also is EVERY else (rules,) + tuple(also)
 
     def takes(self, call):
         """The caller's rulebook can play with this one: GameMaster's rule for a callee that has the same
@@ -828,11 +841,33 @@ class FiveInARow(ParlorGame):
         return list(self.theirs)
 
 
+GW_SQUARE = {"DL": "d", "TL": "t", "DW": "D", "TW": "T"}
+
+
+def geometry_lines(view):
+    """A Grid Words view's PRM and TIL lines -> [SQ squares, LV values] for the rulebook ([] without them)."""
+    squares, values = ["."] * 225, {}
+    for l in view:
+        f = l.split()
+        if f[:1] == ["PRM"] and len(f) > 1 and f[1] in GW_SQUARE:
+            for i in range(2, len(f) - 1, 2):
+                if f[i].isdigit() and f[i + 1].isdigit() and 1 <= int(f[i]) <= 15 and 1 <= int(f[i + 1]) <= 15:
+                    squares[(int(f[i + 1]) - 1) * 15 + int(f[i]) - 1] = GW_SQUARE[f[1]]
+        elif f[:1] == ["TIL"] and len(f) == 4 and len(f[1]) == 1 and "A" <= f[1] <= "Z" and f[2].isdigit():
+            values[f[1]] = int(f[2])
+    if not values:
+        return []
+    return ["SQ " + "".join(squares), "LV " + " ".join(str(values.get(c, 0)) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ")]
+
+
 class GridWords(ParlorGame):
-    """Grid Words [ParlorNet]: gridwords/1, ruleset classic, two players. The parlor deals and keeps the bag, so
+    """Grid Words [ParlorNet]: gridwords/1, any ruleset, two players. The parlor deals and keeps the bag, so
     the rulebook plays only on a parlor. Moves are the core's own tokens: PLAY x y H|V letters, EXCH letters,
-    PASS. Besides the shared messages the Mac is sent K and its rack (as the view's R line), S and the two
-    scores, and B and the tiles in the bag, when the game starts and after every move. The other player's
+    PASS. Besides the shared messages the Mac is sent the table's board and values from its static geometry,
+    once when the game starts or is resumed: SQ and the 225 squares row by row (. plain, d double letter,
+    t triple letter, D double word, T triple word) and LV and the 26 letters' points, A to Z. Then K and its
+    rack (as the view's R line), S and the two scores, and B and the tiles in the bag, when the game starts
+    and after every move. The other player's
     play goes to the Mac as PLAY with the word as it stands on the board (a blank's letter in lower case),
     an exchange as EXCH and the count, a pass as PASS. The record holds the 225 squares at 1024."""
 
@@ -879,7 +914,19 @@ class GridWords(ParlorGame):
         return gridwords.refusal(move, reason)
 
     async def on_start(self):
+        await self.send_geometry()
         await self.after_move()
+
+    async def send_position(self, view=None):
+        await self.send_geometry()
+        await super().send_position(view)
+
+    async def send_geometry(self):
+        """SQ and LV from the table's static geometry (VUE G), when it has one."""
+        data, final = await self.s.req("VUE %s G" % self.s.tid)
+        if final.startswith("OK"):
+            for l in geometry_lines(data):
+                await self.s.send(l)
 
     async def after_move(self):
         data, final = await self.s.req("VUE %s" % self.s.tid)
@@ -1196,10 +1243,9 @@ RULEBOOKS = {rb.rb_id: rb for rb in (
     Rulebook("Checkers [ParlorNet]", 0x0100, "checkers/1", "american", Checkers, swaps=True),
     Rulebook("Mancala [ParlorNet]", 0x0100, "mancala/1", "kalah", Mancala, swaps=True),
     Rulebook("Five in a Row [ParlorNet]", 0x0100, "fiveinarow/1", "freestyle", FiveInARow, swaps=True),
-    # english, the web's and telnet's first ruleset, differs from classic only in the scoreless turns that end
-    # a game (two rounds rather than six turns), which the parlor counts and ends with END; the rulebook keeps
-    # no count of its own (plugins/gridwords, docs/types/gridwords-1.md)
-    Rulebook("Grid Words [ParlorNet]", 0x0100, "gridwords/1", "classic", GridWords, swaps=True, also=("english",)),
+    # Grid Words: the Mac is sent the table's bonus squares and letter values (SQ, LV), and the parlor counts the
+    # scoreless turns that end a game, so the rulebook plays every ruleset (plugins/gridwords)
+    Rulebook("Grid Words [ParlorNet]", 0x0100, "gridwords/1", "standard", GridWords, swaps=True, also=EVERY),
     Rulebook("Rummy Tile [ParlorNet]", 0x0100, "rummytile/1", "standard", RummyTile, swaps=True),
     Rulebook("Cannon Fire [ParlorNet]", 0x0100, "cannonfire/1", "classic", CannonFire, swaps=True),
     Rulebook("Backgammon [ParlorNet]", 0x0100, "backgammon/1", "standard", Backgammon, swaps=True),
@@ -1837,9 +1883,23 @@ def events(lines):
 # ---- the games, as the lobby and the calls know them ----------------------------------------------
 
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,12}\Z")
-GAME_OF = {(rb.key, r): rb.rb_id.split(" [")[0] for rb in RULEBOOKS.values() for r in rb.accepts}
-# a table's ruleset as the ParlorNet rulebook's lobby knows the game: the rulebook's own (TBL, IVL)
-LOBBY_RULES = {(rb.key, r): rb.rules for rb in RULEBOOKS.values() for r in rb.accepts}
+
+
+def rulebook_for(key, rules):
+    """The rulebook that plays tables of this game and ruleset, or None."""
+    return next((rb for rb in RULEBOOKS.values() if rb.key == key and rules in rb.accepts), None)
+
+
+def game_of(key, rules):
+    """The game's name as GameMaster's rulebooks have it ("Grid Words"), or None when no rulebook plays it."""
+    rb = rulebook_for(key, rules)
+    return rb.rb_id.split(" [")[0] if rb else None
+
+
+def lobby_rules(key, rules):
+    """A table's ruleset as the ParlorNet rulebook's lobby knows the game: the rulebook's own (TBL, IVL)."""
+    rb = rulebook_for(key, rules)
+    return rb.rules if rb else None
 RESUMES = {rb.key for rb in RULEBOOKS.values() if issubclass(rb.game, ParlorGame)}     # take a position
 
 
@@ -2022,9 +2082,9 @@ class Tunnel:
             f = l.split()
             if f[:1] == ["IVT"] and len(f) > 1 and seats.get(f[1], 2) != 2:
                 continue        # GameMaster plays two: an invitation to a bigger table is for the web, telnet or Play
-            if f[:1] == ["IVT"] and len(f) > 3 and (f[2], f[3]) in LOBBY_RULES:
-                # an invitation to a game a rulebook plays, by the ruleset the lobby knows it by (LOBBY_RULES)
-                l = " ".join(f[:3] + [LOBBY_RULES[(f[2], f[3])]] + f[4:])
+            if f[:1] == ["IVT"] and len(f) > 3 and lobby_rules(f[2], f[3]):
+                # an invitation to a game a rulebook plays, by the ruleset the lobby knows it by (lobby_rules)
+                l = " ".join(f[:3] + [lobby_rules(f[2], f[3])] + f[4:])
             self.send_line(l)
         self.send_line(final)
 
@@ -2035,7 +2095,8 @@ class Tunnel:
             WG table game rules name                  an open public table where name waits for a player
             PG table game rules name name             a game other players play, the newest first
         then OK. rules is the rulebook's own ruleset, which the lobby knows the game by, also for a table of
-        another ruleset the rulebook plays (Rulebook.accepts: an english Grid Words table is listed as classic)."""
+        another ruleset the rulebook plays (Rulebook.accepts: a Grid Words table of any ruleset is listed as
+        standard)."""
         data, final = await self.core.req("LST")
         if not final.startswith("OK"):
             self.send_line(final)
@@ -2043,10 +2104,10 @@ class Tunnel:
         me = self.player.name.lower()
         mine, waiting, playing = [], [], []
         for t in sorted(parse_tables(data), key=lambda t: int(t["id"]) if t["id"].isdigit() else 0):
-            if (t["key"], t["rules"]) not in GAME_OF or t["seats"] != 2:
+            if not game_of(t["key"], t["rules"]) or t["seats"] != 2:
                 continue
             low = [n.lower() for n in t["seated"]]
-            game = "%s %s %s" % (t["id"], t["key"], LOBBY_RULES[(t["key"], t["rules"])])
+            game = "%s %s %s" % (t["id"], t["key"], lobby_rules(t["key"], t["rules"]))
             if me in low and t["status"] == "playing" and len(mine) < TBL_MAX:
                 seat = low.index(me)
                 view, ok = await self.core.req("VUE %s" % t["id"])

@@ -173,6 +173,41 @@ def mouse_for_ttype(tt):
                          "gnome", "wezterm", "foot"))
 
 
+class PlainWriter:
+    """A writer for a line that does not speak telnet, such as a terminal behind a modem. The telnet commands
+    the text games send are left out, and IAC IAC, a data byte 255, goes through as one byte. The RSCARDS and
+    dial-in extensions run the text games on such lines."""
+
+    def __init__(self, w):
+        self.w, self.state = w, 0
+
+    def write(self, data):
+        out = bytearray()
+        for x in data:
+            if self.state == 0:
+                if x == IAC:
+                    self.state = 1
+                else:
+                    out.append(x)
+            elif self.state == 1:
+                if x == IAC:
+                    out.append(x)
+                    self.state = 0
+                else:
+                    self.state = {WILL: 2, WONT: 2, DO: 2, DONT: 2, SB: 3}.get(x, 0)
+            elif self.state == 2:
+                self.state = 0
+            elif self.state == 3:
+                if x == IAC:
+                    self.state = 4
+            else:
+                self.state = 0 if x == SE else 3
+        self.w.write(bytes(out))
+
+    def __getattr__(self, name):
+        return getattr(self.w, name)
+
+
 class TelnetIO:
     """Telnet I/O: option negotiation (terminal type, echo), key events
     (characters, ENTER, BS, arrows, HOME/END/PGUP/PGDN, ESC, REDRAW for
@@ -3331,6 +3366,15 @@ class Session:
                 self.io.write(MOUSE_OFF)        # also on a dropped line or an idle timeout
 
 
+def say(io, text):
+    """A message before the player has a screen of their own, such as the login's, cut at spaces so that no
+    word is broken: to the terminal's width less one (NAWS), or 79 columns when it did not say."""
+    size = getattr(io, "size", None)
+    width = max(20, (size[0] if size else 80) - 1)
+    for line in textwrap.wrap(text, width, break_on_hyphens=False) or [""]:
+        io.write(line + "\n")
+
+
 async def answer_asks(io, core, ask, login=False):
     """Answer the server's sign-in questions (ASK lines) until it says OK; returns
     True, or None if the player gives up (an empty answer) or is refused. The
@@ -3339,21 +3383,21 @@ async def answer_asks(io, core, ask, login=False):
     giving up on the new password after a temporary one is explained."""
     while True:
         for line in ask.info:
-            io.write("%s\n" % line)
+            say(io, line)
         io.write("%s (or press Enter to stop): " % ask.label)
         await io.flush()
         value = await (io.read_secret() if ask.secret else io.readline())
         if not value:
             if login and ask.new and not ask.cred:
-                io.write("Your password is not chosen yet. Sign in again with the password from the email "
-                         "to choose it.\n")
+                say(io, "Your password is not chosen yet. Sign in again with the password from the email to "
+                        "choose it.")
             return None
         try:
             return await core.aut(ask.field, value)
         except NeedAuth as again:
             ask = again
         except CoreError as e:
-            io.write("%s.\n" % re.sub(r"^wait=\d+ ", "", str(e)).capitalize().rstrip("."))
+            say(io, "%s." % re.sub(r"^wait=\d+ ", "", str(e)).capitalize().rstrip("."))
             return None
 
 
@@ -3394,13 +3438,14 @@ LOGIN_PROMPT = 'Login (your name, or "new" for a new account): '
 NEW_WORD = "new"
 
 
-async def sign_in(io, args, ticket=None):
+async def sign_in(io, args, ticket=None, core=None):
     """The login phase: a name signs in (USER), or "new" starts a sign-up (REG) that asks for the name
     wanted and then whatever the server's sign-up method needs. A name with no account says so and points
     to "new"; it never starts a sign-up. The connection to the core is opened once a valid name (or new)
-    has been typed. Returns (core, name), or None if the player left, the core is not answering, or the
+    has been typed, unless core is one opened already (the dial-in extension's, which has told the core what
+    the call is). Returns (core, name), or None if the player left, the core is not answering, or the
     adapter is full."""
-    core = None
+    claimed = False
 
     async def line(prompt):
         io.write(prompt)
@@ -3422,7 +3467,7 @@ async def sign_in(io, args, ticket=None):
                 return None
             new = name.lower() == NEW_WORD
             if new:
-                io.write("A new account. %s\n" % NEW_NAME_RULE)
+                say(io, "A new account. %s" % NEW_NAME_RULE)
                 name = await line("Name you want (or press Enter to stop): ")
                 if name is None:
                     return None
@@ -3431,11 +3476,13 @@ async def sign_in(io, args, ticket=None):
             if not NAME_RE.match(name):
                 io.write("Use letters, digits, - and _ only, up to 12.\n")
                 continue
-            if core is None:
+            if not claimed:
                 try:
-                    core = await CoreClient.connect(args.core_host, args.core_port)
-                    await core.source(peer_addr(io.w))
+                    if core is None:
+                        core = await CoreClient.connect(args.core_host, args.core_port)
+                        await core.source(peer_addr(io.w))
                     await core.claim(terminal_name(io.ttype))      # what the turns say they were played with
+                    claimed = True
                 except (OSError, asyncio.TimeoutError, CoreError):
                     core = None
                     io.write("The game server isn't answering. Try again soon.\n")
@@ -3449,12 +3496,11 @@ async def sign_in(io, args, ticket=None):
                     break
             except CoreError as e:
                 if e.code == "NOPLAYER":
-                    io.write('There is no account named %s here. To make one, type new at the Login prompt.\n'
-                             % name)
+                    say(io, "There is no account named %s here. To make one, type new at the Login prompt." % name)
                 elif new:
-                    io.write("Can't sign up: %s.\n" % re.sub(r"^wait=\d+ ", "", str(e)).rstrip("."))
+                    say(io, "Can't sign up: %s." % re.sub(r"^wait=\d+ ", "", str(e)).rstrip("."))
                 else:
-                    io.write("Can't sign in: %s\n" % re.sub(r"^wait=\d+ ", "", str(e)))
+                    say(io, "Can't sign in: %s" % re.sub(r"^wait=\d+ ", "", str(e)))
         if ticket is not None and not ticket.sign_in():
             io.write("Server is full, try again soon.\n")
             await io.flush()
@@ -3534,12 +3580,15 @@ async def pick_display(io, guess):
     return ORDER[int(choice) - 1] if choice in ("1", "2", "3", "4") else default
 
 
-async def main_session(io, args, ticket=None, title_first=True):
+async def main_session(io, args, ticket=None, title_first=True, telnet=True, core=None):
     """A telnet session: the start (the terminal type, with Enter for the display menu), the title page
     (unless title_first is False, as for the RSCARDS service's text games), the message of the day, the
     sign-in, then the menu and the tables. With no Enter at the start the display is the one the terminal
-    type suggests, or plain when it names none."""
-    chose = await io.detect()
+    type suggests, or plain when it names none. telnet is False for a line that speaks no telnet, a modem call
+    through the dial-in extension: nothing asks for the terminal type, so the display is plain, as for a
+    terminal that names none. core is a connection to the core for the sign-in, when the caller has one
+    already (sign_in)."""
+    chose = await io.detect() if telnet else False
     ttype = io.ttype
     guess = mode_for_ttype(ttype)
     try:
@@ -3558,7 +3607,7 @@ async def main_session(io, args, ticket=None, title_first=True):
             io.write("\n")
             if ttype and not chose:         # the display menu said it already
                 io.write("Your terminal says it is %s.\n" % ttype)
-            signed = await sign_in(io, args, ticket)
+            signed = await sign_in(io, args, ticket, core)
     except TimeoutError:
         io.write("\nSigning in took too long; bye.\n")
         await io.flush()

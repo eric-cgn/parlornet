@@ -6,9 +6,9 @@ import re
 import socket
 import time
 import unittest
-from urllib.parse import parse_qs, urlsplit
 
 from test_adapters import Browser, Stack
+from test_adapters import query_of  # noqa: E402
 from test_core import ROOT  # noqa: F401  (puts the repository on the path)
 from test_site import check
 
@@ -91,12 +91,12 @@ class WebProfiles(Stack):
         cls.bob.login("bob", "bob-Pass-word")
         cls.ann_keep = cls.ann.keep()
         st, loc, _, _ = cls.ann.act("/new.htm?g=reversi%2F1&turn=1h")
-        cls.tid = parse_qs(urlsplit(loc).query)["t"][0]
+        cls.tid = query_of(loc)["t"][0]
         cls.bob.act("/join.htm?t=%s" % cls.tid)
         st, loc, _, body = cls.ann.act("/move.htm?t=%s&mv=d3" % cls.tid)
         assert st == 302, body
         cls.bob.act("/move.htm?t=%s&mv=c3" % cls.tid)
-        cls.private = parse_qs(urlsplit(cls.ann.act("/new.htm?g=reversi%2F1&turn=1h&vis=private")[1]).query)["t"][0]
+        cls.private = query_of(cls.ann.act("/new.htm?g=reversi%2F1&turn=1h&vis=private")[1])["t"][0]
         cls.ann.act("/invite.htm?t=%s&who=bob" % cls.private)
         cls.bob.act("/join.htm?t=%s" % cls.private)
         cls.ann.act("/move.htm?t=%s&mv=d3" % cls.private)
@@ -229,7 +229,7 @@ class TelnetProfiles(Stack):
         # a game against ann on the web: tess's turn is recorded with the terminal type
         ann = Browser(self.web_port)
         ann.login("ann", "ann-Pass-word")
-        tid = parse_qs(urlsplit(ann.act("/new.htm?g=reversi%2F1&turn=1h")[1]).query)["t"][0]
+        tid = query_of(ann.act("/new.htm?g=reversi%2F1&turn=1h")[1])["t"][0]
         s.sendall(b"/join %s\r\n" % tid.encode())
         self.until(s, ">", 5)
         ann.act("/move.htm?t=%s&mv=d3" % tid)

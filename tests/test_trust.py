@@ -47,7 +47,7 @@ class Seeds(unittest.TestCase):
         st = bg.op_new({"players": 2, "options": {}, "seed": big})["state"]
         self.assertTrue(all(1 <= d <= 6 for d in bg.roll(st)))
         gw = plugin("gridwords")
-        st = gw.op_new({"rules": "english", "players": 2, "options": {}, "seed": big})["state"]
+        st = gw.op_new({"rules": "standard", "players": 2, "options": {}, "seed": big})["state"]
         self.assertEqual([len(r) for r in st["racks"]], [7, 7])
         nc = plugin("navalcombat")
         st = nc.op_new({"rules": "classic", "players": 2, "options": {}, "seed": big})["state"]

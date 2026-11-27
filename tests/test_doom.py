@@ -327,9 +327,15 @@ class Formats(unittest.TestCase):
         self.assertEqual(D.refusal_text(why), "There is a tile on the board after that word.")
 
     def view(self):
+        """A view at a standard table, with its static geometry (VUE G), as the extension asks for it."""
+        import importlib.util
         from adapters.games import gridwords as G
-        lines = ["V gridwords/1 9", "X 7 8 H 8 8 E 9 8 L 10 8 L 11 8 o", "R AE_RSTU", "K 0 7", "K 1 7",
-                 "BAG 79", "T 0 6", "T 1 0", "W 1", "LAST 0 7 8 H HELLo 6", "CLK 1 250 300"]
+        spec = importlib.util.spec_from_file_location("doom_gw_plugin", os.path.join(ROOT, "plugins", "gridwords",
+                                                                                     "plugin.py"))
+        P = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(P)
+        lines = ["V gridwords/1 9"] + P.geometry(P.RULESETS["standard"]) + [
+                 "X 7 8 H 8 8 E 9 8 L 10 8 L 11 8 o", "R AE_RSTU", "K 0 7", "K 1 7", "BAG 79", "T 0 6", "T 1 0", "W 1", "LAST 0 7 8 H HELLo 6", "CLK 1 250 300"]
         return G.parse_view(lines)
 
     def test_board_as_bobgrid_reads_it(self):
@@ -368,7 +374,7 @@ class Formats(unittest.TestCase):
         text = "".join(l[14:] for l in lines[1:-1])
         self.assertEqual(len(text), 100 - 5 - 7)
         self.assertRegex(text, r"^[A-Z]+\Z")           # one blank on the board, one on my rack: none unseen
-        self.assertEqual(text.count("E"), 12 - 1 - 1)
+        self.assertEqual(text.count("E"), 11 - 1 - 1)
         self.assertEqual(D.unseen(v, -1)[-1:], "?")     # a watcher has not seen the rack's
         self.assertLessEqual(len(lines), 4)
 
@@ -519,10 +525,14 @@ class Doom(Stack):
         t = self.client(Telnet)
         t.me = "tess"
         t.login("tess", pw)
-        t.send("newboard")
+        t.send("newboard 2 klingon")                    # a rules name the server doesn't have
+        self.assertEqual(t.until("The rules here are standard.")[-2:],
+                         ["Usage: newboard [2|3|4] [time for a turn, like 10m, 1h or 1d] [rules]",
+                          "The rules here are standard."])
+        t.send("newboard standard")
         got = t.until(lambda l: l.startswith("Enter `invite <name>'"))
         tid = re.search(r"bd_(\d+)", got[-2]).group(1)
-        self.assertEqual(got[-2:], ["You set up bd_%s for 2 players (classic rules) and join the game." % tid,
+        self.assertEqual(got[-2:], ["You set up bd_%s for 2 players (standard rules) and join the game." % tid,
                                     "Enter `invite <name>' to ask someone, or `invite bot' for the server's bot."])
         t.send("invite webb")
         self.assertEqual(t.until(lambda l: l.startswith("You invite")), ["You invite webb to bd_%s." % tid])
@@ -599,8 +609,8 @@ class Doom(Stack):
         final = t.line()
         self.assertRegex(final, r"^> Final scores: tess -?\d+, webb -?\d+\.$")
         # how long the game runs is the deal's: on the test's short word list a board can leave neither player a
-        # word, and six scoreless turns in a row end it (classic rules). Both ways of playing were used, every
-        # play made is on the record, and a game no rack played out ended on six scoreless turns.
+        # word, and two full rounds of scoreless turns end it (standard rules). Both ways of playing were used,
+        # every play made is on the record, and a game no rack played out ended on four scoreless turns.
         turns = [m.groups() for m in (re.match(r"^(tess|webb) (plays \S+ at|passes\.|exchanges)", l)
                                       for l in t.seen) if m]
         played = [who for who, kind in turns if kind.startswith("plays")]
@@ -608,8 +618,8 @@ class Doom(Stack):
         self.assertGreater(plays, 0)
         self.assertGreater(web_plays, 0)
         if not any(l.endswith(" plays out.") for l in t.seen):
-            self.assertEqual(len(turns[-6:]), 6)
-            self.assertFalse([kind for _, kind in turns[-6:] if kind.startswith("plays")], turns[-8:])
+            self.assertEqual(len(turns[-4:]), 4)
+            self.assertFalse([kind for _, kind in turns[-4:] if kind.startswith("plays")], turns[-6:])
         scores = [int(x) for x in re.findall(r" (-?\d+)", final)]
         view = web.req("VUE %s" % tid)
         self.assertEqual(scores, [int(l.split()[2]) for l in view if l.startswith("T ")])
@@ -677,7 +687,7 @@ class Doom(Stack):
         t.me = "ivy"
         t.login("ivy", pw)
         n = self.native("wendy", "wendy-Pass-word")
-        tid = n.req("NEW gridwords english")[-1].split()[1]
+        tid = n.req("NEW gridwords standard")[-1].split()[1]
         n.req("JON %s" % tid)
         self.assertEqual(n.req("INV %s ivy" % tid)[-1], "OK")
         self.assertEqual(t.until(lambda l: "invites you" in l)[-1],

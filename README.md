@@ -4,7 +4,7 @@ ParlorNet is a server for turn-based games such as Reversi, Backgammon and Check
 
 To find a program for your computer, open the Clients page at http://docs.parlornet.org/. It lists the programs that play each game on each kind of computer. Each program has its own page that tells you where to get it, how to set it up and how to sign in.
 
-Anyone can run a ParlorNet server for a club, a festival, a group of friends or the open internet. A ParlorNet server is called a parlor, and one parlor plays every game. The [Run your own parlor](#run-your-own-parlor) section below starts one with a single `docker run`. For a server that stays up, [deploy/README.md](deploy/README.md) installs the same image with tighter limits. The docs site has both on one page, [Run a server](http://docs.parlornet.org/running.html).
+Anyone can run a ParlorNet server for a club, a festival, a group of friends or the open internet. A ParlorNet server is called a parlor, and one parlor plays every game. The [Run your own parlor](#run-your-own-parlor) section below installs one in three steps, and [deploy/README.md](deploy/README.md) has the details and the other ways to install it. The docs site has both on one page, [Run a server](http://docs.parlornet.org/running.html).
 
 ParlorNet is free software under the MIT license. Its source is at https://github.com/eric-cgn/parlornet. If you want to contribute, read [CONTRIBUTING.md](CONTRIBUTING.md) first. It also has notes on trademarks and on the terms of other programs.
 
@@ -29,21 +29,49 @@ A parlor is a set of separate programs in one Docker container. Its daemon is `p
 
 ## Run your own parlor
 
-A parlor runs in one Docker container. The `docker run` below is enough to try ParlorNet or to run a small parlor. For a server that stays up, [deploy/README.md](deploy/README.md) installs the same image with a memory limit and a read-only root file system, and it keeps the admin menus and ParlorNet Play on the host's loopback address.
+A parlor runs in one Docker container. You need a Linux host with Docker Engine, its compose plugin and systemd. The install script puts a Docker Compose project in `/opt/parlornet` and a systemd unit that starts it at boot. The container runs each release's image from GitHub's container registry, `ghcr.io/eric-cgn/parlornet:<version>`, with a memory limit and a read-only root file system. It keeps the admin menus and ParlorNet Play on the host's loopback address. [deploy/README.md](deploy/README.md) describes what the script installs and the other ways to install a parlor.
 
-Get the source from https://github.com/eric-cgn/parlornet. Then build the image from its top directory and start it. Each release also publishes the image for linux/amd64 as `ghcr.io/eric-cgn/parlornet:<version>`, and you can pull that instead of building it.
+Installing takes three steps. First, get the source on the host. Its `main` branch always holds the latest release.
+
+```sh
+git clone https://github.com/eric-cgn/parlornet
+```
+
+Second, run the install script as root. It asks for the server's name, how players sign in and sign up, and the addresses of the web site and ParlorNet Play if an HTTPS proxy serves them. Then it starts the parlor.
+
+```sh
+sudo sh parlornet/deploy/setup.sh
+```
+
+Third, get the one-time setup password from the log and open the admin menus with it.
+
+```sh
+sudo docker logs parlornet
+telnet 127.0.0.1 6510
+```
+
+The admin menus ask for the setup password and then for a permanent admin password. After that you can set the server's name, the welcome message, the sign-in method, email, the games, the server extensions, the accounts and the tables. Until you set an admin password, every start prints a new setup password in the log. From another machine, open an SSH tunnel with `ssh -L 6510:127.0.0.1:6510 you@host` and then run the same telnet command. Port 6510 is the admin port. It always asks for the admin password, and it is published only on the host's loopback address.
+
+### Updating
+
+To move to a newer release, run its install script the same way. It keeps `/opt/parlornet/.env`, the settings file and the data, and it replaces the other files and restarts the parlor.
+
+```sh
+cd parlornet && git pull && sudo sh deploy/setup.sh
+```
+
+You can also switch the image alone with `sudo sh /opt/parlornet/setup.sh update VERSION`, for example `update 0.3.19`.
+
+### Just trying it
+
+To try ParlorNet on any machine with Docker, such as a laptop, build the image from the source's top directory and start it with the web site, the native protocol, telnet and the admin menus:
 
 ```sh
 docker build -t parlornet .
-docker run -d --name parlornet --restart unless-stopped \
-    -p 6500-6505:6500-6505 -p 6506:4000 -p 6507-6508:6507-6508 -p 6512:6512 -p 6514:6514 -p 6515-6517:6515-6517 -p 1744:6517 -p 6518:6518 -p 6519:6519 -p 6520:6520 \
-    -p 127.0.0.1:6510:6510 -v parlornet:/data parlornet
-docker logs parlornet
+docker run -d --name parlornet -p 6500-6502:6500-6502 -p 127.0.0.1:6510:6510 -v parlornet:/data parlornet
 ```
 
-The first time the parlor starts, the log says that it is not set up yet and gives a one-time setup password. To set it up, open the admin menus with `telnet 127.0.0.1 6510` on the same machine. From another machine, open an SSH tunnel with `ssh -L 6510:127.0.0.1:6510 you@host` and then run the same telnet command. The admin menus ask for the setup password and then for a permanent admin password. After that you can set the server's name, the welcome message, the sign-in method, email, the games, the server extensions, the accounts and the tables.
-
-Port 6510 is the admin port. It always asks for the admin password, but publish it only on the host's loopback address, as the command above does.
+Then open `http://localhost:6500/` in a browser, or `telnet localhost 6502`. `docker rm -f parlornet` stops it, and `docker volume rm parlornet` deletes its data.
 
 ### Ports
 
@@ -68,36 +96,33 @@ Players connect to these ports:
 | 6518 | xcheckers, over ICDS |
 | 6519 | Worthy Opponent, dialed by modem |
 | 6520 | GEnie's RSCARDS front ends, through a WiFi modem or a serial bridge |
+| 6521 | dial-in gateways, which answer calls from modems ([deploy/README.md](deploy/README.md#dial-in-gateways-and-their-time-limits)) |
 
-NetLuff always connects to port 1744, so publish 6517 as 1744 too, as the command above does.
-
-ParlorNet Play, the client for current browsers and phones, is not in the command above. To try it, add `-p 6513:6513` and open `http://` your host `:6513/play/`. For a server that stays up, put it behind an HTTPS proxy as [deploy/README.md](deploy/README.md#parlornet-play-over-https) shows.
+The parlor publishes these ports on every address of the host. NetLuff always connects to port 1744, so 6517 is published as 1744 too. ParlorNet Play, the client for current browsers and phones, is on the host's loopback address only, for an HTTPS proxy on the host, as [deploy/README.md](deploy/README.md#parlornet-play-over-https) shows. Your host's firewall decides who can reach the ports.
 
 ### Data and containment
 
-The `/data` volume keeps the players, the tables and the settings. It also keeps the keys that the server extensions use to reach the core, in `/data/frontends`, which the first start creates.
+The data directory, `/srv/parlornet`, keeps the players, the tables and the settings that the admin menus save. It also keeps the keys that the server extensions use to reach the core, in `frontends/`, which the first start creates. A restart or an update keeps it.
 
-The container runs as one unprivileged user (uid 10042) and needs no capabilities, so `--cap-drop ALL` works. The Containment part of [docs/security-design.md](docs/security-design.md#containment) describes two optional ways to separate the server extensions further.
+The container runs as one unprivileged user (uid 10042), with every capability dropped and no new privileges. The Containment part of [docs/security-design.md](docs/security-design.md#containment) describes two optional ways to separate the server extensions further.
 
 ### Signing up and signing in
 
-By default, players sign up by choosing a password and then sign in with it. Signing up is a separate step. On the web site it is New account, at the telnet login it is `new`, on FIBS clients it is the name `guest`, and in an IOS client it is a new name in the login window. You choose the sign-in and sign-up methods in the admin menus, under Sign-in. [docs/accounts.md](docs/accounts.md) explains each method.
+By default, players sign up by choosing a password and then sign in with it. Signing up is a separate step. On the web site it is New account, at the telnet login it is `new`, on FIBS clients it is the name `guest`, and in an IOS client it is a new name in the login window. You choose the sign-in and sign-up methods when you install the parlor, and you can change them in the admin menus, under Sign-in. [docs/accounts.md](docs/accounts.md) explains each method.
 
 ### A LAN, a club night or a festival
 
-With sign-in set to `none`, players sign in with their name alone:
+With sign-in set to `none`, players sign in with their name alone. Answer `none` when the install script asks how players sign in, or give the answers in the environment:
 
 ```sh
-docker run -d --name parlornet --restart unless-stopped -e PARLOR_NAME=festival -e PARLOR_AUTH=none \
-    -p 6500-6505:6500-6505 -p 6506:4000 -p 6507-6508:6507-6508 -p 6512:6512 -p 6514:6514 -p 6515-6517:6515-6517 -p 1744:6517 -p 6518:6518 -p 6519:6519 -p 6520:6520 \
-    -p 127.0.0.1:6510:6510 -v parlornet:/data parlornet
+sudo PARLOR_NAME=festival PARLOR_AUTH=none sh parlornet/deploy/setup.sh
 ```
 
 ### The open internet
 
 On the open internet, players sign in with a password, and signing up checks their email address. For this, sign-in is `password` and sign-up is `email`. When a player signs up, the parlor mails them a temporary password that works for 24 hours. Their first sign-in with it asks them to choose a password of their own. An account that nobody signs into within a day is deleted.
 
-The parlor therefore needs an SMTP relay. Any SMTP relay will do, as long as it gives the parlor an account that can send mail. You can set the relay in the admin menus, under Sign-in. You can also keep its settings out of the database, in a file that only the container's user can read (`chown 10042 settings.conf; chmod 400 settings.conf`):
+The parlor therefore needs an SMTP relay. Any SMTP relay will do, as long as it gives the parlor an account that can send mail. You can set the relay in the admin menus, under Sign-in. You can also keep its settings out of the database, in the settings file `/etc/parlornet/settings.conf`. The install script creates the file empty and makes it readable only by the container's user. Edit it as root, and then run `sudo systemctl restart parlornet`:
 
 ```
 email.smtp_host=smtp.example.org
@@ -109,32 +134,26 @@ email.from=ParlorNet <noreply@example.org>
 
 The parlor always reaches the relay over TLS, with STARTTLS or with TLS on port 465. It checks the relay's certificate against `email.smtp_host`, so give the relay's name there, not its address.
 
-```sh
-docker run -d --name parlornet --restart unless-stopped -e PARLOR_NAME=games.example.org \
-    -e PARLOR_AUTH=password -e PARLOR_SIGNUP=email \
-    -v /etc/parlornet/settings.conf:/run/parlornet/settings.conf:ro \
-    -p 6500-6505:6500-6505 -p 6506:4000 -p 6507-6508:6507-6508 -p 6512:6512 -p 6514:6514 -p 6515-6517:6515-6517 -p 1744:6517 -p 6518:6518 -p 6519:6519 -p 6520:6520 \
-    -p 127.0.0.1:6510:6510 -v parlornet:/data parlornet
-```
+### Settings
 
-### Settings in the environment
-
-These environment variables give a parlor its first settings. Once the admin menus set a value, the parlor uses the value in its database instead.
+The install script writes your answers to `/opt/parlornet/.env`. The same file holds every other setting, each one commented out with its default and a line or two about it. To change a setting, edit the file and run `sudo systemctl restart parlornet`. The settings give a parlor its first values. Once the admin menus set a value, the parlor uses the value in its database instead.
 
 - `PARLOR_NAME` is the server's name.
 - `PARLOR_AUTH` is the sign-in method, `none` or `password`.
 - `PARLOR_SIGNUP` is the sign-up method, `none`, `password` or `email`. With `email`, signing up mails the player a temporary password. By default, sign-up is `none` when sign-in is `none`, and `password` when sign-in is `password`.
 - `PARLOR_ADAPTERS` lists the server extensions to start, for example `web,telnet,admin`.
-- `PARLOR_MOTD_FILE` is a file with the message of the day.
 - `PARLOR_CONTRIBUTE_URL` is the address that `{contribute}` in the message of the day shows. By default it is this project's home. If it is empty, that line is left out.
 - `PARLOR_DOCS_URL` is the docs site that the web pages link to. By default it is http://docs.parlornet.org/. If it is empty, the pages have no link to it.
 
-`PARLOR_ADMIN=1` starts the admin menus even if they were turned off.
+The settings for an HTTPS proxy, for dial-in gateways and for memory are in [deploy/README.md](deploy/README.md). With `docker run`, give each setting with `-e`, as in `-e PARLOR_AUTH=none`. There, `PARLOR_MOTD_FILE` names a file with the message of the day, and `PARLOR_ADMIN=1` starts the admin menus even if they were turned off.
 
-If you forget the admin password, clear it with this command and restart the container. The log then shows a new setup password.
+The site directory, `/srv/parlornet-site`, holds the site's own files. These are its message of the day, words for the welcome page and pages of its own. [A site of your own](deploy/README.md#a-site-of-your-own) in deploy/README.md describes them.
+
+If you forget the admin password, clear it with this command and restart the parlor. The log then shows a new setup password.
 
 ```sh
 docker exec parlornet python -m parlord.admin --db /data/parlord.db --reset-password
+sudo systemctl restart parlornet
 ```
 
 ## Branches and releases

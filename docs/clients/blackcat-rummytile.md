@@ -16,8 +16,10 @@ RummyTile does not play on a parlor, for the reason under History. Its players c
 
 ## Known quirks
 
-Nothing known yet.
+- Under Mac OS 9.2.2, RummyTile 1.0.1 quit at launch without a word with its own 512K. It started once its preferred memory was raised to 6,000K in the Finder's Get Info window.
 
 ## Screenshots
 
-None yet.
+![The New RummyTile Game dialog with Player 1 and Player 2 set to Human](../../static/img/blackcat-rummytile-new-game.gif "Chris Smolinski's RummyTile starts a game for up to four players at one Mac.")
+![The RummyTile window with an empty table grid above Player 1's rack of colored numbered tiles, at a quarter of its size](../../static/img/blackcat-rummytile-game-window.gif "RummyTile plays at one Mac only, with the rack of the player whose turn it is at the bottom.")
+![Player 1's rack of colored tiles numbered 12, 9, 3, 2, 4, 3, 6 and 11](../../static/img/blackcat-rummytile-rack.gif "Player 1's rack holds tiles numbered in several colors.")

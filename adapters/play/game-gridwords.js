@@ -5,8 +5,6 @@
 
 (function () {
   var B = 0.55, CELL = 1, GAP = 0.45, RACK_H = 1.5, TS = 0.9, SLOT = 1.12;
-  var STD_TIL = {A: 1, B: 3, C: 3, D: 2, E: 1, F: 4, G: 2, H: 4, I: 1, J: 8, K: 5, L: 1, M: 3, N: 1, O: 1, P: 3, Q: 10, R: 1,
-                 S: 1, T: 1, U: 1, V: 4, W: 4, X: 8, Y: 4, Z: 10, _: 0};
   var LABEL = {TW: "3W", DW: "2W", TL: "3L", DL: "2L"};
   var MEANING = {TW: "triple word", DW: "double word", TL: "triple letter", DL: "double letter"};
 
@@ -26,7 +24,7 @@
     function sqName(x, y) { return "abcdefghijklmno".charAt(x - 1) + y; }
     function cell(x, y) { return {x: B + (x - 0.5) * CELL, y: B + (y - 0.5) * CELL}; }
     function slotX(i, n) { return W() / 2 + (i - (n - 1) / 2) * SLOT; }
-    function points(c) { var t = til[c.toUpperCase()]; return t != null ? t : STD_TIL[c.toUpperCase()] || 0; }
+    function points(c) { return til[c.toUpperCase()] || 0; }     // the table's own values (its TIL lines)
     function pal() { return api.palette(); }
     function key(x, y) { return x + "," + y; }
     function pendingAt(x, y) { for (var i = 0; i < pending.length; i++) if (pending[i].x === x && pending[i].y === y) return pending[i]; return null; }
@@ -35,14 +33,14 @@
 
     // ---- the view and events -------------------------------------------------------------------------------
     function view(lines) {
-      var t = {}, r = null, k = [], l = null, gotX = false;
+      var t = {}, r = null, k = [], l = null, gotX = false, p = null, v = null;    // the geometry comes whole
       lines.forEach(function (line) {
         var f = line.split(" ");
         switch (f[0]) {
           case "BRD": size = +f[1]; break;
           case "CTR": ctr = [+f[1], +f[2]]; break;
-          case "PRM": for (var i = 2; i + 1 < f.length; i += 2) prm[key(+f[i], +f[i + 1])] = f[1]; break;
-          case "TIL": til[f[1]] = +f[2]; break;
+          case "PRM": p = p || {}; for (var i = 2; i + 1 < f.length; i += 2) p[key(+f[i], +f[i + 1])] = f[1]; break;
+          case "TIL": v = v || {}; v[f[1]] = +f[2]; break;
           case "X": gotX = true; for (var j = 1; j + 2 < f.length; j += 3) t[key(+f[j], +f[j + 1])] = f[j + 2]; break;
           case "R": r = f[1] === "-" ? "" : (f[1] || ""); break;
           case "K": k[+f[1]] = +f[2]; break;
@@ -52,6 +50,8 @@
         }
       });
       tiles = t; counts = k; last = l; void gotX;
+      if (p) prm = p;
+      if (v) til = v;
       if (r !== null) setRack(r);
       // a tile laid where one has now been played goes back to the rack
       pending = pending.filter(function (p) { return !tiles[key(p.x, p.y)]; });

@@ -18,7 +18,8 @@
 # NetLuff (Mac) always connects to port 1744:
 # publish 6517 under both numbers (-p 6517:6517 -p 1744:6517). xcheckers (X11) connects to 6518
 # (-p 6518:6518). Worthy Opponent (DOS) dials 6519 by modem (-p 6519:6519). GEnie's RSCARDS front ends
-# dial 6520 through a WiFi modem or a serial bridge (-p 6520:6520). ParlorNet Play, for today's
+# dial 6520 through a WiFi modem or a serial bridge (-p 6520:6520). Dial-in gateways carry modem calls to
+# 6521 (-p 6521:6521), for ParlorNet's own clients and for terminals. ParlorNet Play, for today's
 # browsers, is on 6513:
 # publish it on the host's loopback (-p 127.0.0.1:6513:6513) for a reverse proxy there that terminates TLS
 # (deploy/README.md), with -e PARLOR_PLAY_URL=https://<name>/play/ and -e PARLOR_PLAY_PROXIES=<the proxy's
@@ -36,7 +37,7 @@ RUN groupadd --system --gid 10042 parlord \
     && useradd --system --uid 10042 --gid 10042 --no-create-home --shell /usr/sbin/nologin parlord \
     && for x in web:10043 telnet:10044 ios:10045 fibs:10047 outland:10048 admin:10049 bot:10050 doom:10051 \
                 gamemaster:10052 netsprocket:10054 play:10055 awale:10056 batnav:10057 netluff:10058 icds:10059 \
-                worthy:10060 networdz:10061 rscards:10062; do \
+                worthy:10060 networdz:10061 rscards:10062 dialin:10063; do \
          n=${x%%:*}; i=${x##*:}; \
          groupadd --system --gid "$i" "pn-$n" \
          && useradd --system --uid "$i" --gid "$i" --no-create-home --shell /usr/sbin/nologin "pn-$n" \
@@ -57,12 +58,12 @@ VOLUME /data
 # 6500 web, 6501 native protocol, 6502 telnet, 6503 IOS, 6505 FIBS, 6507 DOoM, 4000 Outland,
 # 6508 GameMaster (the ParlorNet rulebook), 6512 NetBoxes,
 # 6513 ParlorNet Play (plain HTTP, for a TLS proxy in front), 6514 batnav, 6515 Awale, 6516 Networdz,
-# 6517 NetLuff (publish it as 1744 too), 6518 ICDS (xcheckers), 6519 Worthy Opponent and
-# 6520 RSCARDS (a WiFi modem or a serial bridge).
+# 6517 NetLuff (publish it as 1744 too), 6518 ICDS (xcheckers), 6519 Worthy Opponent,
+# 6520 RSCARDS (a WiFi modem or a serial bridge) and 6521 the dial-in gateways' calls.
 # The admin menus
 # (6510) are not exposed:
 # publish them on the host's loopback only (-p 127.0.0.1:6510:6510).
-EXPOSE 6500 6501 6502 6503 6505 6507 4000 6508 6512 6513 6514 6515 6516 6517 6518 6519 6520
+EXPOSE 6500 6501 6502 6503 6505 6507 4000 6508 6512 6513 6514 6515 6516 6517 6518 6519 6520 6521
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 6501), 3); s.sendall(b'PARLORNET/1\\r\\n'); assert s.recv(12) == b'PARLORNET/1 '"]
 CMD ["python", "/app/deploy/start.py"]

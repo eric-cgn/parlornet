@@ -10,10 +10,10 @@ import subprocess
 import sys
 import time
 import unittest
-from urllib.parse import parse_qs, urlsplit
 
 import procs
 from test_adapters import Client, WebPlayers
+from test_adapters import query_of  # noqa: E402
 from test_core import ROOT, adapter_args, free_port, make_keys, stack_args
 from test_ios import Eclipse, legal, scanf
 from test_fibs import MacFIBS
@@ -240,7 +240,7 @@ class Stack(WebPlayers, unittest.TestCase):
     def web_table(self, name, game="reversi%2F1", vis="public"):
         self.web_login(name)
         loc = self.web_get("/new.htm?g=%s&turn=1h&vis=%s&n=%s" % (game, vis, name))[1]
-        return parse_qs(urlsplit(loc).query)["t"][0]
+        return query_of(loc)["t"][0]
 
     def web_invite(self, name, tid, who):
         st, loc, body = self.web_get("/invite.htm?t=%s&who=%s&n=%s" % (tid, who, name))
@@ -503,7 +503,7 @@ class Idle(WebPlayers, unittest.TestCase):
     def test_a_web_pages_own_polls_are_not_activity(self):
         self.web_login("wes")
         loc = self.web_get("/new.htm?g=reversi%2F1&turn=1h&n=wes")[1]
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         self.assertIn("wes", self.who())
         end = time.time() + self.IDLE + 1
         while time.time() < end:                            # the script's look for news, the page's reloads

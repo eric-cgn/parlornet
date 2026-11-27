@@ -46,4 +46,7 @@ Anything else you type is chat with your opponent once you have a table.
 
 ## Screenshots
 
-![NetLuff 1.4 after a won game against the bot, under Mac OS 9.2.2](../../static/img/netluff-game.gif)
+![NetLuff's controls after connecting, with the parlor's address, the word Connected and the parlor's welcome in the chat box](../../static/img/netluff-connected.gif "Henrik Linder's NetLuff connects to the parlor, which greets you in the chat box.")
+![Part of NetLuff's 20 by 20 grid with crosses and circles near the middle](../../static/img/netluff-game-in-progress.gif "A game of five in a row against the bot under Mac OS 9.2.2.")
+![The same part of the grid with five circles in a row drawn in red](../../static/img/netluff-bot-makes-five.gif "When the bot makes five in a row, NetLuff draws its line in red.")
+![NetLuff's status reading Disconnected and Loser! above a chat box that ends with the bot making five in a row](../../static/img/netluff-loser.gif "NetLuff shows Loser! and disconnects, the way two copies of NetLuff end a game.")

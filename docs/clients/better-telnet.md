@@ -10,12 +10,15 @@ Both copies are fat applications for 68k and PowerPC Macs.
 
 ## Setting it up
 
-- Open a connection to `{host}`, port `6502`.
+- BetterTelnet has no port field. In the Open Connection dialog's Host Name field, type the host name, a space and the port, as in `{host} 6502`.
 
 ## Known quirks
 
-- It has no IBM PC line characters, so pick the `ansi` display.
+- It has no IBM PC line characters. It reports itself as a VT220, so the parlor picks the `ansi` display, with ANSI color and plain line characters, without being asked.
 
 ## Screenshots
 
-None yet.
+![The PuTTY window titled parlor - PuTTY, showing the start of ParlorNet's title in colored blocks](../../static/img/telnet-title.gif "Every telnet program reaches the same screens. Here PuTTY shows ParlorNet's title page.")
+![The lobby in PuTTY, with bob's Checkers game listed under Other tables](../../static/img/telnet-lobby.gif "The lobby lists the tables being played, here bob's game against the bot.")
+![Half of a Backgammon board in PuTTY, with a white checker waiting on the bar](../../static/img/telnet-backgammon.gif "A game of Backgammon against the bot is under way, and cora has a checker on the bar.")
+![BetterTelnet's Open Connection dialog with the parlor's address and 6502 in the Host Name field](../../static/img/better-telnet-open-connection.gif "BetterTelnet takes the port after the host name, with a space between them.")

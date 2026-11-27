@@ -29,6 +29,7 @@ ADAPTERS = [
     ("icds", "adapters.icds", 6518, "Checkers for xcheckers (X11) and ICDS clients"),
     ("worthy", "adapters.worthy", 6519, "Reversi, Checkers, Five in a Row for Worthy Opponent (DOS, modem)"),
     ("rscards", "adapters.rscards", 6520, "All ten games for GEnie's RSCARDS (modem or serial line)"),
+    ("dialin", "adapters.dialin", 6521, "modem calls from dial-in gateways: ParlorNet clients, telnet"),
     ("bot", "bot", None, "the bot: a player anyone can invite"),
 ]
 NAMES = [a[0] for a in ADAPTERS]

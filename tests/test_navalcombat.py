@@ -5,10 +5,10 @@ import json
 import os
 import re
 import unittest
-from urllib.parse import parse_qs, urlsplit
 
 from game_checks import LONG, ansi_screens, board_image, plain_screen, web_page
 from test_adapters import Native, Stack
+from test_adapters import query_of  # noqa: E402
 import procs
 from test_core import ROOT, Client, free_port
 
@@ -462,7 +462,7 @@ class WebGame(Stack):
             self.assertIn("You are <b>%s</b>" % name, b.login(name, name + "-Pass-word")[3])
         st, loc, _, _ = ann.act("/new.htm?g=navalcombat%2F1&turn=1h")
         self.assertEqual(st, 302)
-        tid = parse_qs(urlsplit(loc).query)["t"][0]
+        tid = query_of(loc)["t"][0]
         self.assertEqual(bob.act("/join.htm?t=%s" % tid)[0], 302)
         natives = {"ann": Native(self.core, "ann", "ann-Pass-word"), "bob": Native(self.core, "bob", "bob-Pass-word")}
         for n in natives.values():
@@ -590,7 +590,7 @@ class Web(unittest.TestCase):
         return re.findall(r'href="([^"]+)"', html)
 
     def mvs(self, html):
-        return [re.search(r"mv=([^&]+)", h).group(1) for h in self.links(html) if "mv=" in h]
+        return [re.search(r"mv=([^&;]+)", h).group(1) for h in self.links(html) if "mv=" in h]
 
     def test_placing(self):
         st = placing_view()

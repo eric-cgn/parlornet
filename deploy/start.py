@@ -15,7 +15,7 @@ Opt-in, needing extra capabilities: started as root (--user 0) with SETUID,
 SETGID and KILL, this script keeps root only to start, watch and stop the
 others: parlord runs as parlord and each server extension as its own user
 pn-<name> (web, telnet, ios, fibs, outland, doom, gamemaster, netsprocket, play, batnav, awale,
-networdz, netluff, icds, worthy, rscards, admin, bot), which can read its own
+networdz, netluff, icds, worthy, rscards, dialin, admin, bot), which can read its own
 key (group pn-<name>, mode 640) and nothing else of /data. Started as root
 without those capabilities, it cannot switch users and says so. Either way a
 first step run as parlord (--prepare) sets the modes and enrolls missing keys.
@@ -43,9 +43,16 @@ Environment (all optional):
     PARLOR_ADMIN=1     start the admin adapter even if the admin panel turned it off
     PARLOR_SETTINGS    key=value file for secrets such as email.smtp_password
                        (/run/parlornet/settings.conf if it is there)
-    PARLOR_MOTD_FILE   message of the day until the admin panel sets one
-    PARLOR_CONTRIBUTE_URL  the address put in the message of the day for {contribute} until the admin
-                       panel sets one (https://github.com/eric-cgn/parlornet; empty: that line is left out)
+    PARLOR_MOTD_FILE   message of the day until the admin panel sets one; the site directory's motd.txt
+                       comes first
+    PARLOR_SITE        the operator's site directory, mounted read-only (/run/parlornet/site, where
+                       install.sh mounts PARLOR_SITE_DIR). All of its files are optional. motd.txt is the
+                       message of the day until the admin panel sets one, and the web extension (--site) shows
+                       welcome.htm on the welcome page and serves pages/<name>.htm at /<name>.htm
+                       (deploy/README.md, A site of your own)
+    PARLOR_CONTRIBUTE_URL  the address that {contribute} stands for until the admin panel sets one
+                       (https://github.com/eric-cgn/parlornet; empty: the message of the day leaves out its
+                       line). The web extension gets the value it has at start (--contribute-url)
     PARLOR_DOCS_URL    the docs site the web pages link to until the admin panel sets one
                        (http://docs.parlornet.org/; empty: no link)
     PARLOR_GAMEMASTER_PORT  the port the ParlorNet rulebook connects to, declared to the core, when the
@@ -55,16 +62,17 @@ Environment (all optional):
     PARLOR_WEB_PROXIES  web.proxies until the settings file sets it: the addresses of reverse proxies in front
                        of the web site (port 6500), whose X-Forwarded-For and X-Forwarded-Proto it believes
     PARLOR_PLAY_URL    play.public_url until the settings file sets it: the address of ParlorNet Play behind
-                       a TLS proxy, such as https://parlornet.org/play/ (the web's /play answers 301 there)
+                       a TLS proxy, such as https://games.example.org/play/ (the web's /play answers 301 there)
     PARLOR_PLAY_PROXIES  play.proxies until the settings file sets it: the proxies' addresses, whose
                        X-Forwarded-For and X-Forwarded-Proto the Play extension believes
     PARLOR_PLAY_PUSH_CONTACT  play.push_contact until the settings file sets it: the operator's mailto: or
                        https: address that ParlorNet Play gives push services; push notifications are off
                        without it (docs/play-notifications.md)
     PARLOR_DIALIN_GATEWAYS  dialin.gateways until the admin menus or the settings file set it: the addresses
-                       of dial-in gateways, which may send a PROXY header on the native port (6501). The
-                       core reads it, with PARLOR_DIALIN_CALL_MINS and the other limits of the time
-                       allowance (parlord/allowance.py), from the environment it inherits
+                       of dial-in gateways, which carry modem calls to the dial-in extension (6521) and
+                       may start each with a PROXY header. The core reads it, with PARLOR_DIALIN_CALL_MINS
+                       and the other limits of the time allowance (parlord/allowance.py), from the
+                       environment it inherits, and the dial-in extension asks the core
     PARLOR_DB          the SQLite database (/data/parlord.db)
     PARLOR_KEYS        the frontend key directory (frontends/ beside the database)
 """
@@ -86,7 +94,7 @@ except ImportError:         # not a Unix: no users to switch to
 APP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, APP)
 from adapters import catalog  # noqa: E402
-from parlord import frontends  # noqa: E402
+from parlord import PROJECT_URL, frontends  # noqa: E402
 
 CORE_PORT, FRONTEND_PORT, ADMIN_SOCKET = 6501, 6590, 6599
 IDLE_NOTES = ("netsprocket",)      # the extensions that fill a silence with a chat line (their docstrings)
@@ -98,6 +106,7 @@ CAP_KILL, CAP_SETGID, CAP_SETUID = 5, 6, 7
 env = os.environ.get
 DB = env("PARLOR_DB", "/data/parlord.db")
 KEYS = env("PARLOR_KEYS") or os.path.join(os.path.dirname(os.path.abspath(DB)), "frontends")
+SITE = env("PARLOR_SITE") or "/run/parlornet/site"
 
 
 def key_for(name):
@@ -247,7 +256,9 @@ def prepare(per_user=False):
     def setting(key):           # the admin menus, then the settings file (then the environment, in main)
         v = stored(key)
         return (conf.get(key) if v is None else v) or ""
+    contribute = stored("site.contribute_url")       # "" is cleared, None is not set
     return {"names": out, "settings": settings if os.access(settings, os.R_OK) else None,
+            "contribute_url": conf.get("site.contribute_url") if contribute is None else contribute,
             "web_hosts": setting("web.hosts"), "web_url": setting("web.public_url"),
             "web_proxies": setting("web.proxies"), "play_url": setting("play.public_url"),
             "play_proxies": setting("play.proxies"), "play_push_contact": setting("play.push_contact"),
@@ -373,6 +384,10 @@ def main():
                 web_url = ready.get("web_url") or env("PARLOR_WEB_URL") or ""
                 web_proxies = ready.get("web_proxies") or env("PARLOR_WEB_PROXIES") or ""
                 extra += (["--public-url", web_url] if web_url else []) + (["--proxies", web_proxies] if web_proxies else [])
+                contribute = ready.get("contribute_url")
+                extra += ["--contribute-url", env("PARLOR_CONTRIBUTE_URL", PROJECT_URL) if contribute is None
+                          else contribute]
+                extra += ["--site", SITE] if os.path.isdir(SITE) else []
             if name == "play":      # play.public_url and play.proxies (settings file), else the environment
                 proxies = ready.get("play_proxies") or env("PARLOR_PLAY_PROXIES") or ""
                 push_contact = ready.get("play_push_contact") or env("PARLOR_PLAY_PUSH_CONTACT") or ""
@@ -396,7 +411,10 @@ def main():
         core += ["--signup", env("PARLOR_SIGNUP")]
     if ready["settings"]:
         core += ["--settings-file", ready["settings"]]      # readable by the core's user (checked as that user)
-    if env("PARLOR_MOTD_FILE"):
+    motd = os.path.join(SITE, "motd.txt")
+    if os.path.isfile(motd):            # the site directory's message of the day comes first
+        core += ["--motd", motd]
+    elif env("PARLOR_MOTD_FILE"):
         core += ["--motd", env("PARLOR_MOTD_FILE")]
     start("parlord", core)
     while True:

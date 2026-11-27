@@ -63,7 +63,7 @@ class Base(unittest.IsolatedAsyncioTestCase):
     async def req(self, sess, line, srv=None):
         return await (srv or self.srv).dispatch(sess, line)
 
-    async def game(self, *names, rules="english", options="", srv=None):
+    async def game(self, *names, rules="standard", options="", srv=None):
         """A running Grid Words table of these players (the first makes it) -> its id."""
         srv = srv or self.srv
         tid = (await self.req(names[0], "NEW gridwords %s players=%d %s" % (rules, len(names), options), srv))[-1]
@@ -89,7 +89,7 @@ class Integrity(Base):
 
     async def test_an_extension_marks_its_players_table(self):
         nw, bob = await self.player("ann", frontend="networdz"), await self.player("bob")
-        tid = (await self.req(bob, "NEW gridwords classic"))[-1].split()[1]
+        tid = (await self.req(bob, "NEW gridwords standard"))[-1].split()[1]
         self.assertEqual((await self.req(bob, "INT %s false my reasons" % tid))[0][:15], "ERR NOTFRONTEND")
         self.assertEqual((await self.req(nw, "INT %s false %s" % (tid, self.WHY)))[0][:13], "ERR NOTSEATED")
         self.assertFalse(any("integrity" in l for l in await self.req(bob, "LST")))
@@ -157,7 +157,7 @@ class Notes(Base):
         self.assertLessEqual(len("NOTE 2026-11-22 abcdefghijkl " + "x" * 48), 78)
         self.assertTrue(line.endswith("x" * 48))
         # a private table's notes are its players' and invited players' only
-        priv = (await self.req(ann, "NEW gridwords english vis=private"))[-1].split()[1]
+        priv = (await self.req(ann, "NEW gridwords standard vis=private"))[-1].split()[1]
         await self.req(ann, "JON %s" % priv)
         await self.req(ann, "NOTE %s just us" % priv)
         self.assertEqual((await self.req(wes, "NOTE %s" % priv))[0][:11], "ERR PRIVATE")

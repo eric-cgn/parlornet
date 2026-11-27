@@ -22,7 +22,7 @@ It answers under /play/ only:
 It speaks plain HTTP and is meant to sit behind a reverse proxy that terminates TLS (deploy/README.md):
 
 - --public-url (the setting play.public_url, PARLOR_PLAY_URL) is the address players open, such as
-  https://parlornet.org/play/. The WebSocket's Origin must then be that URL's origin, the cookie is Secure
+  https://games.example.org/play/. The WebSocket's Origin must then be that URL's origin, the cookie is Secure
   when it is https, and the port declared to the core is that URL's port. Without it, the Origin must name
   the host and port of the Host header, as a page loaded straight from this port does.
 - --proxies (play.proxies, PARLOR_PLAY_PROXIES) lists the proxies' addresses or networks. For a request from
@@ -38,7 +38,7 @@ PARLOR_PLAY_PUSH_CONTACT: the operator's mailto: or https: address, which push s
 directory (--data, PARLOR_PLAY_DATA) for the subscriptions and the VAPID key; without any of them they are off.
 
     python3 -m adapters.playserver --core 127.0.0.1:6590 --key /data/frontends/play.key --port 6513 \\
-        --host 0.0.0.0 --public-url https://parlornet.org/play/ --proxies 172.30.4.1 --data /data/play \\
+        --host 0.0.0.0 --public-url https://games.example.org/play/ --proxies 172.30.4.1 --data /data/play \\
         --push-contact mailto:operator@example.org
 """
 import argparse
@@ -136,7 +136,7 @@ def public_url(text):
     host = (u.netloc or "").lower()
     if (u.scheme not in ("http", "https") or "@" in host or not HOST_RE.match(host) or u.query or u.fragment
             or u.path not in ("", "/", "/play", "/play/")):
-        raise ValueError("play.public_url is an address like https://parlornet.org/play/")
+        raise ValueError("play.public_url is an address like https://games.example.org/play/")
     default = {"http": 80, "https": 443}[u.scheme]
     if host.endswith(":%d" % default):
         host = host[:-len(":%d" % default)]
@@ -480,7 +480,7 @@ def parse_args(argv=None):
     declare.add_args(ap)
     ap.add_argument("--public-url", default=os.environ.get("PARLOR_PLAY_URL", ""),
                     help="play.public_url: the address players open, behind a TLS proxy "
-                         "(https://parlornet.org/play/); its port is the one declared to the core")
+                         "(https://games.example.org/play/); its port is the one declared to the core")
     ap.add_argument("--proxies", default=os.environ.get("PARLOR_PLAY_PROXIES", ""),
                     help="play.proxies: comma-separated addresses or networks of the reverse proxies whose "
                          "X-Forwarded-For and X-Forwarded-Proto are believed")
