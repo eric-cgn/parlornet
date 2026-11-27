@@ -7,7 +7,7 @@ The docs site serves them from static/img/ (tools/medal_icons.py writes them the
 welcome page from memory (adapters/web.py, SITE_IMAGES), each with its word as ALT text (adapters/clients.py,
 MEDALS), so a text browser reads "Gold" where a graphical one shows the medal.
 """
-from .board import encode_gif
+from .board import transparent_gif
 
 SIZE = 16
 SS = 4                                  # samples a side in each pixel
@@ -90,12 +90,8 @@ def no_sign():
 
 
 def gif(palette, px):
-    """A GIF89a with palette index 0 transparent: the encoder's file with a graphic control extension."""
-    data = encode_gif(SIZE, SIZE, palette, px)
-    at = 13 + 3 * (1 << ((data[10] & 7) + 1))             # after the header and the color table
-    assert data[at:at + 1] == b","
-    gce = b"\x21\xf9\x04\x01\x00\x00\x00\x00"                 # transparent color: index 0
-    return data[:at] + gce + data[at:]
+    """A SIZE by SIZE GIF89a with palette index 0 transparent."""
+    return transparent_gif(SIZE, SIZE, palette, px)
 
 
 ICONS = {"medal-gold.gif": lambda: medal("gold"), "medal-silver.gif": lambda: medal("silver"),

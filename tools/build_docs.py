@@ -1,4 +1,4 @@
-"""Build the ParlorNet docs site (http://docs.parlornet.org/) into a folder: docsite/build.py says what is in it.
+"""Build ParlorNet Docs, the docs site (http://docs.parlornet.org/), into a folder: docsite/build.py says what is in it.
 
     python3 tools/build_docs.py                 # into build/docs-site (git-ignored)
     python3 tools/build_docs.py --out DIR       # an empty folder, or one this tool wrote before

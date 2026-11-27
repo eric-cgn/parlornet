@@ -192,11 +192,16 @@ class SiteWide(Built):
             if "<script" in low:                        # only the finders
                 self.assertIn(name, ("index.html", "docs.html"))
             self.assertTrue(page.startswith('<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">'), name)
-            self.assertRegex(page[:1500], r">ParlorNet</font>", name)
-            self.assertIn("These pages cover every ParlorNet server.", page[-900:], name)
+            self.assertRegex(page[:1500], r">ParlorNet Docs</font>", name)
+            self.assertRegex(page, r"<title>ParlorNet Docs: [^<]+</title>", name)
+            self.assertIn("ParlorNet Docs covers every ParlorNet server.", page[-900:], name)
             nav = plain(page)[:plain(page).index("</table>")]
-            for label in ("Clients", "Protocols", "Browsers", "Telnet programs", "Docs", "Run a server", "Source"):
-                self.assertTrue(">%s</a>" % label in nav or "<b>%s</b>" % label in nav, (name, label))
+            bar = nav[nav.rindex('<td bgcolor="#999999">'):]
+            labels = re.findall(r">([^<>|]+)</(?:a|b)>", bar)
+            self.assertEqual(labels, ["ParlorNet", "Clients", "Protocols", "Browsers", "Telnet programs", "Docs",
+                                      "Run a server", "Source"], name)
+            self.assertTrue(bar.startswith('<td bgcolor="#999999"><a href="http://parlornet.org/">ParlorNet</a> | '),
+                            name)       # the main site first, over plain HTTP
             self.assertNotIn("Server: <b>", page, name)              # no server's name: it serves them all
 
     def test_byte_budgets(self):
@@ -223,7 +228,7 @@ class SiteWide(Built):
             self.assertIn("<i>host</i>", page, name)
             self.assertFalse("(this server)" in page, name)
             if name != "eclipse-68k-fix.html":            # its bug report shows what happens to a name
-                self.assertFalse("parlornet.org" in page, name)
+                self.assertFalse("parlornet.org" in self.content(page), name)     # the bar links the main site
         self.assertIn("<tt>telnet <i>host</i> 6502</tt>", self.pages["telnet.html"])
 
 
@@ -350,8 +355,8 @@ class RunningPage(Built):
             self.assertIn('href="%s"' % anchor, page)
 
     def test_names_no_host_of_ours(self):
-        """Examples use example.org; the only parlornet.org name on the page is the docs site's."""
-        page = self.pages["running.html"]
+        """Examples use example.org; the only parlornet.org name in the page's content is the docs site's."""
+        page = self.content(self.pages["running.html"])
         self.assertEqual(set(re.findall(r"[\w.-]*parlornet\.org", page)), {"docs.parlornet.org"})
         self.assertIn("games.example.org", page)
 
@@ -381,7 +386,7 @@ class ClientsPage(Built):
 
     @staticmethod
     def rows(section):
-        return re.findall(r'<tr(?: bgcolor="#FFFFCC")?><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td>'
+        return re.findall(r'<tr(?: bgcolor="#CCCCCC")?><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td><td>(.*?)</td>'
                           r'<td>(.*?)</td></tr>', section)
 
     def test_the_retro_window(self):
@@ -494,7 +499,7 @@ class ClientsPage(Built):
             u = urlsplit(href.replace("&amp;", "&"))
             self.assertEqual(u.path, "index.html")
             self.assertEqual(C.filter_values(parse_qs(u.query)), (plat, arch), label)
-            got = re.findall(r'<td(?: bgcolor="#99CC99")?><a href="([^"]+)">([NTW-])</a>((?:<img [^>]+>)*)</td>',
+            got = re.findall(r'<td(?: bgcolor="#999999")?><a href="([^"]+)">([NTW-])</a>((?:<img [^>]+>)*)</td>',
                              cells)
             self.assertEqual(len(got), len(games), label)
             for (link, sym, icons), (_, gtype) in zip(got, games):

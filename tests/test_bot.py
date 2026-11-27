@@ -340,7 +340,7 @@ class WithAServer(unittest.TestCase):
         b = Browser(self.web_port)
         st, _, _, body = b.login("webby")
         self.assertIn("Play the bot", body)
-        form = next(f for f in body.split("<li><form")[1:] if 'name="g" value="reversi/1"' in f)
+        form = next(f for f in body.split('<form action="/new.htm"')[1:] if 'name="g" value="reversi/1"' in f)
         q = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', form))
         q.update(turn="1d", vis="public", bot="1")
         st, loc, _, body = b.get("/new.htm?" + urlencode(q))
@@ -359,7 +359,7 @@ class WithAServer(unittest.TestCase):
         st, _, _, body = b.get("/lobby.htm")
         self.assertIn(">webby</a>, <a href=\"/player.htm?who=bot\">bot</a> (bot)", body)
         # a table without the bot: the table page offers it, and its link invites it
-        form = next(f for f in body.split("<li><form")[1:] if 'name="g" value="dotsandboxes/1"' in f)
+        form = next(f for f in body.split('<form action="/new.htm"')[1:] if 'name="g" value="dotsandboxes/1"' in f)
         q = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', form))
         q.update(turn="1d", vis="public", np="3")
         st, loc, _, body = b.get("/new.htm?" + urlencode(q))

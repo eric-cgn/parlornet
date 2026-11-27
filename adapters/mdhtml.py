@@ -10,7 +10,7 @@ cell, which would add a third to a long doc), headings in the site's heading
 face and color, and tables with the site's header row and alternating rows."""
 import re
 
-from .webstyle import DEEP, HEAD_FACE, IVORY, SAGE
+from .webstyle import HEAD_FACE, colors
 
 HEAD_SIZES = {1: 5, 2: 4, 3: 3}     # FONT SIZE per heading level; deeper ones keep the browser's own size
 
@@ -91,7 +91,9 @@ def to_html(md, link_fix=lambda u: u, image=None):
             text = inline(s[n + 1:], link_fix)
             # HTML 3.2 anchors may not nest: a heading that holds a link gets an empty anchor before it
             size = ' size="%d"' % HEAD_SIZES[n] if n in HEAD_SIZES else ""
-            text = '<font face="%s"%s color="%s">%s</font>' % (HEAD_FACE, size, DEEP, text)
+            colour = colors().heading
+            colour = ' color="%s"' % colour if colour != colors().ink else ""     # the text has the ink already
+            text = '<font face="%s"%s%s>%s</font>' % (HEAD_FACE, size, colour, text)
             anchor = ('<a name="%s"></a>%s' if "<a " in text else '<a name="%s">%s</a>') % (name, text)
             out.append("<h%d>%s</h%d>" % (n, anchor, n))
         elif s.startswith("|"):
@@ -106,7 +108,7 @@ def to_html(md, link_fix=lambda u: u, image=None):
             html = ['<table border="0" cellpadding="4" cellspacing="0">']
             for r, cells in enumerate(rows):
                 tag = "th" if r == 0 else "td"
-                colour = SAGE if r == 0 else IVORY if r % 2 == 0 else None
+                colour = colors().bar if r == 0 else colors().tint if r % 2 == 0 else None
                 html.append('<tr%s valign="top">%s</tr>' % (
                     ' bgcolor="%s"' % colour if colour else "",
                     "".join("<%s%s>%s</%s>" % (tag, ' align="left"' if tag == "th" else "", inline(c, link_fix), tag)

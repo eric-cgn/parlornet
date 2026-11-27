@@ -202,7 +202,8 @@ def board_src(body):
 
 
 def img_srcs(body):
-    return set(re.findall(r'<img src="([^"]+)"', body))
+    """The page's images besides the frame's own, the icon after Docs in the navigation bar."""
+    return set(re.findall(r'<img src="([^"]+)"', body)) - {"/img/external.gif"}
 
 
 class Live(Stack):

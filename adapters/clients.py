@@ -30,7 +30,7 @@ site's, from its root (/index.html); the build makes them relative to each page.
 """
 import re
 
-from .webstyle import IVORY, SAGE, a, callout, esc, h1, h2, p, plain_table, protocol_anchor, ul
+from .webstyle import a, callout, colors, esc, h1, h2, p, plain_table, protocol_anchor, ul
 
 FRONTENDS_PAGE = "/index.html"         # the Clients page: the docs site's home
 BROWSERS_PAGE = "/browsers.html"
@@ -1067,7 +1067,7 @@ def grid_medals(gtype, plat, arch):
 
 
 def summary_grid(games):
-    """Machines down, games across, one linked symbol per cell (N also on light felt; the letter carries the
+    """Machines down, games across, one linked symbol per cell (N also on the bar color; the letter carries the
     meaning), each machine's name linking to its filtered view; a key under it."""
     head = '<th align="left">Machine</th>' + "".join("<th>%s</th>" % a("#" + t, abbr(t)) for _, t in games)
     rows = []
@@ -1076,13 +1076,14 @@ def summary_grid(games):
         for _, gtype in games:
             sym, href = best(gtype, plat, arch)
             icons = "".join(medal_img(r.medal) for r in grid_medals(gtype, plat, arch)) if sym == "N" else ""
-            cells.append("<td%s>%s%s</td>" % (' bgcolor="%s"' % SAGE if sym == "N" else "", a(href, sym), icons))
+            cells.append("<td%s>%s%s</td>" % (' bgcolor="%s"' % colors().bar if sym == "N" else "", a(href, sym),
+                                              icons))
         rows.append('<tr align="center"><td align="left">%s</td>%s</tr>\n'
                     % (a(FRONTENDS_PAGE + filter_query(plat, arch), esc(label)), "".join(cells)))
     key = "; ".join("<b>%s</b> %s" % sym for sym in SYMBOLS) + ". " + ", ".join(
         "%s %s" % (abbr(t), esc(n)) for n, t in games) + ". " + GRID_MEDALS
     return ('<table border="0" cellpadding="2" cellspacing="0">\n<tr bgcolor="%s">%s</tr>\n%s</table>\n'
-            % (IVORY, head, "".join(rows)) + p(key, 2))
+            % (colors().tint, head, "".join(rows)) + p(key, 2))
 
 
 # ---- by machine: the game server's welcome page (adapters/web.py, machines_html) ----------------------------

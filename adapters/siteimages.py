@@ -1,6 +1,6 @@
 """The game server's small pictures (docs/site.md): a photo of each kind of computer beside its row of Play
-from your computer on the welcome page, and an icon for each game, which shows its play, on the Games page,
-each game's page and the lobby's Start a table.
+from your Computer on the welcome page, and an icon for each game, which shows its play, in the welcome page's
+Games section, on each game's page and in the lobby's Start a table.
 
 They are GIFs in adapters/img/, read once when the web extension starts: machines/<anchor>.gif (an anchor of
 PLAY_MACHINES in adapters/clients.py, or any-old and any-new), at most 56 by 44 pixels (MACHINE_BOX), and

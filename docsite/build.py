@@ -31,8 +31,10 @@ files running.html is made from are read: nothing else from deploy/ or anywhere 
 doc to another doc becomes a link to its page; to a client's Markdown, a link to the client's page; to a picture
 in static/img/, the picture on the site; to any other file of the repository, a link to it at the project's
 home on GitHub; to http://docs.parlornet.org/..., a link within the site. Every page is built in the web site's
-frame and palette (adapters/webstyle.py), HTML 3.2 as on the game server, with the docs site's own navigation
-and footer, and links relative to the page, so the site works from any address or a folder.
+frame (adapters/webstyle.py), HTML 3.2 as on the game server, under the site's own name, ParlorNet Docs, with
+its own navigation and footer, and links relative to the page, so the site works from any address or a folder.
+Its pages are in the greyscale palette (webstyle.GREY), so a reader can tell them from the green game server's
+pages when moving between the two. The navigation bar starts with a link back to the main site, HOME_URL.
 
 The finders: on index.html and docs.html, a script writes a box (and, on the Clients page, platform and
 processor menus) that hides the rows that do not match. A browser without the script, or without the DOM
@@ -57,14 +59,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS_DIR = os.path.join(ROOT, "docs")
 OUT = os.path.join(ROOT, "build", "docs-site")
 CNAME = "docs.parlornet.org"
+HOME_URL = "http://parlornet.org/"      # the main site, first in the navigation bar: plain HTTP for old browsers
+NAME = "ParlorNet Docs"                 # the site's name, in the masthead and every page's title
+PALETTE = S.GREY
 MARKER = ".parlornet-docs"          # in a folder this tool wrote, so it may empty it before writing again
 GITHUB_BLOB = PROJECT_URL + "/blob/main/"
 GITHUB_TREE = PROJECT_URL + "/tree/main/"
 
-NAV = [("/index.html", "Clients"), ("/protocols.html", "Protocols"), ("/browsers.html", "Browsers"),
+NAV = [(HOME_URL, "ParlorNet"), ("/index.html", "Clients"), ("/protocols.html", "Protocols"), ("/browsers.html", "Browsers"),
        ("/telnet.html", "Telnet programs"), ("/docs.html", "Docs"), (running.PAGE, running.TITLE),
        (PROJECT_URL, "Source")]
-FOOT = ("These pages cover every ParlorNet server. | %s | ParlorNet is free software."
+FOOT = ("ParlorNet Docs covers every ParlorNet server. | %s | ParlorNet is free software."
         % a(PROJECT_URL, "Source code"))
 
 # The docs index (docs.html): (heading, [(path, title, what it does)]), in reading order. Each line reads as a
@@ -150,7 +155,9 @@ def doc_files():
 
 
 def frame(title, body, current=None, head_extra="", refresh=None):
-    return S.frame(title, body, nav=S.nav_html(NAV, current), foot=FOOT, head_extra=head_extra, refresh=refresh)
+    """A page of the site, its title after the site's name ("ParlorNet Docs: Clients")."""
+    return S.frame("%s: %s" % (NAME, title), body, nav=S.nav_html(NAV, current), foot=FOOT,
+                   head_extra=head_extra, refresh=refresh, name=NAME)
 
 
 # ---- the finders ------------------------------------------------------------------------------------
@@ -306,7 +313,7 @@ def doc_page(path, md_file):
     fix = link_fixer(posixpath.dirname("docs/" + rel))
     body = to_html(md, fix, clientpages.figure)
     body += p(a(GITHUB_BLOB + "docs/" + rel + ".md", "This doc on GitHub"), 2)
-    return frame("ParlorNet: %s" % doc_title(md, rel), body, "/docs.html")
+    return frame(doc_title(md, rel), body, "/docs.html")
 
 
 def docs_index(docs):
@@ -333,33 +340,38 @@ def docs_index(docs):
               "of your own and how to run a server. They are written in Markdown and kept in the docs folder of "
               "the source.") +
             finder(False) + "".join(out))
-    return frame("ParlorNet: docs", body, "/docs.html")
+    return frame("Docs", body, "/docs.html")
 
 
 def pages():
-    """{site path: page HTML, links still from the site's root}."""
+    """{site path: page HTML, links still from the site's root}, in the site's palette."""
+    with S.using(PALETTE):
+        return _pages()
+
+
+def _pages():
     gs = games()
     docs = doc_files()
     out = {
-        "/index.html": frame("ParlorNet: clients", C.frontends_body(gs, finder(True)), "/index.html"),
-        "/protocols.html": frame("ParlorNet: protocols", protocols.protocols_body(gs), "/protocols.html"),
-        "/browsers.html": frame("ParlorNet: browsers", C.browsers_body(), "/browsers.html"),
-        "/telnet.html": frame("ParlorNet: telnet programs", C.telnet_body(), "/telnet.html"),
+        "/index.html": frame("Clients", C.frontends_body(gs, finder(True)), "/index.html"),
+        "/protocols.html": frame("Protocols", protocols.protocols_body(gs), "/protocols.html"),
+        "/browsers.html": frame("Browsers", C.browsers_body(), "/browsers.html"),
+        "/telnet.html": frame("Telnet programs", C.telnet_body(), "/telnet.html"),
         "/eclipse-68k-fix.html": frame("Eclipse 68k Fix", eclipse.eclipse_fix_body()),
         rulebook.PAGE: frame("ParlorNet rulebook for GameMaster", rulebook.body()),
         gamerulebooks.PAGE: frame("ParlorNet game rulebooks for GameMaster", gamerulebooks.body()),
         "/docs.html": docs_index(docs),
-        running.PAGE: frame("ParlorNet: run a server", running.body(link_fixer), running.PAGE),
-        "/404.html": frame("ParlorNet: not found", h1("Not found") + p(
+        running.PAGE: frame(running.TITLE, running.body(link_fixer), running.PAGE),
+        "/404.html": frame("Not found", h1("Not found") + p(
             "There is no page at this address. Try the %s, %s, %s or %s page."
             % (a("/index.html", "Clients"), a("/protocols.html", "Protocols"), a("/docs.html", "Docs"),
                a(running.PAGE, running.TITLE)))),
     }
     fix = link_fixer(clientpages.PAGES_REL)
     for c in C.EVERY:
-        out[c.href()] = frame("ParlorNet: %s" % c.name, clientpages.client_body(c, fix), "/index.html")
+        out[c.href()] = frame(c.name, clientpages.client_body(c, fix), "/index.html")
     for path, c in C.OLD_SETUP_PAGES.items():
-        out[path] = frame("ParlorNet: %s" % c.name, clientpages.moved_body(c), "/index.html",
+        out[path] = frame(c.name, clientpages.moved_body(c), "/index.html",
                           refresh=(0, relative(path.lstrip("/"), c.href())))
     for path, md_file in docs.items():
         out[path] = doc_page(path, md_file)
@@ -392,7 +404,7 @@ def files():
         out[name] = (html if name == "404.html" else relativize(name, html)).encode("ascii")
         shown.update(re.findall(r'<img src="/(img/[^"]+)"', html))
     from adapters.web import make_gif
-    out[S.EMBLEM.lstrip("/")] = S.emblem_gif(make_gif)
+    out[S.EMBLEM.lstrip("/")] = S.emblem_gif(make_gif, PALETTE)
     out.update(eclipse.files())
     out.update(rulebook.files())
     out.update(gamerulebooks.files())

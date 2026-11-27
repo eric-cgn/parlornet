@@ -15,9 +15,9 @@ Credentials never appear in a URL or a page (docs/security-design.md).
 Pages end in .htm. Every page is built in one frame with one palette
 (adapters/webstyle.py); the site map and the rules its pages keep are in
 docs/site.md. The site is the game server's own: the welcome page with the message
-of the day, sign-in and sign-up and the ways to play from each kind of computer, the
-lobby and tables, and the games this server hosts. Its bar is Welcome, Lobby, Games
-and Docs, with Sign out while a player is signed in. The documentation (the clients
+of the day, sign-in and sign-up, the games this server hosts and the ways to play from
+each kind of computer, then the lobby and tables, and a page for each game. Its bar is
+Welcome, Lobby, Docs and Sign In, with Sign Out in its place while a player is signed in. The documentation (the clients
 for every machine, their setup, the protocols reference and the docs) is a separate
 static site, built by tools/build_docs.py, at site.docs_url (http://docs.parlornet.org/
 by default); the old addresses of its pages here redirect there.
@@ -59,7 +59,7 @@ from . import palette as PAL
 from . import siteimages as PIC
 from . import webstyle as S
 from .games import rules_name
-from .webstyle import DEEP, FELT, IVORY, SAGE, a, callout, data_table, esc, font, h1, h2, p, small, ul
+from .webstyle import a, away, callout, data_table, esc, font, h1, h2, h3, p, small, ul
 
 RATES = (0, 3, 5, 10, 30, 60)
 DEFAULT_RATE = 5
@@ -117,10 +117,10 @@ GAMES = [
 ]
 
 
-GAMES_PAGE = "/games.htm"
+GAMES_SECTION = "/welcome.htm#games"     # the welcome page's Games section, the list of every game
 FIBS_HOME = "http://fibs.com/"
 
-# What each planned game in GAMES is, for the games page (/games.htm): game type -> (about, rules). about
+# What each planned game in GAMES is, for the Games section and each game's page: game type -> (about, rules). about
 # is two or three sentences in ParlorNet's own words, with generic names only. rules are the rulesets and
 # options this server supports, from the type specs in docs/types/ (for a planned game: what is planned).
 # Plain text; the page escapes it. A game with a module in adapters/games/ has its own ABOUT there, which
@@ -181,7 +181,7 @@ def _players(lo, hi):
 
 
 def game_about(gtype):
-    """(about, rules) for the games page: from the game's module in adapters/games/, else GAME_ABOUT; None
+    """(about, rules) for the Games section and the game's page: from the game's module in adapters/games/, else GAME_ABOUT; None
     when neither has it."""
     m = games.by_type().get(gtype)
     return m.ABOUT if m else GAME_ABOUT.get(gtype)
@@ -190,8 +190,8 @@ def game_about(gtype):
 def game_rows(hosted=None):
     """Every planned game in build order, then any other game the core hosts: a dict per game with name,
     type, players and status. hosted is the core's GAM list (parse_games), or
-    None when it is not known; then the static status in GAMES stands. The welcome page's Games list, the
-    games page and each game's page are built from this."""
+    None when it is not known; then the static status in GAMES stands. The welcome page's Games section and
+    each game's page are built from this."""
     by_type = {}
     for g in hosted or ():
         by_type.setdefault(g["key"].split("/")[0], g)
@@ -236,11 +236,11 @@ def first_sentence(text):
     return m.group(1) if m else text
 
 
-def games_page(hosted=None, scores=False, nav=None):
-    """/games.htm: every game in build order, one row each (anchor: the game type, so old links to a
-    game's section still land on it): its icon (adapters/siteimages.py), its name linking to its own page,
-    players, status here, and the first sentence of what it is. scores: the server shows its leaderboard (a
-    link to it). nav: the navigation bar for a signed-in player (site_nav)."""
+def games_html(hosted=None, scores=False):
+    """The welcome page's Games section (#games): every game in build order, one row each (anchor: the game
+    type, so links to a game's row land on it): its icon (adapters/siteimages.py), its name linking to its own
+    page, players, status here, and the first sentence of what it is. scores: the server shows its leaderboard
+    (a link to it)."""
     rows = []
     for r in game_rows(hosted):
         about = game_about(r["type"])
@@ -250,15 +250,14 @@ def games_page(hosted=None, scores=False, nav=None):
         rows.append([PIC.game_img(r["type"], None) or "&nbsp;", '<a name="%s"></a>%s' % (r["type"], name),
                      esc(r["players"]), esc(r["status"]),
                      esc(first_sentence(about[0])) if about else "-"])
-    body = (h1("Games") +
+    return (h2("games", "Games") +
             p("These are the games ParlorNet plays, listed in the order they were added. ParlorNet wrote each "
               "one itself from the game&#39;s public rules and gives it a generic name. You can play the ones "
               "marked playable on this server now, and each game&#39;s page has its rules and the programs "
-              "that play it.") +
+              "that play it.", 2) +
             data_table(["", "Game", "Players", "Status", "What it is"], rows, "100%", (None, None, "center")) +
             (p("Every finished game scores points: see who leads on the %s." % a(LEADERBOARD_PAGE, "leaderboard"), 2)
              if scores else ""))
-    return respond(200, page("ParlorNet: games", body, current=GAMES_PAGE, nav=nav))
 
 
 def docs_link(path=""):
@@ -286,11 +285,10 @@ def game_page(gtype, hosted=None, nav=None):
     if docs_link():
         spec = "docs/types/%s.html" % (m.KEY.replace("/", "-") if m else gtype + "-1")
         facts.append(("For programmers", "%s, %s" % (
-            a(docs_link(spec), "type spec"),
-            a(docs_link("docs/pnp.html#" + heading_anchor(r["name"])), "protocol guide"))))
+            docs_a(spec, "type spec"), docs_a("docs/pnp.html#" + heading_anchor(r["name"]), "protocol guide"))))
         programs = p("The %s on the docs site lists the programs that play %s on each kind of computer and "
                      "how to set them up." % (
-                         a(docs_link("index.html#" + gtype), "Clients page"), esc(r["name"])), 2)
+                         docs_a("index.html#" + gtype, "Clients page"), esc(r["name"])), 2)
     else:
         programs = ""
     body = (h1((PIC.game_img(gtype) + " " if PIC.game_img(gtype) else "") + esc(r["name"])) +
@@ -300,8 +298,8 @@ def game_page(gtype, hosted=None, nav=None):
             ul(esc(x) for x in rules) +
             (_fibs_note_html() if gtype == "backgammon" else "") +
             h2("frontends", "Programs that play it") + programs +
-            p("%s | %s" % (a("%s#%s" % (GAMES_PAGE, gtype), "All games"), a("/lobby.htm", "Play")), 2))
-    return respond(200, page("ParlorNet: %s" % r["name"], body, current=GAMES_PAGE, nav=nav))
+            p("%s | %s" % (a("/welcome.htm#%s" % gtype, "All games"), a("/lobby.htm", "Play")), 2))
+    return respond(200, page("ParlorNet: %s" % r["name"], body, nav=nav))
 
 
 def credits_page(nav=None):
@@ -322,8 +320,8 @@ def credits_page(nav=None):
               "at most %d by %d pixels and reduced to 16 colors or fewer. Each is shared under the same license "
               "as its photo. The game icons and the picture for Any new computer are ParlorNet&#39;s own, drawn "
               "for this site, and come under ParlorNet&#39;s license." % PIC.MACHINE_BOX, 2) +
-            p("%s | %s" % (a("/welcome.htm#%s" % MACHINES_ANCHOR, "Play from your computer"),
-                           a(GAMES_PAGE, "Games")), 2))
+            p("%s | %s" % (a("/welcome.htm#%s" % MACHINES_ANCHOR, MACHINES_HEAD),
+                           a(GAMES_SECTION, "Games")), 2))
     return respond(200, page("ParlorNet: picture credits", body, nav=nav))
 
 
@@ -353,7 +351,8 @@ def parse_protocols(lines):
 # ratings as the docs site's Clients page, each client linking to its own page there.
 
 MACHINES_ANCHOR = "machines"
-OLD_ANCHORS = ("play", "ways-in", "frontends", "clients", "protocols", "games")    # earlier sections' anchors
+MACHINES_HEAD = "Play from your Computer"
+OLD_ANCHORS = ("play", "ways-in", "frontends", "clients", "protocols")    # earlier sections' anchors
 ANY_OLD = ("any-old", "Any old computer", "and any vintage machine not listed above")
 ANY_NEW = ("any-new", "Any new computer", "a phone, a tablet or a desktop")
 MEDAL_MEANS = {C.GOLD: "works fully", C.SILVER: "works once the program is patched",
@@ -361,10 +360,14 @@ MEDAL_MEANS = {C.GOLD: "works fully", C.SILVER: "works once the program is patch
 RATED_LINES = 4         # a machine's rated clients with a line each; the rest are named in one line after them
 
 
-def docs_a(path, text):
-    """A link to a page of the docs site, or just the text when the operator cleared site.docs_url."""
+def docs_a(path, text, mark=True):
+    """A link to a page of the docs site with the external-link icon after it, or just the text when the
+    operator cleared site.docs_url. mark=False leaves the icon out, for Play from your Computer, which has
+    dozens of these links and says once, above them, that they go to the docs site."""
     href = docs_link(path)
-    return a(href, text) if href else text
+    if not href:
+        return text
+    return away(a(href, text)) if mark else a(href, text)
 
 
 def medal_html(medal):
@@ -373,7 +376,7 @@ def medal_html(medal):
 
 
 def client_a(c):
-    return docs_a(c.href().lstrip("/"), esc(c.name))
+    return docs_a(c.href().lstrip("/"), esc(c.name), False)
 
 
 def machine_ways(targets):
@@ -406,21 +409,23 @@ def machine_ways(targets):
 def any_old_html():
     return "<br>\n".join([
         "Every game with a %s, or a terminal program on a %s." % (
-            docs_a(C.TELNET_PAGE.lstrip("/"), "telnet program"), docs_a("docs/serial.html", "modem or serial line")),
-        "Every game on these pages, in a %s from 1995 on." % docs_a(C.BROWSERS_PAGE.lstrip("/"), "web browser")])
+            docs_a(C.TELNET_PAGE.lstrip("/"), "telnet program", False),
+            docs_a("docs/serial.html", "modem or serial line", False)),
+        "Every game on these pages, in a %s from 1995 on." % docs_a(C.BROWSERS_PAGE.lstrip("/"), "web browser",
+                                                                     False)])
 
 
 def any_new_html(play):
     if play:
         first = "%s in any current browser, with animated boards (%s)." % (
-            a(play, "<b>ParlorNet Play</b>"), docs_a("docs/modern-client.html", "about Play"))
+            a(play, "<b>ParlorNet Play</b>"), docs_a("docs/modern-client.html", "about Play", False))
     else:
         first = "These pages, in any current browser."
-    return first + "<br>\n" + "%s from a terminal works too." % docs_a(C.TELNET_PAGE.lstrip("/"), "Telnet")
+    return first + "<br>\n" + "%s from a terminal works too." % docs_a(C.TELNET_PAGE.lstrip("/"), "Telnet", False)
 
 
 def machines_html(play=None):
-    """Play from your computer: the machines' names, each a jump to its row, then a row per machine (anchored)
+    """Play from your Computer: the machines' names, each a jump to its row, then a row per machine (anchored)
     with its picture (adapters/siteimages.py) and its ways to play, best first, then Any old computer and Any new
     computer, and what the medals mean, with the link to the picture credits.
     play: ParlorNet Play's address (play_link), None while it does not run."""
@@ -428,15 +433,16 @@ def machines_html(play=None):
     cells = {anchor: machine_ways(targets) for anchor, _, _, targets in C.PLAY_MACHINES}
     cells[ANY_OLD[0]], cells[ANY_NEW[0]] = any_old_html(), any_new_html(play)
     rows = ['<tr%s valign="top"><td align="center">%s</td><td>%s</td></tr>\n' % (
-        ' bgcolor="%s"' % IVORY if n % 2 else "", PIC.machine_img(anchor) or "&nbsp;",
-        '<a name="%s"></a>%s %s' % (anchor, font(esc(name), 3, S.HEAD_FACE, DEEP),
+        ' bgcolor="%s"' % S.colors().tint if n % 2 else "", PIC.machine_img(anchor) or "&nbsp;",
+        '<a name="%s"></a>%s %s' % (anchor, font(esc(name), 3, S.HEAD_FACE, S.colors().heading),
                                     font("%s<br>\n%s" % ("(%s)" % esc(note) if note else "", cells[anchor]), 2)))
             for n, (anchor, name, note) in enumerate(machines)]
     legend = " ".join("%s %s: %s." % (medal_html(m), C.MEDALS[m][0], MEDAL_MEANS[m]) for m in MEDAL_MEANS)
-    return (h2(MACHINES_ANCHOR, "Play from your computer", OLD_ANCHORS) +
+    return (h2(MACHINES_ANCHOR, MACHINES_HEAD, OLD_ANCHORS) +
             p(" | ".join(a("#" + anchor, esc(name)) for anchor, name, _ in machines), 2) +
-            p("Find your computer: its row starts with the best way to play there, and each program&#39;s page "
-              "says how to get it and set it up.", 2) +
+            p("Find your computer: its row starts with the best way to play there.%s" % (
+                " The links in it go to %s, where each program&#39;s page says how to get it and set it up."
+                % docs_a("index.html", "ParlorNet Docs") if docs_link() else ""), 2) +
             '<table width="100%%" border="0" cellpadding="4" cellspacing="0">\n%s</table>\n' % "".join(rows) +
             p("%s Not yet rated: nobody has played a whole game with it there yet. The photos are from Wikimedia "
               "Commons: %s." % (legend, a(PIC.CREDITS_PAGE, "picture credits")), 1))
@@ -478,7 +484,7 @@ def moved_page(req, path, q=None):
         return notice("Not found", "Not here", "The documentation is not served by this server.",
                       [("/welcome.htm", "Welcome")], 404)
     loc = docs_link(target)
-    return respond(301, bare_page("Moved", "<p>This page has moved to the ParlorNet docs site, at %s.</p>"
+    return respond(301, bare_page("Moved", "<p>This page has moved to ParlorNet Docs, at %s.</p>"
                                   % a(loc, esc(loc))), extra="Location: %s\r\n" % loc)
 
 
@@ -527,8 +533,9 @@ def make_gif(w, h, palette, pixels):
 
 # Every game's images, from its module in adapters/games/ (images()): path -> GIF bytes, made on first use.
 IMAGES = games.Images()
-# The site's own image, on every page's masthead (webstyle.EMBLEM): served and cached like the games' images.
-SITE_IMAGES = {S.EMBLEM: S.emblem_gif(make_gif)}
+# The site's own images, the emblem on every page's masthead (webstyle.EMBLEM) and the icon after each link to
+# the docs site (webstyle.EXTERNAL): served and cached like the games' images.
+SITE_IMAGES = {S.EMBLEM: S.emblem_gif(make_gif), S.EXTERNAL: S.external_gif()}
 SITE_IMAGES.update({C.MEDALS[m][1]: MEDAL_ICONS[C.MEDALS[m][1].rsplit("/", 1)[1]]() for m in (C.GOLD, C.SILVER, C.BRONZE)})
 SITE_IMAGES.update(PIC.IMAGES)      # the computers' photos and the games' icons (adapters/siteimages.py)
 
@@ -822,7 +829,8 @@ MOTD_HEAD = "Message of the Day"
 def motd_html(motd):
     """The message of the day as it is, in <pre> (an ASCII layout reads the same as on telnet), escaped,
     with its web addresses as links, in an ivory box under a light green header row, framed in felt; the box
-    is as wide as the text. Dark text on both (browsers without cell colors show plain text)."""
+    is as wide as the text. Dark text on both (browsers without cell colors show plain text). A line break
+    after the box keeps what follows, a note or the signed-in callout, from touching it."""
     def line(l):
         parts = URL_RE.split(l)
         return "".join(a(x, esc(x)) if i % 2 else esc(x) for i, x in enumerate(parts))
@@ -830,25 +838,34 @@ def motd_html(motd):
             '<table width="100%%" border="0" cellpadding="6" cellspacing="0">\n'
             '<tr><td bgcolor="%s">%s</td></tr>\n'
             '<tr><td bgcolor="%s"><pre>%s</pre></td></tr>\n'
-            '</table>\n</td></tr></table>\n'
-            % (FELT, SAGE, font("<b>%s</b>" % MOTD_HEAD, color=DEEP), IVORY, "\n".join(line(l) for l in motd)))
+            '</table>\n</td></tr></table>\n<br>\n'
+            % (S.colors().edge, S.colors().bar, font("<b>%s</b>" % MOTD_HEAD, color=S.colors().heading),
+               S.colors().tint, "\n".join(line(l) for l in motd)))
+
+
+# The welcome page's sections, in order: (anchor, heading). Its contents line links each one.
+WELCOME_SECTIONS = [("welcome", "Welcome"), ("signin", "Sign-In"), ("games", "Games"), (MACHINES_ANCHOR, MACHINES_HEAD)]
 
 
 def welcome(req, message="", auth=("password", "Password", "password"), motd=(), protocols=None, nav=None,
-            lobby=None):
-    """The welcome page: the message of the day (all of the welcome text is there, so the operator writes
-    it), then the two ways to start, Sign in and New account, each its own form, then Play from your computer,
-    the ways to play from each machine (machines_html). protocols: the core's PRL, for ParlorNet Play's address.
-    nav and lobby: for a signed-in player, the navigation bar (site_nav) and the lobby's link, which stands in
-    for the two forms."""
+            lobby=None, hosted=None, scores=False):
+    """The welcome page: its heading and a contents line, then four sections. Welcome holds the message of
+    the day (all of the welcome text is there, so the operator writes it) and any note. Sign-In holds the two
+    ways to start, Sign in and New account, each its own form. Games lists every game (games_html), and Play
+    from your Computer the ways to play from each machine (machines_html). protocols: the core's PRL, for
+    ParlorNet Play's address. nav and lobby: for a signed-in player, the navigation bar (site_nav) and the
+    lobby's link, which stands in for the two forms. hosted and scores: the core's games and whether it shows
+    its leaderboard, for Games."""
     if lobby:
         start = callout(p("You are signed in. The %s has your tables and invitations." % a(lobby, "<b>Lobby</b>")))
     else:
-        start = (h2("signin", "Sign in") + callout(signin_form(auth)) +
-                 h2("new", "New account") +
+        start = (callout(signin_form(auth)) +
+                 h3("new", "New account") +
                  p("%s %s" % (esc(signup_steps(auth)), esc(NEW_NAME_RULE)), 2) +
                  callout(signup_form()))
-    body = (h1("Welcome") + (motd_html(motd) if motd else "") + note_html(message) + start +
+    contents = p(" | ".join(a("#" + anchor, esc(head)) for anchor, head in WELCOME_SECTIONS), 2)
+    body = ('<a name="welcome"></a>' + h1("Welcome") + contents + (motd_html(motd) if motd else "") +
+            note_html(message) + h2("signin", "Sign-In") + start + games_html(hosted, scores) +
             machines_html(play_link(host_of(req), protocols)))
     return respond(200, page("ParlorNet", body, current="/welcome.htm", nav=nav))
 
@@ -880,21 +897,21 @@ def ask_page(lid, ask, message="", kind="signin"):
 
 
 def site_nav(link=None, current=None):
-    """The navigation bar of every page: Welcome, Lobby, Games and Docs (the docs site, left out when the
-    operator cleared site.docs_url), and Sign out last while a player is signed in. link: the signed-in link
+    """The navigation bar of every page: Welcome, Lobby, Docs (the docs site, left out when the operator
+    cleared site.docs_url), and last Sign In, or Sign Out while a player is signed in. link: the signed-in link
     maker (Server.linker: the session for browsers without cookies, and the action check), None when nobody
     is; current: the path of the page shown, whose entry is in bold."""
     if link is None:
-        return S.nav_html(S.public_nav(), current)
+        return S.nav_html(S.public_nav(), current, (S.DOCS[0],))
     plain = getattr(link, "plain", link)
-    items = [(plain("/welcome.htm"), "Welcome"), (link("/lobby.htm"), "Lobby"), (plain(GAMES_PAGE), "Games")]
-    here = dict(zip(("/welcome.htm", "/lobby.htm", GAMES_PAGE), (h for h, _ in items))).get(current)
+    items = [(plain("/welcome.htm"), "Welcome"), (link("/lobby.htm"), "Lobby")]
+    here = dict(zip(("/welcome.htm", "/lobby.htm"), (h for h, _ in items))).get(current)
     docs = [(S.DOCS[0], "Docs")] if S.DOCS[0] else []
-    return S.nav_html(items + docs + [(link("/out.htm"), "Sign out")], here)
+    return S.nav_html(items + docs + [(link("/out.htm"), "Sign Out")], here, (S.DOCS[0],))
 
 
 def signed_in_nav(link):
-    """The bar of the signed-in pages: site_nav with Sign out. Lobby stays a link on the lobby too, where it
+    """The bar of the signed-in pages: site_nav with Sign Out. Lobby stays a link on the lobby too, where it
     is the way to look again."""
     return site_nav(link)
 
@@ -936,34 +953,40 @@ def lobby_page(me, link, games, tables, note="", auth="password", invites=(), bo
     turns = [("5m", "5 minutes"), ("15m", "15 minutes"), ("1h", "1 hour"), ("1d", "1 day"),
              ("3d", "3 days"), ("5d", "5 days")]
 
-    def choices(g):
-        """The rules select (a game with several rulesets) and the players select (one that takes more than
-        two), each followed by ", "."""
-        out = ""
+    def select(name, options, chosen):
+        return '<select name="%s">%s</select>' % (name, "".join(
+            '<option value="%s"%s>%s' % (v, " selected" if v == chosen else "", lbl) for v, lbl in options))
+
+    def start_form(g):
+        """One game's form to start a table: its icon in its own cell beside a small table, with the game's name
+        on top, then a row for each choice, its label in the first column and the control in the second, so
+        the choices read down a column, and Play the bot and the button last. Rules shows only for a game with
+        several rulesets, and Players only for one that takes more than two."""
+        rows = []
         rulesets = g.get("rulesets") or [g["rules"]]
         if len(rulesets) > 1:
-            out += 'rules: <select name="ru">%s</select>, ' % "".join(
-                '<option value="%s"%s>%s' % (esc(r), " selected" if i == 0 else "",
-                                             esc(rules_name(g["key"], r))) for i, r in enumerate(rulesets))
+            rows.append(("Rules:", select("ru", [(esc(r), esc(rules_name(g["key"], r))) for r in rulesets],
+                                          esc(rulesets[0]))))
         lo, hi = g.get("min") or 2, g.get("max") or 2
         if hi > lo:
-            out += 'players: <select name="np">%s</select>, ' % "".join(
-                '<option value="%d"%s>%d' % (n, " selected" if n == lo else "", n) for n in range(lo, hi + 1))
-        return out
+            rows.append(("Players:", select("np", [(str(n), str(n)) for n in range(lo, hi + 1)], str(lo))))
+        rows += [("Time per turn:", select("turn", turns, "1d")),
+                 ("Table:", small('<input type="radio" name="vis" value="public" checked> Public<br>\n'
+                                  '<input type="radio" name="vis" value="private"> Private (by invitation)')),
+                 ("", small('<input type="checkbox" name="bot" value="1"> Play the bot') +
+                  '<br>\n<input type="submit" value="Start a game of %s">' % esc(g["name"]))]
+        icon = PIC.game_img(g["key"].split("/")[0]) or "&nbsp;"
+        return ('<form action="/new.htm" method="get">\n<input type="hidden" name="g" value="%s">%s\n'
+                '<table border="0" cellpadding="2" cellspacing="0">\n'
+                '<tr valign="top"><td rowspan="%d">%s</td><td colspan="2">%s</td></tr>\n%s'
+                '</table>\n</form>\n'
+                % (esc(g["key"]), hidden_fields(link("/new.htm")), len(rows) + 1, icon,
+                   font("<b>%s</b>" % esc(g["name"]), 3, S.HEAD_FACE, S.colors().heading),
+                   "".join('<tr><td align="right"%s nowrap>%s</td><td>%s</td></tr>\n'
+                           % (' valign="top"' if "<br>" in control else "", small(label), control)
+                           if label else "<tr><td></td><td>%s</td></tr>\n" % control for label, control in rows)))
 
-    new = "".join("""<li><form action="/new.htm" method="get">
-<input type="hidden" name="g" value="%s">%s
-<font face="%s">%s<b>%s</b>, %stime per turn: <select name="turn">%s</select>
-<input type="radio" name="vis" value="public" checked> Public
-<input type="radio" name="vis" value="private"> Private (by invitation)
-<input type="checkbox" name="bot" value="1"> Play the bot
-<input type="submit" value="Start a game of %s"></font>
-</form></li>
-""" % (esc(g["key"]), hidden_fields(link("/new.htm")), S.TEXT_FACE,
-       (PIC.game_img(g["key"].split("/")[0]) + " " if PIC.game_img(g["key"].split("/")[0]) else ""),
-       esc(g["name"]), choices(g),
-       "".join('<option value="%s"%s>%s' % (v, " selected" if v == "1d" else "", lbl) for v, lbl in turns),
-       esc(g["name"])) for g in group_games(games) if g["key"] in GAME_PAGES)
+    new = "".join(start_form(g) for g in group_games(games) if g["key"] in GAME_PAGES)
     account = [a(link(PLAYER_PAGE), "Your profile"), a(link(PROFILE_PAGE), "Preferred machine"),
                a(link(COLOURS_PAGE), "Grid Words colors"), a(link(BG_HOME_PAGE), "Backgammon board"),
                a(link("/out.htm"), "Sign out"),
@@ -984,7 +1007,7 @@ def lobby_page(me, link, games, tables, note="", auth="password", invites=(), bo
             h2(None, "Tables") + tbl +
             h2(None, "Start a table") +
             p("To play the bot, check Play the bot when you start a table. It sits down in a few seconds.", 2) +
-            "<ul>\n%s</ul>\n" % new +
+            new +
             h2("account", "Your account") +
             p(" | ".join(account), 2))
     return respond(200, page("ParlorNet lobby", body, nav=signed_in_nav(link), compact=True))
@@ -1553,13 +1576,14 @@ class Web:
     async def welcome(self, req, message="", extra=""):
         link = self.visitor(req)
         r = welcome(req, message, await self.auth_info(), await self.motd(), await self.protocols(),
-                    site_nav(link, "/welcome.htm") if link else None, link("/lobby.htm") if link else None)
+                    site_nav(link, "/welcome.htm") if link else None, link("/lobby.htm") if link else None,
+                    self.games_seen, self.scores_seen)
         return self.with_header(r, extra)
 
     def visitor(self, req):
         """A public page's view of its visitor: the signed-in link maker (linker) when the request carries a
         session (the cookie, or s= for a browser without cookies) that resumed here within GOOD_SECS and was
-        not signed out, so the page's bar has the lobby's link and Sign out; else None. The core is not asked;
+        not signed out, so the page's bar has the lobby's link and Sign Out; else None. The core is not asked;
         a session that ended elsewhere is found out on the next signed-in page."""
         sid, cookieless = cookie_sid(req), False
         if not sid:
@@ -1739,12 +1763,9 @@ class Web:
                 return respond(304, b"", "image/gif", extra="Cache-Control: max-age=86400\r\n")
             return respond(200, SITE_IMAGES.get(path) or IMAGES[path], "image/gif",
                            extra="Cache-Control: max-age=86400\r\nLast-Modified: %s\r\n" % STARTED)
-        if path == GAMES_PAGE:
-            await self.refresh_info()
-            return games_page(self.games_seen, self.scores_seen, self.visitor_nav(req, GAMES_PAGE))
         if path.startswith("/games/"):
             await self.refresh_info()
-            got = (game_page(path[len("/games/"):-len(".htm")], self.games_seen, self.visitor_nav(req, GAMES_PAGE))
+            got = (game_page(path[len("/games/"):-len(".htm")], self.games_seen, self.visitor_nav(req, None))
                    if path.endswith(".htm") else None)
             if got:
                 return got
