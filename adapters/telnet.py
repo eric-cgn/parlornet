@@ -58,6 +58,7 @@ import time
 import traceback
 
 from parlord.auth import NEW_NAME_RULE
+from parlord.replies import parse_tim
 
 from . import declare
 from .common import (framed_motd, LOGIN_SECS, LOGIN_TOTAL_SECS, CLAIM_LEN, CoreClient, CoreError, Gate, claim_text,
@@ -88,6 +89,7 @@ TUTORIAL_LINE = "Type /tutorial for a short lesson on these keys."
 TUTORIAL_QUESTION = ("Would you like a short tutorial on how the games work? You can run it again any time "
                      "with /tutorial.")
 POLL_SECS = 2.0         # game screen: ask the core for new events this often
+TIME_SECS = 60.0        # ask the core for the time left (TIM's left=) this often, for the clock
 MENU_SECS = 15.0        # menu: reload the table list this often
 DETECT_SECS = 3.0       # the start: how long telnet waits for the terminal type, and for Enter to open the menu
 ECHO_WAIT = 0.5         # before a password: how long telnet waits for the client to agree to stop echoing
@@ -506,6 +508,16 @@ def connected_text(secs):
     return "%dh %dm" % (m // 60, m % 60) if m >= 60 else "%dm" % m
 
 
+def online_text(s, now=None):
+    """The clock at the end of the title bar: the time signed in and the time left, as "12m onl 63m rem", or
+    "12m onl unl rem" when the connection has no time limit. s is the session (Session.since, and the left
+    and left_at that Session.sync_time keeps from TIM)."""
+    now = time.time() if now is None else now
+    left = getattr(s, "left", None)
+    rem = "unl" if left is None else "%dm" % (max(0, int(left - (now - s.left_at))) // 60)
+    return "%s onl %s rem" % (connected_text(now - s.since), rem)
+
+
 def left_words(secs):
     """Time left on a clock, as the sentences say it: 4:12 under an hour, then 1h 5m, then 2d 3h."""
     s = max(0, int(secs))
@@ -780,7 +792,7 @@ STATUS_KEYS = {"Enter": "ENTER", "Esc": "ESC", "Backspace": "BS"}
 # The movement keys of the screen being composed (a key of MOVE_SETS, "" for arrows only): set by
 # AnsiView.screen() around compose(), so every game's status bar shows the keys that apply.
 DRAWING_MOVES = contextvars.ContextVar("parlornet_moves", default="")
-# The time connected for the title bar (connected_text), set the same way: "" draws none.
+# The time connected and the time left for the title bar (online_text), set the same way: "" draws none.
 DRAWING_CLOCK = contextvars.ContextVar("parlornet_clock", default="")
 
 
@@ -1097,7 +1109,7 @@ class AnsiView:
     def screen(self):
         token = DRAWING_MOVES.set(self.move_set())      # the status bar shows the session's keys
         since = getattr(self.s, "since", None)
-        clock = DRAWING_CLOCK.set(connected_text(time.time() - since) if since else "")
+        clock = DRAWING_CLOCK.set(online_text(self.s) if since else "")
         try:
             cv = self.compose_screen()
         finally:
@@ -1613,7 +1625,7 @@ class PlainMenu(MenuBase):
         mine = [t for t in tabs if me in t["names"]]
         others = [t for t in tabs if me not in t["names"]]
         self.say("")
-        tail = "%s | %s" % (me, connected_text(time.time() - self.s.since))      # the time connected
+        tail = "%s | %s" % (me, online_text(self.s))      # the time connected and the time left
         self.say(("== ParlorNet lobby " + "=" * 60)[:78 - len(tail)] + " " + tail)
         self.say("Your tables:")
         for t in mine:
@@ -2673,6 +2685,7 @@ class AnsiGame(GameBase, AnsiView):
             if k is None:
                 if time.time() - polled >= POLL_SECS:
                     polled = time.time()
+                    await self.s.sync_time()
                     if await self.pull():
                         await self.refresh()
                         self.snap()
@@ -2953,6 +2966,7 @@ class PlainGame(GameBase):
         while True:
             k = await self.io.readkey(timeout=min(POLL_SECS, self.tick_in() or POLL_SECS))
             if k is None:
+                await self.s.sync_time()
                 new = await self.pull()
                 if any(kind in self.BOARD_KINDS for kind, _ in new):
                     await self.refresh()
@@ -3105,13 +3119,23 @@ class Session:
         self.games = []
         self.invites = []           # my invitations (IVL), loaded with the tables
         self.since = getattr(io, "since", None) or time.time()     # signed in: the time connected counts from here
+        self.left, self.left_at = None, 0.0     # the time left (TIM's left=; None: no limit) and when it was asked
         self.history = []           # the command lines run, for Up and Down in command mode
         self.quitting = False       # /quit at a table, said yes to: the session ends
         self.tutorial_next = False  # /tutorial at a table: the lobby opens the tutorial
 
+    async def sync_time(self):
+        """Ask the core for the time left, at most once every TIME_SECS, for the clock (online_text)."""
+        if time.time() - self.left_at < TIME_SECS:
+            return
+        data, final = await self.core.req("TIM")
+        tim = parse_tim(data) if final.startswith("OK") else None
+        self.left, self.left_at = tim[2] if tim else None, time.time()
+
     async def load(self):
         """-> (tables, {table id: (seat to move, secs left, turn secs, when)})
         for the tables where this player plays a running game."""
+        await self.sync_time()
         if not self.games:
             data, _ = await self.core.req("GAM")
             order = list(RENDERERS)         # the menu lists games in a fixed order, Reversi first

@@ -3,13 +3,13 @@ over the frontend channel (docs/security-design.md), the sign-in helper for
 line-based game-network adapters, and the gate that counts an adapter's
 connections before and after sign-in."""
 import asyncio
-import ipaddress
 import os
 import re
 import socket
 import ssl
 import time
 
+from parlord.accounts import as_ip, trusted_proxy
 from parlord.auth import NEWPASS_TEXT
 from parlord.commands import MOTD_BOTTOM, MOTD_TOP, SCORES_NOTE, framed_motd, score_text  # noqa: F401
 from parlord.frontends import client_context, read_key
@@ -104,31 +104,6 @@ def keepalive(writer, idle=KEEPALIVE[0], interval=KEEPALIVE[1], count=KEEPALIVE[
         return True
     except OSError:
         return False
-
-
-def proxy_list(text, key="proxies"):
-    """A proxies setting (comma-separated addresses or networks) -> [ip_network]. ValueError if one is not."""
-    out = []
-    for x in (text or "").split(","):
-        if x.strip():
-            try:
-                out.append(ipaddress.ip_network(x.strip(), strict=False))
-            except ValueError:
-                raise ValueError("%s is a comma-separated list of addresses or networks: %r" % (key, x.strip()))
-    return out
-
-
-def as_ip(text):
-    """An address as an ip_address (an IPv4-mapped IPv6 one as IPv4), or None."""
-    try:
-        ip = ipaddress.ip_address(text.strip())
-    except ValueError:
-        return None
-    return ip.ipv4_mapped if ip.version == 6 and ip.ipv4_mapped else ip
-
-
-def trusted_proxy(ip, proxies):
-    return ip is not None and any(ip.version == n.version and ip in n for n in proxies)
 
 
 def forwarded_client(peer, headers, proxies):

@@ -1,12 +1,25 @@
-"""Reading the core's replies (docs/protocol.md): the data lines of LST, IVL, WHO, GAM, PFL and TOP, the
+"""Reading the core's replies (docs/protocol.md): the data lines of LST, IVL, WHO, GAM, PFL, TOP and TIM, the
 CLIENT lines and the invitation events, as the shared commands (parlord/commands.py) and the server
 extensions (adapters/) read them. Pure functions of the lines, with nothing of a connection."""
+import re
 
 
 def err_text(final):
     """'ERR CODE text' -> 'text'."""
     parts = final.split(" ", 2)
     return parts[2] if len(parts) > 2 else (parts[1] if len(parts) > 1 else "error")
+
+
+def parse_tim(lines):
+    """TIM's line -> (seconds signed in, the server's time "2026-11-24T21:05:33Z", seconds left, the call's
+    seconds left, the player's month's seconds left), each of the last three None for no limit; or None when
+    there is no well-formed TIM line."""
+    for l in lines:
+        m = re.match(r"^TIM (\d+) (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) left=(\d+|unl) call=(\d+|unl) "
+                     r"month=(\d+|unl)\Z", l)
+        if m:
+            return (int(m.group(1)), m.group(2)) + tuple(None if g == "unl" else int(g) for g in m.groups()[2:])
+    return None
 
 
 def parse_games(lines):

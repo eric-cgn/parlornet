@@ -95,7 +95,7 @@ The telnet extension (`adapters/telnet.py`) serves it, and the frontend is any t
 
 **Tutorial:** a lesson in Tic Tac Toe teaches the keys, step by step, on your own screen. Nothing you do there reaches the parlor. The lobby lists it, `/tutorial` opens it, and your first sign-in on a full screen asks once whether you want it. You can run it again any time with `/tutorial`.
 
-**Time signed in:** the right end of the title bar shows how long you have been signed in, in whole minutes as the 8-bit clients show it: 0m, 12m, then 1h 5m after an hour. It changes once a minute. In `plain` mode the lobby's header line shows it.
+**Time signed in:** the right end of the title bar shows how long you have been signed in and how long you have left, as "12m onl unl rem". The time signed in is in whole minutes as the 8-bit clients show it: 0m, 12m, then 1h 5m after an hour. The time left comes from the core's `TIM` and reads "unl" when there is no limit. It changes once a minute. In `plain` mode the lobby's header line shows it.
 
 **Backgammon countdowns:** when your turn starts and you have to roll, telnet counts down five seconds on the screen and then rolls for you. When you have played your last checker, or no legal step is left, it counts down five seconds and then sends your move. Any key stops a countdown. Esc stops it and does nothing else, so you can double, undo or think. In `plain` mode one line says the countdown has started, and Enter stops it. The server's turn clock is not changed by any of this.
 

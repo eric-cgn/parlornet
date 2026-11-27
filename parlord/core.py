@@ -13,8 +13,8 @@ import secrets
 import sys
 import time
 
-from . import DOCS_URL, PROJECT_URL, bots, commands, frontends, native
-from .accounts import KEY_LABEL_LEN, STEP_KINDS, Accounts, Player, source_key  # noqa: F401  (Player: for code that imports it from here)
+from . import DOCS_URL, PROJECT_URL, allowance, bots, commands, frontends, native
+from .accounts import KEY_LABEL_LEN, STEP_KINDS, Accounts, Player, as_ip, source_key  # noqa: F401  (Player: for code that imports it from here)
 from .store import Store
 
 VERSION = 1
@@ -452,6 +452,15 @@ class Session:
         self.signed_in = None             # when it signed in (TIM counts from here)
         self.signed_out = self.opened     # when it was last not signed in (the sign-in limit counts from here)
         self.closing = False
+        # The time allowance (parlord/allowance.py): the connection's class, its meter (None: not metered),
+        # what its gateway said of the call, the notices it has had (seconds left), the end of the grace a
+        # player whose month is used up has (monotonic), and the notices waiting for its next reply.
+        self.cls = allowance.DEFAULT
+        self.meter = None
+        self.call = {}
+        self.told = set()
+        self.grace = None
+        self.notes = []
 
     def allow(self):
         now = time.time()
@@ -490,6 +499,8 @@ class Server:
         self.notices = []                 # [(seq, kind, table, name, who, type/ver, client)] for NFY, oldest first
         self.notice_seq = 0
         self.notice_cond = asyncio.Condition()
+        self.allowance = allowance.Allowance(self.settings, self.store)
+        self.allowance_month = None       # the month the allowance last forgot old months in
 
     # ---- settings and sign-in -----------------------------------------------
     # Every setting the admin panel changes (parlord/admin.py) takes effect at
@@ -612,6 +623,7 @@ class Server:
         tables are given up, it no longer owns any table, and private tables
         it played at that are over are removed."""
         self.accounts.delete(p.name)
+        self.allowance.forget_player(p.name)
         self.kick(p.name)
         key = p.name.lower()
         for t in list(self.tables.values()):
@@ -983,6 +995,10 @@ class Server:
     async def sweep(self):
         now = time.time()
         self.accounts.sweep()
+        self.allowance.charge_all()
+        if allowance.month_of(now) != self.allowance_month:
+            self.allowance.forget_old(now)
+            self.allowance_month = allowance.month_of(now)
         if self.keyring is not None:            # rotated or removed frontend keys: close their connections
             self.keyring.load()
             for sess in list(self.frontend_conns):
@@ -1083,9 +1099,16 @@ class Server:
             return
         self.conns += 1
         try:
+            peer = writer.get_extra_info("peername")
             lines = native.Lines(reader, MAXLINE)
+            loop = asyncio.get_running_loop()
+            until = loop.time() + Limits.first_line_secs
+            head = None
             try:
-                eol = await lines.start(Limits.first_line_secs, Limits.ending_secs)
+                # a dial-in gateway's PROXY header first, then the opening, in the same 20 seconds
+                head = await lines.proxy(Limits.first_line_secs,
+                                         self.allowance.trusted(as_ip(peer[0]) if peer else None))
+                eol = await lines.start(until - loop.time(), Limits.ending_secs)
             except asyncio.TimeoutError:
                 eol = None
                 writer.write(native.opening_error(*native.WRONG, self.docs_url()))
@@ -1095,8 +1118,12 @@ class Server:
             if eol is None:
                 writer.close()
                 return
-            peer = writer.get_extra_info("peername")
-            sess = Session(writer, source=source_key(peer[0]) if peer else None, eol=eol)
+            call = head if head is not None and not head.local else None      # a call the gateway carries
+            source = call.src if call and call.src else peer[0] if peer else None
+            sess = Session(writer, source=source_key(source), eol=eol)
+            if call:
+                sess.cls, sess.call = allowance.DIALIN, call.call
+            sess.meter = self.allowance.open(sess.cls, call.prior if call else 0)
             await self.serve_conn(reader, writer, sess, lines)
         except (ConnectionError, OSError):
             pass
@@ -1109,17 +1136,28 @@ class Server:
         try:
             await self.send(sess, [self.greeting()])
             while not sess.closing:
+                if sess.meter is not None:
+                    end = self.time_check(sess)
+                    if end:
+                        await self.send(sess, [end])
+                        break
                 good = True
+                timed = None            # the time allowance's next check, when it comes before the idle limits
                 try:
                     if lines is not None:
                         wait = Limits.idle_secs
                         if not sess.player:     # nobody sits at the sign-in for long
                             wait = min(wait, max(0.0, sess.signed_out + Limits.signin_secs - time.monotonic()))
+                        due = self.time_due(sess) if sess.meter is not None else None
+                        if due is not None and due < wait:
+                            wait = timed = due
                         got = await lines.line(wait)
                         raw, good = got if got is not None else (b"", True)     # b"": the end of input
                     else:
                         raw = await asyncio.wait_for(reader.readline(), Limits.idle_secs)
                 except asyncio.TimeoutError:
+                    if timed is not None:
+                        continue
                     if lines is not None and not sess.player:
                         await self.send(sess, [err("IDLE", "closing: sign in within 5 minutes of connecting")])
                     else:
@@ -1130,6 +1168,11 @@ class Server:
                     break
                 if not raw and (lines is None or got is None):
                     break
+                if sess.meter is not None:      # the time may have run out while the line was on its way
+                    end = self.time_check(sess)
+                    if end:
+                        await self.send(sess, [end])
+                        break
                 if len(raw) > MAXLINE + 2:
                     await self.send(sess, [err("TOOLONG", "lines are 80 bytes at most")])
                     break
@@ -1151,10 +1194,15 @@ class Server:
                     print("internal error on %s: %s" % (line.split()[0][:4].upper(), type(e).__name__),
                           file=sys.stderr)
                     out = [err("INTERNAL", "")]
-                await self.send(sess, out)
+                if sess.meter is not None:
+                    self.time_signed(sess)
+                await self.send(sess, ["INF " + n for n in sess.notes] + out)
+                sess.notes = []
         except (ConnectionError, OSError):
             pass
         finally:
+            if sess.meter is not None:
+                self.allowance.close(sess.meter)
             self.sessions.discard(sess)
             self.protocols.pop(sess, None)        # its protocols are listed while it is connected
             if sess.player:
@@ -1166,6 +1214,55 @@ class Server:
                 writer.close()
             except Exception:
                 pass
+
+    # ---- the time allowance (parlord/allowance.py; docs/protocol.md, Time allowance) -------------------------
+    def time_left(self, sess):
+        """(seconds left, which limit) for a connection, or (None, None) when it has no limit."""
+        return self.allowance.left(sess.meter) if sess.meter is not None else (None, None)
+
+    def time_check(self, sess):
+        """A metered connection's time, looked at before each request and whenever time_due says: the notices
+        it has come to wait in sess.notes for its next reply. -> the ERR LIMIT line when the connection is to
+        close now (its time is up, or the grace of a player whose month was used up has ended), else None."""
+        left, which = self.time_left(sess)
+        if sess.grace is not None:
+            return err("LIMIT", self.allowance.reason(sess.meter, "user")) if time.monotonic() >= sess.grace else None
+        if left is None:
+            return None
+        if left <= 0:
+            return err("LIMIT", self.allowance.reason(sess.meter, which))
+        sess.told = {t for t in sess.told if left <= t + 30}     # a limit that grew again (a new month) warns again
+        due = [t for t in allowance.NOTICE_SECS if left <= t and t not in sess.told]
+        if due:
+            sess.told.update(due)
+            sess.notes = [self.allowance.notice(sess.meter, which, left)]
+        return None
+
+    def time_due(self, sess):
+        """Seconds until a metered connection's time should be looked at again: its next notice, its end or the
+        end of its grace, and at most allowance.CHECK_SECS (other connections draw on the pool too)."""
+        if sess.grace is not None:
+            return max(0.0, sess.grace - time.monotonic())
+        left, which = self.time_left(sess)
+        if left is None:
+            return allowance.CHECK_SECS
+        mark = max([t for t in allowance.NOTICE_SECS if t < left and t not in sess.told] + [0])
+        return min(allowance.CHECK_SECS, max(0.05, (left - mark) / self.allowance.rate(sess.meter, which)))
+
+    def time_signed(self, sess):
+        """After each request on a metered connection: a sign-in or a sign-out moves its charge to the player or
+        off them. A player whose month is used up is told so with the reply and has GRACE_SECS left."""
+        who = sess.player.name.lower() if sess.player else None
+        if who == sess.meter.who:
+            return
+        self.allowance.sign(sess.meter, who)
+        sess.grace = None
+        if who is None:
+            return
+        left, which = self.time_left(sess)
+        if left is not None and left <= 0 and which == "user":
+            sess.grace = time.monotonic() + allowance.GRACE_SECS
+            sess.notes = self.allowance.used_up(sess.meter)
 
     def greeting(self):
         """PARLORNET/1 name AUTH=... SIGNUP=... [LABEL=...], within the protocol's
@@ -1293,7 +1390,11 @@ class Server:
         """TIM: how long the player has been signed in and the server's time, for a client with no clock of
         its own: TIM secs now, then OK. No database, and not activity (dispatch, ACTIVE_VERBS)."""
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        return ["TIM %d %s" % (self.connected_secs(sess), now), ok()]
+        parts = self.allowance.parts(sess.meter) if sess.meter is not None else {}
+        left = min(parts.values()) if parts else None
+        say = lambda secs: "unl" if secs is None else str(secs)      # noqa: E731
+        return ["TIM %d %s left=%s call=%s month=%s" % (self.connected_secs(sess), now, say(left),
+                                                         say(parts.get("call")), say(parts.get("user"))), ok()]
 
     @staticmethod
     def connected_secs(sess):

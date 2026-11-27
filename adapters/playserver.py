@@ -51,8 +51,9 @@ import sys
 import time
 from urllib.parse import parse_qs, urlsplit
 
-from .common import (CoreClient, CoreError, addr_key, forwarded_client, keepalive, peer_addr, proxy_list,
-                     trusted_proxy)
+from parlord.accounts import proxy_list, trusted_proxy
+
+from .common import CoreClient, CoreError, addr_key, forwarded_client, keepalive, peer_addr
 from . import declare
 from . import palette as PAL
 from . import playpush

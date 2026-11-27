@@ -106,8 +106,8 @@ import time
 from collections import namedtuple
 
 from . import bots
-from .replies import (err_text, parse_games, parse_invites, parse_players, parse_profile, parse_tables, parse_top,
-                      pending_invites)
+from .replies import (err_text, parse_games, parse_invites, parse_players, parse_profile, parse_tables, parse_tim,
+                      parse_top, pending_invites)
 
 # The message of the day as the text frontends show it: between a top and a bottom rule, 39 columns wide
 # like the message itself, so it is clear where it ends and the server's own instructions begin.
@@ -235,22 +235,32 @@ def time_text(data, final, width=40):
     """/time's lines from TIM's reply (data lines, final line): "Signed in 12:34. Server time 21:05 UTC." The
     time signed in is m:ss, or h:mm:ss from an hour on, and the server's time is UTC, hours and minutes. Where
     the line would be wider than width (from an hour on, on a 40-column screen) it is two lines. TIM counts
-    from signing in and answers 0 before it, so with 0 seconds the line says the server's time alone."""
+    from signing in and answers 0 before it, so with 0 seconds the line says the server's time alone. When the
+    connection has time limits, a sentence says each: "This call has 63 minutes left." from TIM's call=, "You
+    have 40 minutes left this month." from month=, and "The parlor's month has 10 minutes left." when the
+    pool's time is the shortest (left= below both). Each is wrapped to width."""
     if final.startswith("ERR UNKNOWN"):
         return ["This server does not tell the time."]
     if not final.startswith("OK"):
         return [err_text(final)]
-    f = next((l.split() for l in data if l.startswith("TIM ")), [])
-    if len(f) < 3 or not f[1].isdigit() or not re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\Z", f[2]):
+    tim = parse_tim(data)
+    if tim is None:
         return ["The server's time is not known."]
-    secs = int(f[1])
+    secs, now, left, call, month = tim
     h, m, s = secs // 3600, secs % 3600 // 60, secs % 60
-    server = "Server time %s UTC." % f[2][11:16]
-    if not secs:
-        return [server]
-    lines = ["Signed in %s." % ("%d:%02d:%02d" % (h, m, s) if h else "%d:%02d" % (m, s)), server]
+    server = "Server time %s UTC." % now[11:16]
+    lines = ["Signed in %s." % ("%d:%02d:%02d" % (h, m, s) if h else "%d:%02d" % (m, s)), server] if secs else [server]
     one = " ".join(lines)
-    return [one] if len(one) <= width else lines
+    out = [one] if len(one) <= width else lines
+    mins = lambda n: "less than a minute" if n < 60 else "1 minute" if n < 120 else "%d minutes" % (n // 60)  # noqa: E731
+    said = []
+    if call is not None:
+        said.append("This call has %s left." % mins(call))
+    if month is not None:
+        said.append("You have %s left this month." % mins(month))
+    if left is not None and all(left < n for n in (call, month) if n is not None):
+        said.append("The parlor's month has %s left." % mins(left))
+    return out + wrap(said, width)
 
 
 def game_lines(games, label, entering=False):

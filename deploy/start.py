@@ -57,6 +57,10 @@ Environment (all optional):
     PARLOR_PLAY_PUSH_CONTACT  play.push_contact until the settings file sets it: the operator's mailto: or
                        https: address that ParlorNet Play gives push services; push notifications are off
                        without it (docs/play-notifications.md)
+    PARLOR_DIALIN_GATEWAYS  dialin.gateways until the admin menus or the settings file set it: the addresses
+                       of dial-in gateways, which may send a PROXY header on the native port (6501). The
+                       core reads it, with PARLOR_DIALIN_CALL_MINS and the other limits of the time
+                       allowance (parlord/allowance.py), from the environment it inherits
     PARLOR_DB          the SQLite database (/data/parlord.db)
     PARLOR_KEYS        the frontend key directory (frontends/ beside the database)
 """
