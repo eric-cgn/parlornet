@@ -42,7 +42,7 @@ Anything else you type is chat with your opponent once you have a table.
 
 ## Screenshots
 
-![Worthy Opponent 2.0's Talk window with the parlor's greeting, in DOSBox](../../static/img/worthy-opponent-talk.gif)
-![A whole game of CornerStone against the bot, in DOSBox](../../static/img/worthy-opponent-cornerstone.gif)
-![Checkers against the bot: the bot's kings, in DOSBox](../../static/img/worthy-opponent-checkers.gif)
-![Quinte won against the bot, in DOSBox](../../static/img/worthy-opponent-quinte.gif)
+![Worthy Opponent's red Phone Book screen with an entry named ParlorNet that dials ATDT parlor:6519](../../static/img/worthy-opponent-phone-book.gif "Worthy Opponent 2.0's phone book has an entry that dials the parlor, in DOSBox.")
+![The Talk window with the parlor's greeting, the player signing in as cora and a list of who is online](../../static/img/worthy-opponent-talk-sign-in.gif "After the call connects, the player signs in and asks who is online in the Talk window.")
+![A checkerboard with red and black pieces a few moves into a game](../../static/img/worthy-opponent-checkers.gif "A game of Checkers against the bot is a few moves in.")
+![The Talk window with a chat line, the player resigning the game and the bot saying good game](../../static/img/worthy-opponent-talk-result.gif "The player chats, resigns the game in Talk, and the bot says good game.")

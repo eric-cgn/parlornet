@@ -10,13 +10,15 @@ Edit the client's Markdown file, here or with the "Edit this page on GitHub" lin
 2. **Getting it:** anything to say beyond the download links, such as which version to take or what it costs. The links themselves are in `adapters/clients.py`.
 3. **Setting it up:** how to point it at a ParlorNet server. Write `{host}` for the server's name, so that the page can show it as *host*, and give the usual port. For a program that connects over a serial port, link to [Serial connections](../serial.md) rather than repeating it.
 4. **Known quirks:** what a player will run into, and what to do about it, one item each. Write "Nothing known yet." when nothing is known.
-5. **Screenshots:** one line per picture, written as `![Caption](../../static/img/name.gif)`, or "None yet.".
+5. **Screenshots:** one line per picture, written as `![What it shows](../../static/img/name.gif "Caption")`, or "None yet.". The words in brackets are the picture's ALT text, for a browser that shows no pictures, and the caption goes under the picture.
 
 Write plain sentences, as you would explain the program to a friend.
 
 ## Screenshots
 
-A screenshot is a GIF in `static/img/`, no more than 320 pixels wide and about 20 KB, so that pages load quickly on a slow modem. Crop it to the window that matters, and keep anything personal out of it, such as your own user name or address. Screenshots of a program's own windows are fine to publish.
+A page has three or four screenshots, or none. Each is a GIF in `static/img/`, named after the client, such as `eclipse-game.gif`. It is under 200 pixels wide and no more than 21 KB, so that pages load quickly on a slow modem. Crop it to the window that matters, or reduce it by a whole number such as a half, and never stretch it. Keep anything personal out of it, such as your own user name or address. Screenshots of a program's own windows are fine to publish.
+
+Telnet programs and web browsers show the same screens, so their pages share a set. Every telnet program's page shows `telnet-title.gif`, `telnet-lobby.gif` and `telnet-backgammon.gif`, and may add one picture of its own that shows something only that program does. The period browsers share the 1997 pages in `web-1997-*.gif`, and the current browsers share ParlorNet Play in `play-*.gif`.
 
 ## Adding a client
 

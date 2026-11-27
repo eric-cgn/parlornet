@@ -30,4 +30,4 @@ The download is the author's page as the Internet Archive kept it. The author of
 
 ## Screenshots
 
-![BobGrid 2.3 after five turns each against the bot, under the Blackdown JDK 1.1.8 on Linux](../../static/img/bobgrid-game.gif)
+None yet.

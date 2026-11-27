@@ -30,6 +30,7 @@ Anything else you type is chat with the other players once you have a table.
 ## Known quirks
 
 - The first Join after starting NetBoxes often fails at once, with nothing on screen. Choose Join Net Game again.
+- The Password field of Join Net Game shows your password as you type it.
 - NetBoxes opens its chat window before the parlor answers. A wrong name or password is said there, and then the program shows "The game host has left!".
 - Games start from the parlor when every seat is taken, so Start Game and Abort Game stay gray. To leave a game, type `/resign`, or close the game window, which resigns it.
 - When you have the first turn, the game starts with your opponent's name lit, and the turn comes to you a moment later. NetBoxes lets only the player who started a game move first, so the parlor's player passes once on your screen only.
@@ -42,4 +43,6 @@ Anything else you type is chat with the other players once you have a table.
 
 ## Screenshots
 
-![A game against the bot on 5 by 5 boxes, halfway through](../../static/img/netboxes-game.gif)
+![NetBoxes' Join Net Game dialog set to TCP/IP with the parlor's address and port 6512](../../static/img/netboxes-join-net-game.gif "Join Net Game takes the parlor's address and port 6512 under TCP/IP.")
+![The NetBoxes Chat window with the parlor's welcome, the /invite bot command and the start of the game](../../static/img/netboxes-chat-invite-bot.gif "Typing /invite bot in the chat box starts a game against the bot.")
+![The NetBoxes board with lines drawn between the dots and one box taken by the bot, under the turn clock and both scores](../../static/img/netboxes-game-in-progress.gif "A 5 by 5 game of Will Helling's NetBoxes against the bot under Mac OS 9.2.2.")
