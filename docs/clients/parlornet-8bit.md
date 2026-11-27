@@ -31,5 +31,5 @@ The programs speak ParlorNet's own protocol, on the parlor's native port, `{host
 
 ![The Apple IIgs program's settings, with the parlor named parlor on port 6501](../../static/img/parlornet-8bit-iigs-settings.gif "On the Apple IIgs, the settings name the parlor and its port, and Marinetti makes the connection.")
 ![A Backgammon game against the bot on an Apple IIe in double hi-res color](../../static/img/parlornet-8bit-iie-backgammon.gif "The Apple IIe plays Backgammon against the bot in double hi-res color.")
-![A Checkers game against the bot on a Commodore 64, with Black to move](../../static/img/parlornet-8bit-c64-checkers.gif "On the Commodore 64, a Checkers game against the bot is under way, and it is Black's turn.")
+![A Grid Words board on a Commodore 64 with words laid across the middle and the key to its bonus squares beside it](../../static/img/parlornet-8bit-c64-gridwords.gif "On the Commodore 64, lou and the bot are a few words into a game of Grid Words. The key beside the board shows which marks are letter bonuses and which are word bonuses.")
 ![A finished Reversi game on a Commodore 64, where the bot says good game and wins](../../static/img/parlornet-8bit-c64-reversi-result.gif "When a Reversi game ends on the Commodore 64, the bot says "Good game!" and the program says who won.")

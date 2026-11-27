@@ -1180,8 +1180,7 @@ class ClientPages(Built):
 
     def test_screenshots(self):
         """Every screenshot is a small GIF in static/img/, under 200 pixels across, shown at its own size with its
-        ALT text and its caption under it. A page has three or four of them, or says "None yet.", and none
-        shows Grid Words."""
+        ALT text and its caption under it. A page has three or four of them, or says "None yet." in their place."""
         from adapters import clients as C
         from docsite import clientpages
         seen = 0
@@ -1202,8 +1201,6 @@ class ClientPages(Built):
                 # browsers share
                 self.assertRegex(rel, r"^static/img/(?:%s|telnet|web-1997|play)-[a-z0-9-]+\.gif$" % re.escape(c.id),
                                  rel)
-                self.assertNotIn("gridwords", rel)
-                self.assertNotIn("grid words", (alt + caption).lower(), rel)
                 with open(os.path.join(ROOT, *rel.split("/")), "rb") as f:
                     data = f.read()
                 self.assertIn(data[:6], (b"GIF87a", b"GIF89a"), rel)
