@@ -126,4 +126,6 @@ Anything else you type is chat with the other players.
 
 ## Screenshots
 
-None yet.
+![The whole Networdz board at a quarter of its size, with a game a few turns in and its bonus squares in green and orange](../../static/img/networdz-board.gif "With PARLOR.CFG loaded, Networdz draws the standard board. Here dana and the bot are a few turns into a game, and the board is shown at a quarter of its size.")
+![Tiles in the board's lower left corner that spell DAG, YEH, GHOUL and the end of BEAUX, with each tile's points in its corner](../../static/img/networdz-tiles.gif "Each tile shows the points PARLOR.CFG gives it, such as 3 for Y and H and 7 for X.")
+![The ParlorNet Link window with the parlor's name, Networdz's port 6516 and the status Connected to the parlor](../../static/img/networdz-link.gif "ParlorNet Link connects to Networdz and to the parlor, and its status says what to do next.")
